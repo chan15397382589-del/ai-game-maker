@@ -52,3 +52,22 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+// ==================== DELETE: 删除作品 ====================
+export async function DELETE(req: NextRequest) {
+  try {
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
+    const admin = await getVerifiedAdmin(token);
+    if (admin instanceof NextResponse) return admin;
+
+    const db = getDB();
+    const { id } = await req.json();
+
+    const { error } = await db.from("projects").delete().eq("id", id);
+    if (error) throw error;
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    console.error("[删除作品] 失败:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

@@ -10,9 +10,8 @@ import { useRouter } from "next/navigation";
 async function getToken(): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   if (session?.access_token) return session.access_token;
-  // getUser 可以触发 session 恢复
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return "";
+  // token 可能过期，尝试刷新
+  await supabase.auth.refreshSession();
   const { data: { session: s2 } } = await supabase.auth.getSession();
   return s2?.access_token || "";
 }
@@ -77,7 +76,6 @@ const looksLikeCode = (line: string): boolean => {
   if (/^(ctx|canvas|document|window|Math|JSON|Array|console|style)\./.test(t)) score += 2;
   if (/this\.\w+/.test(t)) score += 2;
   if (/addEventListener\s*\(/.test(t)) score += 2;
-  if (/=>\s*\{/.test(t)) score += 2;
   if (/\$\(/.test(t)) score += 2;
   if (/^[a-zA-Z-]+\s*:\s*[^;]+;?\s*$/.test(t)) score += 1;
   if (/^[a-zA-Z-]+\s*\{/.test(t)) score += 1;
@@ -108,6 +106,7 @@ const extractTextOnly = (content: string): string => {
     .replace(/准备好了吗[?？][!！]?/g, "")
     .replace(/先把代码放出来/g, "")
     .replace(/你复制到/g, "")
+    .replace(new RegExp("@image#\\d+[:：][^\\s\\n]+", "g"), "")
     .trim();
 };
 
@@ -122,13 +121,52 @@ const extractAllCode = (content: string): string => {
   return code;
 };
 
+// 过滤 AI 可能输出的图片占位符标记
+const cleanImageMarkers = (content: string): string => {
+  return content.replace(new RegExp("@image#\\d+[:：][^\\s\\n]+", "g"), "").trim();
+};
+
 const extractHtmlCode = (content: string): string | null => {
-  let match = content.match(/```html\s*([\s\S]*?)```/i);
-  if (match && match[1].trim()) return match[1].trim();
-  match = content.match(/```\s*([\s\S]*?)```/);
-  if (match && match[1].trim() && /<\w/.test(match[1])) return match[1].trim();
-  const trimmed = content.trim();
-  if (/^<!DOCTYPE|^<html|^<head|^<body|<\w+\s[^>]*>[\s\S]*<\/\w+>/i.test(trimmed)) return trimmed;
+  const cleaned = cleanImageMarkers(content);
+
+  // 匹配 ```html ... ``` 代码块（使用更可靠的方式：从 ```html 后开始，匹配到最后一个 ```）
+  const htmlFenceMatch = cleaned.match(/```html\s*([\s\S]+)/i);
+  if (htmlFenceMatch) {
+    const afterFence = htmlFenceMatch[1];
+    // 查找闭合的 ```
+    const closeIdx = afterFence.lastIndexOf("```");
+    if (closeIdx > 0) {
+      const code = afterFence.slice(0, closeIdx).trim();
+      if (code) return code;
+    } else {
+      // 未闭合的代码块，也返回已有内容（流式输出可能还没结束）
+      const code = afterFence.trim();
+      if (code && code.includes("<")) return code;
+    }
+  }
+
+  // 匹配无语言标记的 ``` ... ``` 代码块
+  const genericFenceMatch = cleaned.match(/```\s*([\s\S]+)/);
+  if (genericFenceMatch) {
+    const afterFence = genericFenceMatch[1];
+    const closeIdx = afterFence.lastIndexOf("```");
+    if (closeIdx > 0) {
+      const code = afterFence.slice(0, closeIdx).trim();
+      if (code && /<\w/.test(code)) return code;
+    }
+  }
+
+  // 如果没有代码块标记，但内容看起来是完整 HTML
+  const trimmed = cleaned.trim();
+  if (/^<!DOCTYPE\s+html/i.test(trimmed)) return trimmed;
+  if (/^<html[\s>]/i.test(trimmed)) return trimmed;
+  if (/^<head[\s>]/i.test(trimmed)) return trimmed;
+  if (/^<body[\s>]/i.test(trimmed)) return trimmed;
+
+  // 兜底：如果内容中有大量 HTML 标签，尝试提取
+  const htmlLike = /<html[\s\S]*<\/html>/i.exec(trimmed);
+  if (htmlLike) return htmlLike[0];
+
   return null;
 };
 
@@ -144,7 +182,20 @@ function downloadHtml(code: string, title: string) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ============================================================
+// 对话文档类型定义
+// ============================================================
+interface Conversation {
+  id: string;
+  title: string;
+  html_code: string | null;
+  has_game: boolean;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
 }
 
 // ============================================================
@@ -169,23 +220,35 @@ export default function StudentPortal() {
   const [liveCode, setLiveCode] = useState("");
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [gameStarted, setGameStarted] = useState(false);
+  const [viewMode, setViewMode] = useState<"code" | "game">("game");
 
-  // 会话管理相关状态
-  const [currentSessionId, setCurrentSessionId] = useState<string>("");
+  // 对话文档管理
+  const [currentConvId, setCurrentConvId] = useState<string>("");
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [showFiles, setShowFiles] = useState(false);
-  const [sessions, setSessions] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loadingSession, setLoadingSession] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const codeScrollRef = useRef<HTMLDivElement>(null);
+  const sendingRef = useRef(false);
+  // 保存完整原始消息（含代码），用于发送给 API
+  const initialMessage = "你好！我是小智老师 🤖✨\n\n你想创作什么类型的游戏呢？我可以帮你做：\n🎯 迷宫游戏\n🐹 打地鼠\n🍎 接东西游戏\n🏃 跑酷游戏\n🎨 或者其他你喜欢的！\n\n告诉我你的想法吧！";
+  const rawMessagesRef = useRef<{ role: string; content: string }[]>([
+    { role: "assistant", content: initialMessage },
+  ]);
+  const retryCountRef = useRef(0); // 重试计数器
 
+  // 初始化：检查登录 + 加载对话列表
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       if (data.user) {
         setUserId(data.user.id);
-        // 生成新的会话 ID
-        setCurrentSessionId(crypto.randomUUID());
+        const token = await getToken();
+        if (token) {
+          await fetchConversations(token);
+        }
       } else {
         router.push("/login");
       }
@@ -203,187 +266,422 @@ export default function StudentPortal() {
     }
   }, [liveCode, isCoding]);
 
-  // 打开文件管理时获取会话列表
-  useEffect(() => {
-    if (!showFiles || !userId) return;
-    fetchSessions();
-  }, [showFiles, userId]);
+  // ============================================================
+  // 对话文档 API 调用
+  // ============================================================
 
-  // 获取会话列表
-  const fetchSessions = async () => {
+  const fetchConversations = async (token?: string) => {
     setLoadingHistory(true);
-    const token = await getToken();
-    if (!token) { setLoadingHistory(false); return; }
+    const t = token || await getToken();
+    if (!t) { setLoadingHistory(false); return; }
     try {
       const res = await fetch("/api/student/sessions", {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${t}` },
       });
       if (res.ok) {
         const data = await res.json();
-        setSessions(data || []);
+        const convs: Conversation[] = data || [];
+        setConversations(convs);
+
+        // 如果有对话文档，自动加载最新的一个
+        if (convs.length > 0 && !currentConvId) {
+          await loadConversation(convs[0].id, convs[0], t);
+        }
       }
     } catch (err) {
-      console.error("获取会话列表失败:", err);
+      console.error("获取对话列表失败:", err);
     } finally {
       setLoadingHistory(false);
     }
   };
 
-  // 加载指定会话的消息
-  const loadSession = async (sessionId: string, startTime?: string, endTime?: string, gameData?: any) => {
+  // 加载指定对话文档
+  const loadConversation = async (convId: string, convData?: Conversation, token?: string) => {
     setLoadingSession(true);
-    // 如果 sessionId 不是有效 UUID（历史会话的时间字符串），生成新 UUID
-    const isValidUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId);
-    const newSessionId = isValidUuid ? sessionId : crypto.randomUUID();
-    setCurrentSessionId(newSessionId);
-    setGameStarted(false); // 停止当前游戏
-    const token = await getToken();
-    if (!token) { setLoadingSession(false); return; }
+    const t = token || await getToken();
+    if (!t) { setLoadingSession(false); return; }
 
     try {
-      let url: string;
-
-      if (startTime && endTime) {
-        url = `/api/student/messages?start_time=${encodeURIComponent(startTime)}&end_time=${encodeURIComponent(endTime)}`;
-      } else {
-        url = `/api/student/messages?session_id=${encodeURIComponent(sessionId)}`;
-      }
-
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch(`/api/student/messages?session_id=${encodeURIComponent(convId)}`, {
+        headers: { Authorization: `Bearer ${t}` },
       });
       if (res.ok) {
         const data = await res.json();
-        setMessages(data || []);
-        // 切换游戏：有游戏则加载，无游戏则清空
-        if (gameData?.html_code) {
-          setHtmlCode(gameData.html_code);
-          setGameTitle(gameData.game_title || "");
-        } else {
-          setHtmlCode("");
-          setGameTitle("");
-        }
+        const cleanedMessages = (data || []).map((msg: any) => ({
+          ...msg,
+          content: extractTextOnly(msg.content) || msg.content,
+        }));
+
+        setMessages(cleanedMessages.length > 0 ? cleanedMessages : [{
+          role: "assistant",
+          content: "这是你之前的对话，可以继续聊哦！告诉我你想修改什么吧！",
+        }]);
+        // 同时恢复原始消息（数据库存的是完整内容）
+        rawMessagesRef.current = (data || []).map((msg: any) => ({
+          role: msg.role,
+          content: msg.content,
+        }));
+
+        setCurrentConvId(convId);
+
+        // 从对话文档恢复游戏代码
+        const code = convData?.html_code || "";
+        setHtmlCode(code);
+        setGameStarted(false);
       }
     } catch (err) {
-      console.error("加载会话失败:", err);
+      console.error("加载对话失败:", err);
     } finally {
       setLoadingSession(false);
     }
   };
 
+  // 创建新对话文档（内部使用）
+  const createConversationInternal = async (token: string): Promise<Conversation | null> => {
+    try {
+      const res = await fetch("/api/student/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      const err = await res.json();
+      alert(err.error || "创建对话失败");
+      return null;
+    } catch {
+      alert("创建对话失败");
+      return null;
+    }
+  };
+
   // 新建对话
-  const startNewConversation = () => {
-    setMessages([
-      {
-        role: "assistant",
-        content: "你好！我是小智老师 🤖✨\n\n你想创作什么类型的游戏呢？我可以帮你做：\n🎯 迷宫游戏\n🐹 打地鼠\n🍎 接东西游戏\n🏃 跑酷游戏\n🎨 或者其他你喜欢的！\n\n告诉我你的想法吧！",
-      },
-    ]);
-    setCurrentSessionId(crypto.randomUUID());
+  const startNewConversation = async () => {
+    if (conversations.length >= 2) {
+      alert("每位学生最多只能有 2 个对话文档。请先删除一个旧文档，然后再创建新对话。");
+      return;
+    }
+
+    const token = await getToken();
+    if (!token) return;
+
+    const newConv = await createConversationInternal(token);
+    if (!newConv) return;
+
+    setCurrentConvId(newConv.id);
     setHtmlCode("");
     setGameTitle("");
     setGameStarted(false);
+    setMessages([
+      {
+        role: "assistant",
+        content: "你好！我是小智老师 🤖✨\n\n你想创作什么类型的游戏呢？\n\n1. 🎯 迷宫游戏\n2. 🐹 打地鼠\n3. 🍎 接东西游戏\n4. 🏃 跑酷游戏\n\n你也可以在下面输入自己的想法！",
+      },
+    ]);
+    rawMessagesRef.current = [{
+      role: "assistant",
+      content: "你好！我是小智老师 🤖✨\n\n你想创作什么类型的游戏呢？\n\n1. 🎯 迷宫游戏\n2. 🐹 打地鼠\n3. 🍎 接东西游戏\n4. 🏃 跑酷游戏\n\n你也可以在下面输入自己的想法！",
+    }];
+    setConversations(prev => [newConv, ...prev]);
     setShowFiles(false);
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || loading) return;
+  // 删除对话文档
+  const deleteConversation = async (convId: string) => {
+    if (deletingId) return;
+    if (!confirm("确定要删除这个对话吗？删除后无法恢复。")) return;
+
+    setDeletingId(convId);
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await fetch("/api/student/sessions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: convId }),
+      });
+
+      if (res.ok) {
+        const updated = conversations.filter(c => c.id !== convId);
+        setConversations(updated);
+
+        // 如果删除的是当前对话，切换到剩余的对话
+        if (convId === currentConvId) {
+          if (updated.length > 0) {
+            await loadConversation(updated[0].id, updated[0]);
+          } else {
+            setCurrentConvId("");
+            setHtmlCode("");
+            setGameTitle("");
+            setGameStarted(false);
+            const resetMsg = [{
+              role: "assistant",
+              content: "你好！我是小智老师 🤖✨\n\n你想创作什么类型的游戏呢？\n\n1. 🎯 迷宫游戏\n2. 🐹 打地鼠\n3. 🍎 接东西游戏\n4. 🏃 跑酷游戏\n\n你也可以在下面输入自己的想法！",
+            }];
+            setMessages(resetMsg);
+            rawMessagesRef.current = resetMsg;
+          }
+        }
+      } else {
+        alert("删除失败，请重试");
+      }
+    } catch {
+      alert("删除失败，请重试");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // 静默更新对话文档（不显示错误）
+  const updateConversationSilent = async (convId: string, updates: { title?: string; html_code?: string }) => {
+    try {
+      const token = await getToken();
+      if (!token) return;
+
+      const res = await fetch("/api/student/sessions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: convId, ...updates }),
+      });
+
+      if (res.ok) {
+        const updated = await res.json();
+        setConversations(prev => prev.map(c =>
+          c.id === convId
+            ? { ...c, ...updates, updated_at: updated.updated_at, has_game: !!updates.html_code }
+            : c
+        ));
+      }
+    } catch (err) {
+      console.error("更新对话失败:", err);
+    }
+  };
+
+  // ============================================================
+  // 流式响应处理（共享逻辑）
+  // ============================================================
+
+  const processStream = async (
+    response: Response,
+    existingCode: string,
+    convId: string
+  ) => {
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+    let assistantContent = "";
+    let insideCodeBlock = false;
+
+    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+
+    while (reader) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split("\n");
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+
+        const data = trimmed.slice(5).trim();
+        if (data === "[DONE]") continue;
+
+        try {
+          const parsed = JSON.parse(data);
+          // 处理服务端流错误事件
+          if (parsed.error) {
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                content: "抱歉，AI 回复中断了，请再试一次！😅",
+              };
+              return updated;
+            });
+            break;
+          }
+          const content = parsed.content || "";
+          assistantContent += content;
+
+          if (content.includes("```")) {
+            const count = (assistantContent.match(/```/g) || []).length;
+            insideCodeBlock = count % 2 === 1;
+            setIsCoding(insideCodeBlock);
+            // 进入代码块时自动切换到代码视图
+            if (insideCodeBlock) {
+              setViewMode("code");
+            }
+          }
+
+          if (insideCodeBlock) {
+            setLiveCode(extractAllCode(assistantContent));
+          }
+
+          const textOnly = extractTextOnly(assistantContent);
+          const displayText = textOnly || (insideCodeBlock ? "✨ 小智老师正在编写游戏代码，请稍等..." : "");
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              content: displayText,
+            };
+            return updated;
+          });
+        } catch {
+          // 忽略解析错误
+        }
+      }
+    }
+
+    // 流结束：更新最终显示 + 更新原始消息列表
+    const finalText = extractTextOnly(assistantContent);
+    // 保存完整原始内容到 rawMessagesRef
+    rawMessagesRef.current = [...rawMessagesRef.current, { role: "assistant", content: assistantContent }];
+    setMessages((prev) => {
+      const updated = [...prev];
+      updated[updated.length - 1] = {
+        ...updated[updated.length - 1],
+        content: finalText || "✅ 游戏代码已生成，请在右侧预览！",
+      };
+      return updated;
+    });
+
+    // 提取游戏代码
+    const code = extractHtmlCode(assistantContent);
+    if (code) {
+      setHtmlCode(code);
+      setGameStarted(false);
+      // 代码提取成功，重置重试计数
+      retryCountRef.current = 0;
+      // 代码生成完成，1秒后自动切换到游戏视图
+      setTimeout(() => {
+        setViewMode("game");
+      }, 1000);
+      // 自动保存游戏代码到对话文档
+      if (convId) {
+        updateConversationSilent(convId, { html_code: code });
+      }
+    } else {
+      // 如果已有游戏但 AI 没输出新代码，静默自动重试（最多1次）
+      if (existingCode && retryCountRef.current < 1) {
+        retryCountRef.current++;
+        setTimeout(async () => {
+          const retryToken = await getToken();
+          if (!retryToken) return;
+          try {
+            // 构建重试消息：使用 rawMessagesRef + 追加 user 角色的代码上下文（确保最后是 user）
+            const retryMessages = [
+              ...rawMessagesRef.current.map((m) => ({ role: m.role, content: m.content })),
+              {
+                role: "user",
+                content: `请基于以下当前游戏代码进行修改，输出完整的HTML代码：\n\`\`\`html\n${existingCode}\n\`\`\``,
+              },
+            ];
+            const retryRes = await fetch("/api/chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${retryToken}` },
+              body: JSON.stringify({
+                messages: retryMessages,
+                userId,
+                sessionId: convId,
+                currentCode: existingCode,
+              }),
+            });
+            if (!retryRes.ok) return;
+            const r = retryRes.body?.getReader();
+            if (!r) return;
+            const d = new TextDecoder();
+            let t = "";
+            while (true) {
+              const { done, value } = await r.read();
+              if (done) break;
+              const chunk = d.decode(value, { stream: true });
+              for (const line of chunk.split("\n")) {
+                const tr = line.trim();
+                if (!tr.startsWith("data:") || tr === "data: [DONE]") continue;
+                try { t += JSON.parse(tr.slice(5).trim()).content || ""; } catch {}
+              }
+            }
+            const c = extractHtmlCode(t);
+            if (c) {
+              setHtmlCode(c);
+              setGameStarted(false);
+              if (convId) updateConversationSilent(convId, { html_code: c });
+            }
+          } catch {}
+        }, 500);
+      }
+    }
+
+    setIsCoding(false);
+    setLiveCode("");
+  };
+
+  // ============================================================
+  // 发送消息（统一入口）
+  // ============================================================
+
+  const doSend = async (text: string) => {
+    if (!text.trim() || sendingRef.current) return;
+    sendingRef.current = true;
 
     const token = await getToken();
 
-    const userMessage = { role: "user", content: input };
+    // 如果还没有对话文档，自动创建一个
+    let convId = currentConvId;
+    if (!convId) {
+      const newConv = await createConversationInternal(token);
+      if (!newConv) return;
+      convId = newConv.id;
+      setCurrentConvId(convId);
+      setConversations(prev => [newConv, ...prev]);
+    }
+
+    // 如果对话标题还是默认的，更新为用户第一条消息
+    const currentConv = conversations.find(c => c.id === convId);
+    if (currentConv?.title === "新对话") {
+      const title = text.substring(0, 20) + (text.length > 20 ? "..." : "");
+      updateConversationSilent(convId, { title });
+    }
+
+    const userMessage = { role: "user", content: text };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
+    // 同时更新原始消息列表（保留完整内容）
+    rawMessagesRef.current = [...rawMessagesRef.current, userMessage];
     setInput("");
     setLoading(true);
     setIsCoding(false);
     setLiveCode("");
+    // 如果已有游戏代码，用户发消息时切换到代码视图（等待修改）
+    if (htmlCode) {
+      setViewMode("code");
+      setGameStarted(false);
+    }
+
+    // 构建发给 API 的消息列表（使用原始消息，保留完整上下文）
+    let apiMessages = rawMessagesRef.current.map((m) => ({ role: m.role, content: m.content }));
 
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
+          messages: apiMessages,
           userId,
-          sessionId: currentSessionId,
+          sessionId: convId,
+          currentCode: htmlCode || undefined,
         }),
       });
 
       if (!response.ok) throw new Error("请求失败");
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = "";
-      let insideCodeBlock = false;
-
-      setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
-      while (reader) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) continue;
-
-          const data = trimmed.slice(5).trim();
-          if (data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(data);
-            const content = parsed.content || "";
-            assistantContent += content;
-
-            if (content.includes("```")) {
-              const count = (assistantContent.match(/```/g) || []).length;
-              insideCodeBlock = count % 2 === 1;
-              setIsCoding(insideCodeBlock);
-            }
-
-            if (insideCodeBlock || isCoding) {
-              const currentCode = extractAllCode(assistantContent);
-              setLiveCode(currentCode);
-            }
-
-            const textOnly = extractTextOnly(assistantContent);
-            const displayText = textOnly || (insideCodeBlock || isCoding ? "✨ 小智老师正在编写游戏代码，请稍等..." : "");
-            setMessages((prev) => {
-              const updated = [...prev];
-              updated[updated.length - 1] = {
-                ...updated[updated.length - 1],
-                content: displayText,
-              };
-              return updated;
-            });
-          } catch {
-            // 忽略解析错误
-          }
-        }
-      }
-
-      const finalText = extractTextOnly(assistantContent);
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          ...updated[updated.length - 1],
-          content: finalText || "✅ 游戏代码已生成，请在右侧预览！",
-        };
-        return updated;
-      });
-
-      const code = extractHtmlCode(assistantContent);
-      if (code) {
-        setHtmlCode(code);
-      }
-      setIsCoding(false);
-      setLiveCode("");
+      await processStream(response, htmlCode, convId);
     } catch (error) {
       console.error("发送消息失败:", error);
       setMessages((prev) => [
@@ -392,7 +690,19 @@ export default function StudentPortal() {
       ]);
     } finally {
       setLoading(false);
+      sendingRef.current = false;
     }
+  };
+
+  // ============================================================
+  // 事件处理
+  // ============================================================
+
+  const sendMessage = () => doSend(input);
+
+  const handleOptionClick = (optionText: string) => {
+    if (loading) return;
+    doSend(optionText);
   };
 
   // 上传游戏到教师管理后台
@@ -403,9 +713,9 @@ export default function StudentPortal() {
     try {
       const res = await fetch("/api/projects", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           user_id: userId,
@@ -433,7 +743,26 @@ export default function StudentPortal() {
     downloadHtml(htmlCode, gameTitle || "我的游戏");
   };
 
+  // 从文本中提取选项（只取第一个问题中的选项）
+  const extractOptions = (text: string): string[] => {
+    const paragraphs = text.split(/\n\n+/);
+    for (const para of paragraphs) {
+      const lines = para.split("\n");
+      const options: string[] = [];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (/^\d+\.\s/.test(trimmed)) {
+          options.push(trimmed.replace(/^\d+\.\s*/, ""));
+        }
+      }
+      if (options.length > 0) return options;
+    }
+    return [];
+  };
+
+  // ============================================================
   // 登录检查中显示加载
+  // ============================================================
   if (checkingAuth) {
     return (
       <div className="flex h-screen items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-50">
@@ -445,6 +774,9 @@ export default function StudentPortal() {
     );
   }
 
+  // ============================================================
+  // 渲染
+  // ============================================================
   return (
     <div className="flex h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
       {/* 左侧：对话区 */}
@@ -466,7 +798,7 @@ export default function StudentPortal() {
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((msg, i) => (
             <div
-              key={i}
+              key={`msg-${i}-${msg.role}-${msg.content.length}`}
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}>
@@ -475,6 +807,24 @@ export default function StudentPortal() {
                     {line}
                   </p>
                 ))}
+                {/* AI 消息的选项按钮 */}
+                {msg.role === "assistant" && !loading && (() => {
+                  const options = extractOptions(msg.content);
+                  if (options.length === 0) return null;
+                  return (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {options.map((opt, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handleOptionClick(opt)}
+                          className="bg-white border-2 border-indigo-300 hover:bg-indigo-100 text-indigo-700 text-sm px-3 py-1.5 rounded-xl font-medium transition active:scale-95"
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           ))}
@@ -511,73 +861,58 @@ export default function StudentPortal() {
       </div>
 
       {/* 右侧：预览区 */}
-      <div className="flex flex-col w-1/2 bg-gray-50 relative">
-        {/* 编码动画覆盖层 —— 实时显示代码 */}
-        {isCoding && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-gray-900 bg-opacity-90 rounded-2xl m-4">
-            <div className="bg-gray-800 rounded-2xl p-6 max-w-2xl w-full h-3/4 flex flex-col shadow-2xl border border-indigo-500">
-              <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-700">
-                <div className="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
-                <div className="w-3 h-3 rounded-full bg-yellow-500 animate-pulse" style={{ animationDelay: "0.2s" }}></div>
-                <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" style={{ animationDelay: "0.4s" }}></div>
-                <span className="ml-3 text-gray-300 text-sm font-mono">小智老师正在编码中...</span>
-                <div className="ml-auto">
-                  <span className="text-xs text-gray-500 animate-pulse">▌</span>
-                </div>
-              </div>
+      <div className="flex flex-col w-1/2 bg-gray-50">
+        {/* 标题栏 + Tab切换 + 上传/下载 */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-white">
+          <h2 className="text-base font-bold text-gray-800 whitespace-nowrap">预览</h2>
 
-              <div
-                ref={codeScrollRef}
-                className="flex-1 bg-gray-950 rounded-lg p-4 font-mono text-sm overflow-y-auto"
-              >
-                {liveCode ? (
-                  <pre className="text-green-400 whitespace-pre-wrap break-all">
-                    {liveCode}
-                  </pre>
-                ) : (
-                  <div className="flex items-center justify-center h-full text-gray-600">
-                    <span className="animate-pulse">准备生成代码...</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
-                <span>✨ 分析游戏逻辑 → 编写代码 → 调试交互</span>
-                <span>{liveCode.length > 0 ? `${liveCode.split("\n").length} 行代码` : ""}</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 预览区标题 + 上传/下载按钮 */}
-        <div className="flex items-center gap-3 p-4 border-b border-gray-200 bg-white">
-          <span className="text-2xl">👀</span>
-          <h2 className="text-lg font-bold text-gray-800">游戏预览</h2>
-          <div className="ml-auto flex gap-2">
-            <input
-              type="text"
-              value={gameTitle}
-              onChange={(e) => setGameTitle(e.target.value)}
-              placeholder="给游戏起个名字..."
-              className="input-field w-40 text-sm"
-            />
+          {/* 代码 / 游戏 Tab 切换 */}
+          <div className="flex flex-row rounded-lg bg-gray-100 p-0.5">
             <button
-              onClick={handleUpload}
-              disabled={!htmlCode || !gameTitle.trim() || saving}
-              className="btn-primary disabled:opacity-50 text-sm"
-              title="上传到教师管理后台"
+              onClick={() => setViewMode("code")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition whitespace-nowrap ${
+                viewMode === "code"
+                  ? "bg-white text-gray-800 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
             >
-              {saving ? "上传中..." : "📤 上传游戏"}
+              代码
             </button>
             <button
-              onClick={handleDownload}
-              disabled={!htmlCode}
-              className="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-xl text-sm font-medium transition disabled:opacity-50"
-              title="下载为 HTML 文件"
+              onClick={() => setViewMode("game")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition whitespace-nowrap ${
+                viewMode === "game"
+                  ? "bg-white text-gray-800 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
             >
-              ⬇️ 下载游戏
+              游戏
             </button>
           </div>
+
+          <input
+            type="text"
+            value={gameTitle}
+            onChange={(e) => setGameTitle(e.target.value)}
+            placeholder="游戏名称"
+            className="input-field w-20 text-xs px-2 py-1"
+          />
+          <button
+            onClick={handleUpload}
+            disabled={!htmlCode || !gameTitle.trim() || saving}
+            className="bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-1 rounded-lg text-xs font-medium transition disabled:opacity-50 whitespace-nowrap"
+            title="上传到教师管理后台"
+          >
+            {saving ? "..." : "📤 上传"}
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={!htmlCode}
+            className="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded-lg text-xs font-medium transition disabled:opacity-50 whitespace-nowrap"
+            title="下载为 HTML 文件"
+          >
+            ⬇️ 下载
+          </button>
         </div>
 
         {/* 文件管理区域（折叠面板） */}
@@ -586,7 +921,7 @@ export default function StudentPortal() {
             onClick={() => setShowFiles(!showFiles)}
             className="flex items-center justify-between w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-sm text-gray-600"
           >
-            <span className="font-medium">📂 我的对话</span>
+            <span className="font-medium">📂 我的对话（{conversations.length}/2）</span>
             <span>{showFiles ? "▲ 收起" : "▼ 展开"}</span>
           </button>
 
@@ -594,40 +929,47 @@ export default function StudentPortal() {
             <div className="max-h-56 overflow-y-auto bg-white border-t border-gray-100 p-3 space-y-1.5 text-sm">
               <button
                 onClick={startNewConversation}
-                className="w-full py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-sm font-medium transition"
+                disabled={conversations.length >= 2}
+                className={`w-full py-2 px-3 rounded-lg text-sm font-medium transition ${
+                  conversations.length >= 2
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    : "bg-indigo-50 hover:bg-indigo-100 text-indigo-600"
+                }`}
               >
-                ➕ 新对话
+                {conversations.length >= 2 ? "已达到上限（2个）" : "➕ 新对话"}
               </button>
 
               {loadingHistory ? (
                 <p className="text-gray-400 text-center py-3 text-xs">加载中...</p>
-              ) : sessions.length === 0 ? (
+              ) : conversations.length === 0 ? (
                 <p className="text-gray-400 text-center py-3 text-xs">暂无历史对话</p>
               ) : (
                 <div className="space-y-1">
-                  {sessions.map((s: any) => (
+                  {conversations.map((conv) => (
                     <div
-                      key={s.session_id}
-                      onClick={() => {
-                        if (loadingSession) return;
-                        loadSession(s.session_id, s.start_time, s.end_time, s.game);
-                        // 在手机上可能需要收起来
-                      }}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition ${
-                        currentSessionId === s.session_id
+                      key={conv.id}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg transition ${
+                        currentConvId === conv.id
                           ? "bg-indigo-100 text-indigo-700"
                           : "hover:bg-gray-100 text-gray-700"
                       }`}
                     >
-                      <div className="flex-1 min-w-0">
+                      {/* 点击加载对话 */}
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => {
+                          if (loadingSession || conv.id === currentConvId) return;
+                          loadConversation(conv.id, conv);
+                        }}
+                      >
                         <p className="text-sm font-medium truncate">
-                          📝 {s.title}
+                          📝 {conv.title}
                         </p>
                         <p className="text-xs text-gray-400">
-                          {s.message_count} 条消息
-                          {s.has_game ? " 🎮" : ""}
+                          {conv.message_count} 条消息
+                          {conv.has_game ? " 🎮" : ""}
                           {" · "}
-                          {new Date(s.last_message_at).toLocaleString("zh-CN", {
+                          {new Date(conv.updated_at).toLocaleString("zh-CN", {
                             month: "2-digit",
                             day: "2-digit",
                             hour: "2-digit",
@@ -635,11 +977,26 @@ export default function StudentPortal() {
                           })}
                         </p>
                       </div>
-                      {currentSessionId === s.session_id && (
-                        <span className="text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full">
-                          当前
-                        </span>
-                      )}
+
+                      {/* 右侧：当前标签 + 删除按钮 */}
+                      <div className="flex items-center gap-1 ml-2">
+                        {currentConvId === conv.id && (
+                          <span className="text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full">
+                            当前
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteConversation(conv.id);
+                          }}
+                          disabled={deletingId === conv.id}
+                          className="text-gray-400 hover:text-red-500 transition p-1 rounded disabled:opacity-50"
+                          title="删除此对话"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -648,37 +1005,87 @@ export default function StudentPortal() {
           )}
         </div>
 
-        {/* iframe 预览 */}
-        <div className="flex-1 p-4">
-          {htmlCode ? (
-            gameStarted ? (
-              <iframe
-                srcDoc={htmlCode}
-                title="游戏预览"
-                className="w-full h-full rounded-2xl bg-white shadow-inner"
-                sandbox="allow-scripts"
-              />
-            ) : (
-              <div className="w-full h-full rounded-2xl bg-indigo-50 flex items-center justify-center cursor-pointer"
-                onClick={() => setGameStarted(true)}
-              >
-                <div className="text-center">
-                  <div className="text-7xl mb-4 animate-bounce">▶️</div>
-                  <p className="text-2xl font-bold text-indigo-600 mb-2">开始游戏</p>
-                  <p className="text-sm text-indigo-400">点击开始运行游戏</p>
+        {/* 代码视图 */}
+        {viewMode === "code" && (
+          <div className="flex-1 min-h-0 flex flex-col p-4">
+            {isCoding || liveCode || htmlCode ? (
+              <div className="flex-1 min-h-0 bg-gray-900 rounded-2xl overflow-hidden flex flex-col shadow-lg">
+                {/* 代码编辑器顶栏 */}
+                <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700 flex-shrink-0">
+                  <div className={`w-2.5 h-2.5 rounded-full ${isCoding ? "bg-green-400 animate-pulse" : "bg-gray-500"}`}></div>
+                  <span className="text-gray-400 text-xs font-mono">
+                    {isCoding ? "正在编写代码..." : "game.html"}
+                  </span>
+                  <span className="ml-auto text-gray-600 text-xs font-mono">
+                    {(liveCode || htmlCode).split("\n").length} 行
+                  </span>
+                </div>
+                {/* 代码内容 */}
+                <div
+                  ref={codeScrollRef}
+                  className="flex-1 min-h-0 overflow-hidden relative"
+                >
+                  <div className="absolute inset-0 overflow-y-auto p-4 font-mono text-xs leading-5">
+                    {(liveCode || htmlCode).split("\n").map((line, i) => (
+                      <div key={i} className="flex">
+                        <span className="text-gray-600 w-8 text-right mr-3 select-none flex-shrink-0">
+                          {i + 1}
+                        </span>
+                        <span className="text-gray-300 whitespace-pre break-all">{line}</span>
+                      </div>
+                    ))}
+                    {isCoding && (
+                      <span className="inline-block w-1.5 h-3.5 bg-green-400 animate-pulse ml-0.5 align-middle"></span>
+                    )}
+                  </div>
                 </div>
               </div>
-            )
-          ) : (
-            <div className="flex items-center justify-center h-full text-gray-400">
-              <div className="text-center">
-                <p className="text-6xl mb-4">🎮</p>
-                <p className="text-lg">和 AI 对话，生成你的第一个游戏吧！</p>
-                <p className="text-sm mt-2">AI 回复中的游戏代码会自动显示在这里 ✨</p>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400">
+                <div className="text-center">
+                  <p className="text-5xl mb-3">&lt;/&gt;</p>
+                  <p className="text-sm">和 AI 对话来生成游戏代码</p>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
+
+        {/* 游戏视图 */}
+        {viewMode === "game" && (
+          <div className="flex-1 min-h-0 p-4">
+            {htmlCode ? (
+              gameStarted ? (
+                <iframe
+                  key={htmlCode}
+                  srcDoc={htmlCode}
+                  title="游戏预览"
+                  className="w-full h-full rounded-2xl bg-white shadow-inner"
+                  sandbox="allow-scripts"
+                />
+              ) : (
+                <div
+                  className="w-full h-full rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer hover:from-indigo-100 hover:to-purple-100 transition"
+                  onClick={() => setGameStarted(true)}
+                >
+                  <div className="text-center">
+                    <div className="text-7xl mb-4 animate-bounce">▶️</div>
+                    <p className="text-2xl font-bold text-indigo-600 mb-2">开始游戏</p>
+                    <p className="text-sm text-indigo-400">点击运行游戏</p>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400">
+                <div className="text-center">
+                  <p className="text-6xl mb-4">🎮</p>
+                  <p className="text-lg">和 AI 对话，生成你的第一个游戏吧！</p>
+                  <p className="text-sm mt-2 text-gray-300">生成的游戏代码会自动显示在这里</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -17,8 +17,17 @@ export default function SupabaseProvider({
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
+    // 尝试恢复 session，如果 refresh token 失效则清除并跳转登录
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
+      if (session) {
+        setSession(session);
+      } else {
+        // session 为空 → 清除本地存储的过期数据
+        clearSupabaseStorage();
+      }
+    }).catch(() => {
+      // refresh token 失效 → 清除本地存储
+      clearSupabaseStorage();
     });
 
     const {
@@ -31,4 +40,16 @@ export default function SupabaseProvider({
   }, []);
 
   return <>{children}</>;
+}
+
+// 清除 Supabase 存储在 localStorage 中的过期 session
+function clearSupabaseStorage() {
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && (key.startsWith("sb-") || key.startsWith("supabase."))) {
+      keysToRemove.push(key);
+    }
+  }
+  keysToRemove.forEach((key) => localStorage.removeItem(key));
 }

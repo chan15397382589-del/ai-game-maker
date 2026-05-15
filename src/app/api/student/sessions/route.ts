@@ -1,113 +1,191 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/lib/deepseek";
 
-const SESSION_GAP_MINUTES = 30; // 间隔超过30分钟视为不同会话
+const MAX_CONVERSATIONS = 2; // 每位学生最多2个对话文档
 
+// 获取当前用户（从 token）
+async function getUser(req: NextRequest) {
+  const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
+  if (!token) return null;
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !user) return null;
+  return user;
+}
+
+// GET - 获取对话文档列表
 export async function GET(req: NextRequest) {
   try {
-    const db = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-
-    const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
-    if (!token) {
+    const user = await getUser(req);
+    if (!user) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
-    const { data: { user }, error: authError } = await db.auth.getUser(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: "认证失败" }, { status: 401 });
+    // 获取所有对话文档（不包含 html_code，减少响应体积）
+    const { data: conversations, error } = await supabaseAdmin
+      .from("conversations")
+      .select("id, title, html_code, created_at, updated_at")
+      .eq("user_id", user.id)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 1. 获取该用户的所有消息（只需要关键字段，避免传输大量 HTML 代码）
-    const { data: messages, error: msgError } = await db
-      .from("messages")
-      .select("id, role, content, created_at")
+    // 获取每个对话的消息数量
+    const result = [];
+    for (const conv of (conversations || [])) {
+      const { count } = await supabaseAdmin
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id)
+        .eq("session_id", conv.id);
+
+      result.push({
+        id: conv.id,
+        title: conv.title,
+        has_game: !!conv.html_code,
+        html_code: conv.html_code, // 前端 loadConversation 需要用到
+        message_count: count || 0,
+        created_at: conv.created_at,
+        updated_at: conv.updated_at,
+      });
+    }
+
+    return NextResponse.json(result);
+  } catch (error: any) {
+    console.error("[sessions] GET 异常:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// POST - 创建新对话文档
+export async function POST(req: NextRequest) {
+  try {
+    const user = await getUser(req);
+    if (!user) {
+      return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+
+    // 检查是否已达到最大数量
+    const { count } = await supabaseAdmin
+      .from("conversations")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
+
+    if ((count || 0) >= MAX_CONVERSATIONS) {
+      return NextResponse.json(
+        { error: `每位学生最多只能有 ${MAX_CONVERSATIONS} 个对话文档，请先删除其他文档` },
+        { status: 400 }
+      );
+    }
+
+    // 创建新对话
+    const { data, error } = await supabaseAdmin
+      .from("conversations")
+      .insert({ user_id: user.id, title: "新对话" })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[sessions] POST 插入失败:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json(data);
+  } catch (error: any) {
+    console.error("[sessions] POST 异常:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// DELETE - 删除对话文档及其所有消息
+export async function DELETE(req: NextRequest) {
+  try {
+    const user = await getUser(req);
+    if (!user) {
+      return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+
+    const { id } = await req.json();
+
+    if (!id) {
+      return NextResponse.json({ error: "缺少对话 ID" }, { status: 400 });
+    }
+
+    // 验证该对话属于当前用户
+    const { data: conv } = await supabaseAdmin
+      .from("conversations")
+      .select("id")
+      .eq("id", id)
       .eq("user_id", user.id)
-      .order("created_at", { ascending: true });
+      .single();
+
+    if (!conv) {
+      return NextResponse.json({ error: "对话不存在或无权操作" }, { status: 404 });
+    }
+
+    // 删除该对话的所有消息
+    const { error: msgError } = await supabaseAdmin
+      .from("messages")
+      .delete()
+      .eq("session_id", id);
 
     if (msgError) {
-      return NextResponse.json({ error: msgError.message }, { status: 500 });
+      console.error("[sessions] 删除消息失败:", msgError);
     }
 
-    // 2. 按时间临近分组
-    const sessions: any[] = [];
-    let currentSession: any = null;
-    let lastTime: Date | null = null;
+    // 删除对话文档
+    const { error } = await supabaseAdmin
+      .from("conversations")
+      .delete()
+      .eq("id", id);
 
-    for (const msg of messages || []) {
-      const msgTime = new Date(msg.created_at);
-
-      // 判断是否应该开启新会话：无当前会话 || 与上条消息间隔超过阈值
-      const isNewSession = !currentSession || (
-        lastTime && (msgTime.getTime() - lastTime.getTime()) > SESSION_GAP_MINUTES * 60 * 1000
-      );
-
-      if (isNewSession) {
-        currentSession = {
-          session_id: msg.created_at, // 用第一条消息的时间作为 session_id
-          message_count: 0,
-          first_user_message: "",
-          last_message_at: msg.created_at,
-          start_time: msg.created_at,
-          end_time: msg.created_at,
-        };
-        sessions.push(currentSession);
-      }
-
-      currentSession.message_count++;
-      currentSession.last_message_at = msg.created_at;
-      currentSession.end_time = msg.created_at;
-
-      // 取第一条用户消息作为标题
-      if (msg.role === "user" && !currentSession.first_user_message) {
-        currentSession.first_user_message = msg.content?.substring(0, 30) || "";
-        if (msg.content?.length > 30) currentSession.first_user_message += "...";
-      }
-
-      lastTime = msgTime;
+    if (error) {
+      console.error("[sessions] 删除对话失败:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 3. 获取用户的项目（游戏作品）
-    const { data: projects } = await db
-      .from("projects")
-      .select("id, game_title, html_code, created_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-
-    // 4. 按时间临近关联游戏到会话
-    for (const session of sessions) {
-      const sessionStart = new Date(session.start_time).getTime();
-      const sessionEnd = new Date(session.end_time).getTime();
-
-      // 找创建时间在会话时间范围内（或会话结束后30分钟内）的项目
-      const matchedProject = (projects || []).find((p) => {
-        const projTime = new Date(p.created_at).getTime();
-        // 项目创建时间在会话开始前5分钟 到 会话结束后30分钟内
-        return projTime >= (sessionStart - 5 * 60 * 1000) &&
-               projTime <= (sessionEnd + SESSION_GAP_MINUTES * 60 * 1000);
-      });
-
-      session.title = session.first_user_message || "新对话";
-      session.has_game = !!matchedProject;
-      session.game = matchedProject
-        ? {
-            project_id: matchedProject.id,
-            game_title: matchedProject.game_title,
-            html_code: matchedProject.html_code,
-          }
-        : null;
-    }
-
-    // 按最后消息时间倒序排列
-    sessions.sort(
-      (a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
-    );
-
-    return NextResponse.json(sessions);
+    return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error("[student/sessions] 异常:", error);
+    console.error("[sessions] DELETE 异常:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// PATCH - 更新对话文档（标题或游戏代码）
+export async function PATCH(req: NextRequest) {
+  try {
+    const user = await getUser(req);
+    if (!user) {
+      return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+
+    const { id, title, html_code } = await req.json();
+
+    if (!id) {
+      return NextResponse.json({ error: "缺少对话 ID" }, { status: 400 });
+    }
+
+    const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (title !== undefined) updates.title = title;
+    if (html_code !== undefined) updates.html_code = html_code;
+
+    const { data, error } = await supabaseAdmin
+      .from("conversations")
+      .update(updates)
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[sessions] PATCH 更新失败:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json(data);
+  } catch (error: any) {
+    console.error("[sessions] PATCH 异常:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
