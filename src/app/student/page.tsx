@@ -8,12 +8,25 @@ import { useRouter } from "next/navigation";
 // 工具函数：获取认证 token
 // ============================================================
 async function getToken(): Promise<string> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (session?.access_token) return session.access_token;
-  // token 可能过期，尝试刷新
-  await supabase.auth.refreshSession();
-  const { data: { session: s2 } } = await supabase.auth.getSession();
-  return s2?.access_token || "";
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) return session.access_token;
+    // token 可能过期，尝试刷新
+    await supabase.auth.refreshSession();
+    const { data: { session: s2 } } = await supabase.auth.getSession();
+    return s2?.access_token || "";
+  } catch {
+    // refresh token 无效或过期，清除本地存储
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith("sb-") || key.startsWith("supabase."))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
+    return "";
+  }
 }
 
 // ============================================================
@@ -253,6 +266,8 @@ export default function StudentPortal() {
         router.push("/login");
       }
       setCheckingAuth(false);
+    }).catch(() => {
+      router.push("/login");
     });
   }, []);
 
@@ -700,11 +715,6 @@ export default function StudentPortal() {
 
   const sendMessage = () => doSend(input);
 
-  const handleOptionClick = (optionText: string) => {
-    if (loading) return;
-    doSend(optionText);
-  };
-
   // 上传游戏到教师管理后台
   const handleUpload = async () => {
     if (!htmlCode || !gameTitle.trim() || !userId) return;
@@ -743,23 +753,6 @@ export default function StudentPortal() {
     downloadHtml(htmlCode, gameTitle || "我的游戏");
   };
 
-  // 从文本中提取选项（只取第一个问题中的选项）
-  const extractOptions = (text: string): string[] => {
-    const paragraphs = text.split(/\n\n+/);
-    for (const para of paragraphs) {
-      const lines = para.split("\n");
-      const options: string[] = [];
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (/^\d+\.\s/.test(trimmed)) {
-          options.push(trimmed.replace(/^\d+\.\s*/, ""));
-        }
-      }
-      if (options.length > 0) return options;
-    }
-    return [];
-  };
-
   // ============================================================
   // 登录检查中显示加载
   // ============================================================
@@ -785,9 +778,8 @@ export default function StudentPortal() {
           <span className="text-2xl">🎮</span>
           <h1 className="text-lg font-bold">AI 游戏创作课堂</h1>
           <button
-            onClick={async () => {
-              await supabase.auth.signOut();
-              router.push("/login");
+            onClick={() => {
+              router.push("/login?action=switch");
             }}
             className="ml-auto text-sm bg-indigo-500 hover:bg-indigo-400 px-3 py-1 rounded-lg transition"
           >
@@ -807,24 +799,6 @@ export default function StudentPortal() {
                     {line}
                   </p>
                 ))}
-                {/* AI 消息的选项按钮 */}
-                {msg.role === "assistant" && !loading && (() => {
-                  const options = extractOptions(msg.content);
-                  if (options.length === 0) return null;
-                  return (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {options.map((opt, idx) => (
-                        <button
-                          key={idx}
-                          onClick={() => handleOptionClick(opt)}
-                          className="bg-white border-2 border-indigo-300 hover:bg-indigo-100 text-indigo-700 text-sm px-3 py-1.5 rounded-xl font-medium transition active:scale-95"
-                        >
-                          {opt}
-                        </button>
-                      ))}
-                    </div>
-                  );
-                })()}
               </div>
             </div>
           ))}

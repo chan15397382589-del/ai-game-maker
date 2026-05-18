@@ -39,10 +39,14 @@ interface TreeNode {
 // 工具函数
 // ============================================================
 async function getAuthToken(): Promise<string> {
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) return "";
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token || "";
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error || !user) return "";
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token || "";
+  } catch {
+    return "";
+  }
 }
 
 function downloadHtml(code: string, title: string) {
@@ -77,21 +81,29 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!ready) return;
     const interval = setInterval(async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data.user) router.push("/login");
-      else if (user && data.user.id !== user.id) checkUser();
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (!data.user) router.push("/login");
+        else if (user && data.user.id !== user.id) checkUser();
+      } catch {
+        router.push("/login");
+      }
     }, 10000);
     return () => clearInterval(interval);
   }, [ready, user]);
 
   const checkUser = async () => {
-    const { data } = await supabase.auth.getUser();
-    if (!data.user) { router.push("/login"); return; }
-    setUser(data.user);
-    const { data: userData } = await supabase.from("users").select("role").eq("id", data.user.id).single();
-    if (userData && userData.role !== "admin") { router.push("/student"); return; }
-    setRole(userData?.role || "admin");
-    setReady(true);
+    try {
+      const { data } = await supabase.auth.getUser();
+      if (!data.user) { router.push("/login"); return; }
+      setUser(data.user);
+      const { data: userData } = await supabase.from("users").select("role").eq("id", data.user.id).single();
+      if (userData && userData.role !== "admin") { router.push("/student"); return; }
+      setRole(userData?.role || "admin");
+      setReady(true);
+    } catch {
+      router.push("/login");
+    }
   };
 
   const handleLogout = async () => {
@@ -876,6 +888,9 @@ function MessagesAudit() {
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedSession, setSelectedSession] = useState<any>(null);
+  // 代码查看弹窗
+  const [codeModal, setCodeModal] = useState<{ open: boolean; code: string; time: string }>({ open: false, code: "", time: "" });
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     const loadStudents = async () => {
@@ -921,6 +936,22 @@ function MessagesAudit() {
     finally { setLoading(false); }
   };
 
+  // 从消息内容中提取 HTML 代码
+  const extractCode = (content: string): string | null => {
+    const match = content.match(/```html\s*([\s\S]*?)```/i);
+    if (match) return match[1].trim();
+    const genericMatch = content.match(/```\s*([\s\S]*?)```/);
+    if (genericMatch && /<\w/.test(genericMatch[1])) return genericMatch[1].trim();
+    return null;
+  };
+
+  // 查看代码
+  const handleViewCode = (content: string, time: string) => {
+    const code = extractCode(content);
+    if (code) setCodeModal({ open: true, code, time });
+  };
+
+  // 导出选中会话为 txt（保留原有功能）
   const exportConversation = () => {
     if (messages.length === 0) return;
     const lines = messages.map((msg) => {
@@ -937,7 +968,52 @@ function MessagesAudit() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  // 导出 Excel（去除 HTML 代码）
+  const exportToExcel = async (allStudents: boolean) => {
+    setExporting(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+
+      const url = allStudents
+        ? "/api/admin/messages/export"
+        : `/api/admin/messages/export?user_id=${encodeURIComponent(selectedStudent)}`;
+
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { alert("导出失败"); return; }
+      const data = await res.json();
+
+      const rows = data.map((row: any, idx: number) => ({
+        "序号": idx + 1,
+        "学生姓名": row.student_name,
+        "学号": row.student_id,
+        "年级": row.grade ? `${row.grade}年级` : "",
+        "班级": row.class_num ? `${row.class_num}班` : "",
+        "角色": row.role,
+        "对话内容": row.content,
+        "时间": new Date(row.created_at).toLocaleString("zh-CN"),
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      // 设置列宽
+      ws["!cols"] = [
+        { wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 8 },
+        { wch: 8 }, { wch: 50 }, { wch: 20 },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "对话记录");
+      const filename = allStudents
+        ? `全部学生对话记录_${new Date().toISOString().slice(0, 10)}.xlsx`
+        : `${studentName}_对话记录.xlsx`;
+      XLSX.writeFile(wb, filename);
+    } catch (err) {
+      alert("导出失败，请重试");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const studentName = students.find((s) => s.id === selectedStudent)?.name || "";
@@ -945,14 +1021,33 @@ function MessagesAudit() {
   return (
     <div>
       <h2 className="text-2xl font-bold text-gray-800 mb-6">📋 对话记录审计</h2>
-      <div className="mb-6 bg-gray-50 rounded-xl p-4">
-        <label className="block text-sm font-medium mb-2 text-gray-700">选择要查看的学生：</label>
-        <select value={selectedStudent} onChange={(e) => handleSelectStudent(e.target.value)} className="input-field w-80 max-w-full">
-          <option value="">-- 请选择学生 --</option>
-          {students.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}（{s.student_id}）</option>
-          ))}
-        </select>
+      <div className="mb-6 bg-gray-50 rounded-xl p-4 flex flex-wrap items-end gap-4">
+        <div>
+          <label className="block text-sm font-medium mb-2 text-gray-700">选择要查看的学生：</label>
+          <select value={selectedStudent} onChange={(e) => handleSelectStudent(e.target.value)} className="input-field w-80 max-w-full">
+            <option value="">-- 请选择学生 --</option>
+            {students.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}（{s.student_id}）</option>
+            ))}
+          </select>
+        </div>
+        {/* Excel 导出按钮 */}
+        <button
+          onClick={() => exportToExcel(true)}
+          disabled={exporting}
+          className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+        >
+          {exporting ? "导出中..." : "📊 导出全部为 Excel"}
+        </button>
+        {selectedStudent && (
+          <button
+            onClick={() => exportToExcel(false)}
+            disabled={exporting}
+            className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+          >
+            {exporting ? "导出中..." : `📊 导出 ${studentName || "此学生"} 的对话`}
+          </button>
+        )}
       </div>
 
       {selectedStudent && (
@@ -980,7 +1075,7 @@ function MessagesAudit() {
             {messages.length > 0 && (
               <button onClick={exportConversation}
                 className="absolute top-2 right-2 bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition z-10">
-                📥 导出此对话
+                📥 导出此对话(TXT)
               </button>
             )}
             {loading ? <div className="flex justify-center py-8"><span className="animate-pulse text-gray-400">加载中...</span></div> :
@@ -990,19 +1085,64 @@ function MessagesAudit() {
                 <div className="text-xs text-gray-400 text-center pb-2 border-b">
                   📝 {selectedSession.first_user_message || "对话"} — 共 {messages.length} 条消息
                 </div>
-                {messages.map((msg, i) => (
+                {messages.map((msg, i) => {
+                  const hasCode = msg.role === "assistant" && extractCode(msg.content);
+                  const displayContent = msg.content.replace(/```html[\s\S]*?```/g, "").replace(/```[\s\S]*?```/g, "").trim() || msg.content;
+                  return (
                   <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div className={msg.role === "user" ? "chat-bubble-user max-w-[80%]" : "chat-bubble-ai max-w-[80%]"}>
-                      <p className="text-xs opacity-70 mb-1 font-medium">
-                        {msg.role === "user" ? "👦 学生" : "🤖 小智老师"}
-                        <span className="ml-2 opacity-50 text-[10px]">{new Date(msg.created_at).toLocaleString("zh-CN")}</span>
+                      <p className="text-xs opacity-70 mb-1 font-medium flex items-center gap-2">
+                        <span>{msg.role === "user" ? "👦 学生" : "🤖 小智老师"}</span>
+                        <span className="opacity-50 text-[10px]">{new Date(msg.created_at).toLocaleString("zh-CN")}</span>
+                        {hasCode && (
+                          <button
+                            onClick={() => handleViewCode(msg.content, new Date(msg.created_at).toLocaleString("zh-CN"))}
+                            className="ml-auto bg-amber-500 hover:bg-amber-600 text-white px-2 py-0.5 rounded text-[10px] font-medium transition"
+                          >
+                            &lt;/&gt; 查看代码
+                          </button>
+                        )}
                       </p>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{displayContent}</p>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 代码查看弹窗 */}
+      {codeModal.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" onClick={() => setCodeModal({ open: false, code: "", time: "" })}>
+          <div className="bg-gray-900 rounded-xl shadow-2xl max-w-3xl w-full max-h-[80vh] mx-4 flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-700">
+              <div>
+                <span className="text-white font-medium text-sm">📄 游戏代码</span>
+                <span className="text-gray-400 text-xs ml-3">{codeModal.time}</span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(codeModal.code);
+                    alert("已复制到剪贴板");
+                  }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-xs transition"
+                >
+                  📋 复制
+                </button>
+                <button
+                  onClick={() => setCodeModal({ open: false, code: "", time: "" })}
+                  className="text-gray-400 hover:text-white text-lg leading-none px-2 transition"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="overflow-y-auto p-5">
+              <pre className="text-green-400 text-xs font-mono whitespace-pre-wrap leading-relaxed">{codeModal.code}</pre>
+            </div>
           </div>
         </div>
       )}
@@ -1145,7 +1285,7 @@ function ProjectsReview() {
             </div>
             <div className="flex-1 p-4 bg-gray-900 rounded-b-2xl">
               <iframe srcDoc={selectedProject.html_code} title={selectedProject.game_title}
-                className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts allow-same-origin" />
+                className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts" />
             </div>
           </div>
         </div>

@@ -9,23 +9,26 @@ export default function Home() {
 
   useEffect(() => {
     const checkAuth = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!data.user) {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (!data.user) {
+          router.replace("/login");
+          return;
+        }
+
+        const { data: userData } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", data.user.id)
+          .single();
+
+        if (userData?.role === "admin") {
+          router.replace("/admin");
+        } else {
+          router.replace("/student");
+        }
+      } catch {
         router.replace("/login");
-        return;
-      }
-
-      // 查用户角色，跳转到对应页面
-      const { data: userData } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", data.user.id)
-        .single();
-
-      if (userData?.role === "admin") {
-        router.replace("/admin");
-      } else {
-        router.replace("/student");
       }
     };
 

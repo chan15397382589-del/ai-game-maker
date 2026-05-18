@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { useRouter } from "next/navigation";
 
@@ -9,6 +9,7 @@ type LoginMode = "student" | "admin";
 
 export default function LoginPage() {
   const [mode, setMode] = useState<LoginMode>("student");
+  const [checkingSession, setCheckingSession] = useState(true);
   // 管理员字段
   const [email, setEmail] = useState("");
   // 学生字段
@@ -18,6 +19,37 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+
+  // 检测是否已有活跃 session，自动跳转到对应门户
+  // 如果 URL 带有 ?action=switch，则显示登录表单（用于切换账号）
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const isSwitch = searchParams.get("action") === "switch";
+
+    if (isSwitch) {
+      setCheckingSession(false);
+      return;
+    }
+
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (data.user) {
+        const { data: userData } = await supabase
+          .from("users")
+          .select("role")
+          .eq("id", data.user.id)
+          .single();
+        if (userData?.role === "admin") {
+          router.push("/admin");
+        } else {
+          router.push("/student");
+        }
+      } else {
+        setCheckingSession(false);
+      }
+    }).catch(() => {
+      setCheckingSession(false);
+    });
+  }, []);
 
   const handleLogin = async () => {
     setLoading(true);
@@ -86,6 +118,14 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100">
+        <p className="text-gray-400">加载中...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-100 via-purple-50 to-pink-100">
