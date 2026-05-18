@@ -7,6 +7,17 @@ import { useRouter } from "next/navigation";
 // 角色类型
 type LoginMode = "student" | "admin";
 
+function clearStaleStorage() {
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && (key.startsWith("sb-") || key.startsWith("supabase."))) {
+      keysToRemove.push(key);
+    }
+  }
+  keysToRemove.forEach((key) => localStorage.removeItem(key));
+}
+
 export default function LoginPage() {
   const [mode, setMode] = useState<LoginMode>("student");
   const [checkingSession, setCheckingSession] = useState(true);
@@ -31,24 +42,32 @@ export default function LoginPage() {
       return;
     }
 
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (data.user) {
-        const { data: userData } = await supabase
+    // 先用 getSession 读取本地缓存（不触发网络请求，不会报 refresh token 错误）
+    const checkAndRedirect = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) { setCheckingSession(false); return; }
+
+        const { data: userData, error: dbError } = await supabase
           .from("users")
           .select("role")
-          .eq("id", data.user.id)
+          .eq("id", session.user.id)
           .single();
+
+        if (dbError) { clearStaleStorage(); setCheckingSession(false); return; }
+
         if (userData?.role === "admin") {
           router.push("/admin");
         } else {
           router.push("/student");
         }
-      } else {
+      } catch {
+        clearStaleStorage();
         setCheckingSession(false);
       }
-    }).catch(() => {
-      setCheckingSession(false);
-    });
+    };
+
+    checkAndRedirect();
   }, []);
 
   const handleLogin = async () => {
@@ -88,12 +107,15 @@ export default function LoginPage() {
       } else {
         // ====== 管理员登录：邮箱 + 密码 ======
         if (!email.trim()) {
-          setError("请输入管理员邮箱");
+          setError("请输入管理员账号");
           return;
         }
 
+        // "admin" 自动转为 admin@ai-game.admin
+        const adminEmail = email.trim() === "admin" ? "admin@ai-game.admin" : email.trim();
+
         const { data, error: authError } = await supabase.auth.signInWithPassword({
-          email,
+          email: adminEmail,
           password,
         });
 
@@ -203,12 +225,12 @@ export default function LoginPage() {
             /* --- 管理员表单 --- */
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">管理员邮箱</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">管理员账号</label>
                 <input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="请输入管理员邮箱"
+                  placeholder="输入 admin 即可登录"
                   className="input-field"
                   onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                   autoFocus

@@ -242,6 +242,20 @@ export default function StudentPortal() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loadingSession, setLoadingSession] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [reflectionPhase, setReflectionPhase] = useState(false);
+  const [reflectionData, setReflectionData] = useState<Record<string, string>>({});
+  const [reflectionSubmitted, setReflectionSubmitted] = useState(false);
+  const [processHint, setProcessHint] = useState<string | null>(null);
+
+  // 推导当前游戏创作阶段
+  const processStep: "ideation" | "creation" | "done" =
+    reflectionSubmitted ? "done" : htmlCode ? "creation" : "ideation";
+
+  const processSteps = [
+    { key: "ideation", icon: "💡", label: "构思", hint: "告诉小智老师你想做什么游戏。想想——什么类型的游戏？里面有什么角色？怎么玩？" },
+    { key: "creation", icon: "🔧", label: "创作", hint: "小智老师帮你做出了游戏！现在你可以试玩，然后告诉他想改哪里——太快了？太小了？颜色不好看？" },
+    { key: "done", icon: "🎉", label: "完成", hint: "你的游戏做好了！上传到老师那里，然后说说你的创作故事～" },
+  ];
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const codeScrollRef = useRef<HTMLDivElement>(null);
@@ -734,8 +748,10 @@ export default function StudentPortal() {
         }),
       });
       if (res.ok) {
-        alert("✅ 游戏已上传到教师管理后台！");
         setGameTitle("");
+        setReflectionPhase(true);
+        setReflectionData({});
+        setReflectionSubmitted(false);
       } else {
         const err = await res.json();
         alert("❌ 上传失败：" + (err.error || "请重试"));
@@ -772,8 +788,45 @@ export default function StudentPortal() {
   // ============================================================
   return (
     <div className="flex h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
+      {/* 创作过程导航栏 */}
+      <div className="w-14 bg-white border-r border-gray-200 flex flex-col items-center py-4 gap-1 flex-shrink-0 relative">
+        {processSteps.map((s) => {
+          const isActive = processStep === s.key;
+          const isPast = processSteps.findIndex(p => p.key === processStep) > processSteps.findIndex(p => p.key === s.key);
+          return (
+            <button
+              key={s.key}
+              onClick={() => setProcessHint(processHint === s.key ? null : s.key)}
+              className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center transition relative ${
+                isActive ? "bg-indigo-100 text-indigo-600" :
+                isPast ? "bg-green-50 text-green-500" :
+                "text-gray-300 hover:bg-gray-50 hover:text-gray-400"
+              }`}
+              title={s.label}
+            >
+              <span className="text-lg leading-none">{s.icon}</span>
+              <span className="text-[9px] font-medium mt-0.5">{s.label}</span>
+              {isActive && <div className="absolute -right-2.5 w-1 h-5 bg-indigo-500 rounded-full" />}
+              {isPast && <div className="absolute top-0.5 right-0.5 text-[8px]">✓</div>}
+            </button>
+          );
+        })}
+        {/* 提示弹窗 */}
+        {processHint && (
+          <div className="absolute left-full top-4 ml-2 w-52 bg-white rounded-xl shadow-lg border border-gray-200 p-3 z-30">
+            <p className="text-xs text-gray-600 leading-relaxed">
+              {processSteps.find(s => s.key === processHint)?.hint}
+            </p>
+            <button
+              onClick={() => setProcessHint(null)}
+              className="mt-2 text-[10px] text-indigo-500 hover:text-indigo-700"
+            >知道了</button>
+          </div>
+        )}
+      </div>
+
       {/* 左侧：对话区 */}
-      <div className="flex flex-col w-1/2 border-r border-gray-200 bg-white">
+      <div className="flex flex-col flex-1 border-r border-gray-200 bg-white">
         <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-indigo-600 text-white">
           <span className="text-2xl">🎮</span>
           <h1 className="text-lg font-bold">AI 游戏创作课堂</h1>
@@ -835,7 +888,7 @@ export default function StudentPortal() {
       </div>
 
       {/* 右侧：预览区 */}
-      <div className="flex flex-col w-1/2 bg-gray-50">
+      <div className="flex flex-col flex-1 bg-gray-50">
         {/* 标题栏 + Tab切换 + 上传/下载 */}
         <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-white">
           <h2 className="text-base font-bold text-gray-800 whitespace-nowrap">预览</h2>
@@ -1060,6 +1113,91 @@ export default function StudentPortal() {
             )}
           </div>
         )}
+      </div>
+      {/* 反思弹窗 */}
+      {reflectionPhase && !reflectionSubmitted && (
+        <ReflectionPanel
+          convId={currentConvId}
+          onSave={async (data) => {
+            setReflectionData(data);
+            setReflectionSubmitted(true);
+            setReflectionPhase(false);
+            if (currentConvId) {
+              try {
+                const token = await getToken();
+                if (!token) return;
+                await fetch("/api/student/sessions", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                  body: JSON.stringify({ id: currentConvId, reflection: JSON.stringify(data) }),
+                });
+              } catch {}
+            }
+          }}
+          onClose={() => setReflectionPhase(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 反思弹窗组件（页面中央逐次出现三张卡片）
+// ============================================================
+function ReflectionPanel({
+  onSave, onClose, convId,
+}: {
+  onSave: (data: Record<string, string>) => void;
+  onClose: () => void;
+  convId: string;
+}) {
+  const [step, setStep] = useState(0);
+  const [card1, setCard1] = useState('');
+  const [card2, setCard2] = useState('');
+  const [card3, setCard3] = useState('');
+
+  const steps = [
+    { icon: '📷', title: '说说你的游戏', sub: '给你的游戏取个名字，再介绍一下它怎么玩～', value: card1, setValue: setCard1, placeholder: '比如：我的游戏叫接星星大作战，天上会飘下来很多星星，要用篮子接住，接一个加10分！' },
+    { icon: '⭐', title: '你最得意的设计', sub: '你做游戏的时候，自己决定了哪个地方？为什么这样决定？', value: card2, setValue: setCard2, placeholder: '比如：我决定让星星飘来飘去，因为直直掉下来太简单了，飘来飘去更好玩' },
+    { icon: '🚀', title: '下次你想加什么', sub: '如果下次还做这个游戏，你最想加什么新东西？', value: card3, setValue: setCard3, placeholder: '比如：我想加一个炸弹，碰到星星就会爆炸，这样玩起来更刺激' },
+  ];
+
+  const current = steps[step];
+  const canNext = current.value.trim().length > 0;
+
+  const handleNext = () => {
+    if (step < 2) { setStep(step + 1); }
+    else { onSave({ card1: card1.trim(), card2: card2.trim(), card3: card3.trim() }); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+        <div className="flex gap-1 px-6 pt-5 pb-1">
+          {steps.map((_, i) => <div key={i} className={`flex-1 h-1.5 rounded-full transition ${i <= step ? 'bg-amber-400' : 'bg-gray-200'}`} />)}
+        </div>
+        <div className="text-center text-xs text-gray-400 mt-2 mb-4">第 {step + 1} / 3 步</div>
+        <div className="px-6 pb-3">
+          <p className="text-lg font-bold text-gray-800 mb-1">{current.icon} {current.title}</p>
+          <p className="text-sm text-gray-500 mb-4">{current.sub}</p>
+          <textarea
+            value={current.value}
+            onChange={(e) => current.setValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && canNext) { e.preventDefault(); handleNext(); } }}
+            placeholder={current.placeholder}
+            className="w-full p-3 text-base border border-gray-300 rounded-xl resize-none h-32 focus:border-amber-400 focus:ring-2 focus:ring-amber-200 outline-none leading-relaxed"
+            autoFocus
+          />
+        </div>
+        <div className="flex items-center justify-between px-6 pb-6 pt-2">
+          <div />
+          <div className="flex items-center gap-2">
+            {step > 0 && <button onClick={() => setStep(step - 1)} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 transition">上一步</button>}
+            <button onClick={handleNext} disabled={!canNext} className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-medium transition">
+              {step < 2 ? '下一步 →' : '✅ 完成'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

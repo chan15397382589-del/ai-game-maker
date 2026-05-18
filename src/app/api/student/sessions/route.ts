@@ -160,7 +160,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
-    const { id, title, html_code } = await req.json();
+    const { id, title, html_code, reflection } = await req.json();
 
     if (!id) {
       return NextResponse.json({ error: "缺少对话 ID" }, { status: 400 });
@@ -169,6 +169,7 @@ export async function PATCH(req: NextRequest) {
     const updates: Record<string, any> = { updated_at: new Date().toISOString() };
     if (title !== undefined) updates.title = title;
     if (html_code !== undefined) updates.html_code = html_code;
+    if (reflection !== undefined) updates.reflection = reflection;
 
     const { data, error } = await supabaseAdmin
       .from("conversations")

@@ -639,9 +639,6 @@ function StudentsManagement() {
               <button onClick={() => setShowAdd(true)} className="bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-3 py-2 rounded-lg transition flex items-center gap-1">
                 ➕ 新增学生
               </button>
-              <button onClick={handleExport} className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm font-medium px-3 py-2 rounded-lg transition flex items-center gap-1">
-                📋 导出表格
-              </button>
               <button onClick={handleResetAllPasswords} disabled={resettingPwd || students.length === 0}
                 className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-2 rounded-lg transition flex items-center gap-1 disabled:opacity-50">
                 {resettingPwd ? "重置中..." : "🔑 重置密码"}
@@ -891,6 +888,8 @@ function MessagesAudit() {
   // 代码查看弹窗
   const [codeModal, setCodeModal] = useState<{ open: boolean; code: string; time: string }>({ open: false, code: "", time: "" });
   const [exporting, setExporting] = useState(false);
+  const [reflections, setReflections] = useState<any[]>([]);
+  const [loadingReflections, setLoadingReflections] = useState(false);
 
   useEffect(() => {
     const loadStudents = async () => {
@@ -908,21 +907,40 @@ function MessagesAudit() {
     setSelectedStudent(userId);
     setSelectedSession(null);
     setMessages([]);
+    setReflections([]);
     if (!userId) { setSessions([]); return; }
     setLoading(true);
+    setLoadingReflections(true);
     try {
       const token = await getAuthToken();
       const res = await fetch(`/api/admin/sessions?user_id=${encodeURIComponent(userId)}`, { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setSessions(await res.json() || []);
     } catch (err) { setSessions([]); }
     finally { setLoading(false); }
+    // 同时获取该学生的反思数据
+    try {
+      const token = await getAuthToken();
+      const convRes = await fetch(`/api/admin/conversations?user_id=${encodeURIComponent(userId)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (convRes.ok) {
+        const allConvs = await convRes.json();
+        setReflections(allConvs.filter((c: any) => c.reflection));
+      }
+    } catch {}
+    setLoadingReflections(false);
   };
 
   const handleSelectSession = async (session: any) => {
-    setSelectedSession(session);
     setLoading(true);
     try {
       const token = await getAuthToken();
+      // 同时获取对话的 reflection 数据
+      const convRes = await fetch(`/api/admin/conversations?id=${encodeURIComponent(session.session_id)}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (convRes.ok) {
+        const convData = await convRes.json();
+        session = { ...session, reflection: convData?.reflection || null };
+      }
+      setSelectedSession(session);
+
       const res = await fetch(`/api/admin/messages?user_id=${encodeURIComponent(selectedStudent)}`, { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         const allMessages = await res.json();
@@ -984,25 +1002,51 @@ function MessagesAudit() {
 
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) { alert("导出失败"); return; }
-      const data = await res.json();
+      const students = await res.json();
 
-      const rows = data.map((row: any, idx: number) => ({
-        "序号": idx + 1,
-        "学生姓名": row.student_name,
-        "学号": row.student_id,
-        "年级": row.grade ? `${row.grade}年级` : "",
-        "班级": row.class_num ? `${row.class_num}班` : "",
-        "角色": row.role,
-        "对话内容": row.content,
-        "时间": new Date(row.created_at).toLocaleString("zh-CN"),
-      }));
+      // 计算最大消息轮数（每条消息一个列对）
+      let maxTurns = 0;
+      students.forEach((s: any) => {
+        if (s.turns.length > maxTurns) maxTurns = s.turns.length;
+      });
 
-      const ws = XLSX.utils.json_to_sheet(rows);
+      // 构建表头：基本信息 + 每条消息一列（角色+内容）
+      const headers: string[] = ["时间", "年级", "班级", "学生姓名", "学号"];
+      for (let i = 0; i < maxTurns; i++) {
+        headers.push(`第${i + 1}轮`);
+      }
+
+      // 构建数据行（每个学生一行）
+      const rows = students.map((s: any) => {
+        const row: any = {
+          "时间": s.first_time,
+          "年级": s.grade ? `${s.grade}年级` : "",
+          "班级": s.class_num ? `${s.class_num}班` : "",
+          "学生姓名": s.student_name,
+          "学号": s.student_id,
+        };
+        // 填充每条消息
+        for (let i = 0; i < maxTurns; i++) {
+          const turn = s.turns[i];
+          row[`第${i + 1}轮`] = turn ? `[${turn.role}] ${turn.content}` : "";
+        }
+        return row;
+      });
+
+      const headerRow = headers;
+      const dataRows = rows.map((r: any) => headers.map((h) => r[h] || ""));
+
+      const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
+
       // 设置列宽
-      ws["!cols"] = [
-        { wch: 6 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 8 },
-        { wch: 8 }, { wch: 50 }, { wch: 20 },
-      ];
+      const colWidths = headers.map((h) => {
+        if (h === "学生姓名") return { wch: 10 };
+        if (h === "学号") return { wch: 12 };
+        if (h.includes("第") && h.includes("轮")) return { wch: 35 };
+        return { wch: 10 };
+      });
+      ws["!cols"] = colWidths;
+
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "对话记录");
       const filename = allStudents
@@ -1037,17 +1081,48 @@ function MessagesAudit() {
           disabled={exporting}
           className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
         >
-          {exporting ? "导出中..." : "📊 导出全部为 Excel"}
+          {exporting ? "导出中..." : "📊 导出全部对话"}
         </button>
-        {selectedStudent && (
-          <button
-            onClick={() => exportToExcel(false)}
-            disabled={exporting}
-            className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
-          >
-            {exporting ? "导出中..." : `📊 导出 ${studentName || "此学生"} 的对话`}
-          </button>
-        )}
+        <button
+          onClick={async () => {
+            setExporting(true);
+            try {
+              const token = await getAuthToken();
+              if (!token) return;
+              const res = await fetch("/api/admin/conversations?all=1", { headers: { Authorization: `Bearer ${token}` } });
+              if (!res.ok) { alert("导出失败"); return; }
+              const data = await res.json();
+              const rows = data.map((c: any) => {
+                let ref: any = {};
+                try { ref = typeof c.reflection === "string" ? JSON.parse(c.reflection) : c.reflection; } catch {}
+                return {
+                  "学生姓名": c.student_name,
+                  "学号": c.student_id,
+                  "年级": c.grade ? `${c.grade}年级` : "",
+                  "班级": c.class_num ? `${c.class_num}班` : "",
+                  "对话标题": c.title,
+                  "卡片1-说说你的游戏": ref.card1 || "",
+                  "卡片2-最得意的设计": ref.card2 || "",
+                  "卡片3-下次想加什么": ref.card3 || "",
+                  "更新时间": new Date(c.updated_at).toLocaleString("zh-CN"),
+                };
+              });
+              const ws = XLSX.utils.json_to_sheet(rows);
+              ws["!cols"] = [
+                { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 8 },
+                { wch: 16 }, { wch: 45 }, { wch: 45 }, { wch: 45 }, { wch: 20 },
+              ];
+              const wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, ws, "全部反馈");
+              XLSX.writeFile(wb, `全部学生反馈_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            } catch { alert("导出失败"); }
+            finally { setExporting(false); }
+          }}
+          disabled={exporting}
+          className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50"
+        >
+          {exporting ? "导出中..." : "📊 导出全部反馈"}
+        </button>
       </div>
 
       {selectedStudent && (
@@ -1072,12 +1147,6 @@ function MessagesAudit() {
             )}
           </div>
           <div className="flex-1 bg-gray-50 rounded-2xl p-4 max-h-[500px] overflow-y-auto min-h-[200px] relative">
-            {messages.length > 0 && (
-              <button onClick={exportConversation}
-                className="absolute top-2 right-2 bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition z-10">
-                📥 导出此对话(TXT)
-              </button>
-            )}
             {loading ? <div className="flex justify-center py-8"><span className="animate-pulse text-gray-400">加载中...</span></div> :
             !selectedSession ? <div className="flex flex-col items-center justify-center py-8 text-gray-400"><p className="text-4xl mb-2">💬</p><p>请在左侧选择对话</p></div> :
             messages.length === 0 ? <div className="flex flex-col items-center justify-center py-8 text-gray-400"><p className="text-4xl mb-2">💬</p><p>暂无消息</p></div> : (
@@ -1085,6 +1154,11 @@ function MessagesAudit() {
                 <div className="text-xs text-gray-400 text-center pb-2 border-b">
                   📝 {selectedSession.first_user_message || "对话"} — 共 {messages.length} 条消息
                 </div>
+
+                {/* 反思数据 */}
+                {selectedSession.reflection && (
+                  <ReflectionCard reflectionJson={selectedSession.reflection} />
+                )}
                 {messages.map((msg, i) => {
                   const hasCode = msg.role === "assistant" && extractCode(msg.content);
                   const displayContent = msg.content.replace(/```html[\s\S]*?```/g, "").replace(/```[\s\S]*?```/g, "").trim() || msg.content;
@@ -1110,6 +1184,56 @@ function MessagesAudit() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* 学生反馈列表 */}
+      {selectedStudent && (
+        <div className="mt-6">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-bold text-gray-800">📝 学生反馈记录</h3>
+          </div>
+          {loadingReflections ? (
+            <p className="text-sm text-gray-400 text-center py-4">加载中...</p>
+          ) : reflections.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">该学生暂无反馈记录</p>
+          ) : (
+            <div className="space-y-3">
+              {reflections.map((conv: any) => {
+                let refData: any = null;
+                try { refData = typeof conv.reflection === "string" ? JSON.parse(conv.reflection) : conv.reflection; } catch {}
+                if (!refData) return null;
+                return (
+                  <div key={conv.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-medium text-gray-700">📝 {conv.title}</span>
+                      <span className="text-xs text-gray-400">{new Date(conv.updated_at).toLocaleString("zh-CN")}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 text-xs">
+                      {refData.card1 && (
+                        <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
+                          <p className="text-gray-400 mb-1">📷 我的游戏</p>
+                          <p className="text-gray-700">{refData.card1}</p>
+                        </div>
+                      )}
+                      {refData.card2 && (
+                        <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
+                          <p className="text-gray-400 mb-1">⭐ 最骄傲</p>
+                          <p className="text-gray-700">{refData.card2}</p>
+                        </div>
+                      )}
+                      {refData.card3 && (
+                        <div className="bg-amber-50 rounded-lg p-2.5 border border-amber-100">
+                          <p className="text-gray-400 mb-1">🚀 下次想</p>
+                          <p className="text-gray-700">{refData.card3}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -1287,9 +1411,50 @@ function ProjectsReview() {
               <iframe srcDoc={selectedProject.html_code} title={selectedProject.game_title}
                 className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts" />
             </div>
+
+            {/* 反思数据 */}
+            {selectedProject.reflection && (
+              <ReflectionCard reflectionJson={selectedProject.reflection} />
+            )}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+// ============================================================
+// 反思卡片小组件（P3-9）
+// ============================================================
+function ReflectionCard({ reflectionJson }: { reflectionJson: string }) {
+  try {
+    const data = JSON.parse(reflectionJson);
+    if (!data.card1 && !data.card2 && !data.card3) return null;
+
+    return (
+      <div className="mt-3 p-3 bg-amber-50 rounded-xl border border-amber-200 space-y-2">
+        <p className="text-xs font-bold text-amber-700">🎉 学生反思</p>
+        {data.card1 && (
+          <div className="text-xs bg-white p-2 rounded-lg border border-amber-100">
+            <span className="text-gray-400">📷 我的游戏：</span>
+            <span className="text-gray-700 ml-1">{data.card1}</span>
+          </div>
+        )}
+        {data.card2 && (
+          <div className="text-xs bg-white p-2 rounded-lg border border-amber-100">
+            <span className="text-gray-400">⭐ 最骄傲：</span>
+            <span className="text-gray-700 ml-1">{data.card2}</span>
+          </div>
+        )}
+        {data.card3 && (
+          <div className="text-xs bg-white p-2 rounded-lg border border-amber-100">
+            <span className="text-gray-400">🚀 下次想：</span>
+            <span className="text-gray-700 ml-1">{data.card3}</span>
+          </div>
+        )}
+      </div>
+    );
+  } catch {
+    return null;
+  }
 }

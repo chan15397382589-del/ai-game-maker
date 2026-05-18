@@ -23,20 +23,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "认证失败" }, { status: 401 });
     }
 
-    const { user_id, game_title, html_code } = await req.json();
+    const { user_id, game_title, html_code, reflection } = await req.json();
 
     if (user_id !== user.id) {
       return NextResponse.json({ error: "无权操作此用户的数据" }, { status: 403 });
     }
 
+    const insertData: Record<string, any> = { user_id, game_title, html_code, is_published: false };
+    if (reflection) insertData.reflection = reflection;
+
     const { data, error } = await db
       .from("projects")
-      .insert({
-        user_id,
-        game_title,
-        html_code,
-        is_published: false,
-      })
+      .insert(insertData)
       .select()
       .single();
 
@@ -102,6 +100,50 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data || []);
   } catch (error: any) {
     console.error("[projects] 异常:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// 更新游戏作品（用于保存反思数据等）
+export async function PATCH(req: NextRequest) {
+  try {
+    const db = getDB();
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
+
+    if (!token) {
+      return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+
+    const { data: { user }, error: authError } = await db.auth.getUser(token);
+    if (authError || !user) {
+      return NextResponse.json({ error: "认证失败" }, { status: 401 });
+    }
+
+    const { id, reflection, game_title } = await req.json();
+    if (!id) {
+      return NextResponse.json({ error: "缺少作品 ID" }, { status: 400 });
+    }
+
+    const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (reflection !== undefined) updates.reflection = reflection;
+    if (game_title !== undefined) updates.game_title = game_title;
+
+    const { data, error } = await db
+      .from("projects")
+      .update(updates)
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[projects] PATCH 失败:", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json(data);
+  } catch (error: any) {
+    console.error("[projects] PATCH 异常:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
