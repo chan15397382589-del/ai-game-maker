@@ -4,13 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { useRouter } from "next/navigation";
 
-const GRADES = [
-  { value: 3, label: "三年级" },
-  { value: 4, label: "四年级" },
-  { value: 5, label: "五年级" },
-  { value: 6, label: "六年级" },
-] as const;
-
 interface SharedItem {
   id: number;
   user_id: string;
@@ -193,8 +186,8 @@ export default function ReviewsPage() {
         </button>
       </div>
 
-      {/* 作品列表 */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+      {/* 作品列表 — 网格布局，一行4个 */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-4">
           {items.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center py-20">
@@ -204,50 +197,39 @@ export default function ReviewsPage() {
               </div>
             </div>
           ) : (
-            items.map((item) => (
-              <div key={item.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-md transition"
-                onClick={() => router.push(`/student/reviews/${item.id}`)}>
-                <div className="flex gap-4 p-4">
-                  {/* 左侧：游戏缩略预览 */}
-                  <div className="w-32 h-32 flex-shrink-0 rounded-xl overflow-hidden border border-gray-200 bg-gray-100 relative">
+            <div className="grid grid-cols-4 gap-3">
+              {items.map((item) => (
+                <div key={item.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-md transition group"
+                  onClick={() => router.push(`/student/reviews/${item.id}`)}>
+                  {/* 游戏缩略图 */}
+                  <div className="aspect-square bg-gray-100 relative overflow-hidden">
                     <iframe srcDoc={item.html_code} title={item.game_title}
                       className="w-full h-full pointer-events-none"
                       sandbox="allow-scripts" scrolling="no" />
                     <div className="absolute inset-0" />
+                    {item.is_mine && (
+                      <button onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
+                        className="absolute top-1 right-1 bg-white/80 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg p-1 text-xs transition opacity-0 group-hover:opacity-100"
+                        title="撤回分享">🗑️</button>
+                    )}
                   </div>
-
-                  {/* 右侧：信息 */}
-                  <div className="flex-1 min-w-0 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-start justify-between">
-                        <h3 className="font-bold text-gray-800 truncate">🎮 {item.game_title}</h3>
-                        {item.is_mine && (
-                          <button onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                            className="text-gray-300 hover:text-red-500 transition p-1 text-sm flex-shrink-0" title="撤回分享">🗑️</button>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {item.author_name}
-                        {item.author_grade && ` · ${GRADES.find(g => g.value === item.author_grade)?.label || item.author_grade + "年级"}`}
-                        {item.author_class_num && `${item.author_class_num}班`}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-4 mt-2">
+                  {/* 信息 */}
+                  <div className="p-3">
+                    <h3 className="text-sm font-bold text-gray-800 truncate">{item.game_title}</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.author_name}</p>
+                    <div className="flex items-center gap-3 mt-2">
                       <button
                         onClick={(e) => { e.stopPropagation(); handleLike(item); }}
-                        className={`flex items-center gap-1 text-sm transition ${item.liked_by_me ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}
+                        className={`flex items-center gap-0.5 text-xs transition ${item.liked_by_me ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}
                       >
                         {item.liked_by_me ? "❤️" : "🤍"} {item.like_count || ""}
                       </button>
-                      <span className="flex items-center gap-1 text-sm text-gray-400">💬 {item.comment_count || ""}</span>
-                      <span className="text-xs text-gray-300 ml-auto">
-                        {new Date(item.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                      </span>
+                      <span className="flex items-center gap-0.5 text-xs text-gray-400">💬 {item.comment_count || ""}</span>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))
+              ))}
+            </div>
           )}
         </div>
 
