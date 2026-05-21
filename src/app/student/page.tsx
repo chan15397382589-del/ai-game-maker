@@ -302,7 +302,14 @@ export default function StudentPortal() {
               const { done, data } = await res.json();
               setClassificationDone(done);
               if (done && data?.srl_group) setSrlGroup(data.srl_group);
-              if (!done) setShowClassification(true);
+              if (!done) {
+                // 没有对话则先自动创建一个
+                if (!currentConvId) {
+                  const newConv = await createConversationInternal(token);
+                  if (newConv) setCurrentConvId(newConv.id);
+                }
+                setShowClassification(true);
+              }
             }
           } catch {}
         }
