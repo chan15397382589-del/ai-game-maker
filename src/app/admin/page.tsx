@@ -704,7 +704,6 @@ function StudentsManagement() {
                   </th>
                   <th className="py-3 px-4 font-semibold text-gray-700">姓名</th>
                   <th className="py-3 px-4 font-semibold text-gray-700">学号</th>
-                  <th className="py-3 px-4 font-semibold text-gray-700">性别</th>
                   <th className="py-3 px-4 font-semibold text-gray-700">年级</th>
                   <th className="py-3 px-4 font-semibold text-gray-700">班级</th>
                   <th className="py-3 px-4 font-semibold text-gray-700">创建时间</th>
@@ -720,7 +719,6 @@ function StudentsManagement() {
                     </td>
                     <td className="py-2.5 px-4 font-medium">{s.name}</td>
                     <td className="py-2.5 px-4 text-gray-600 font-mono text-xs">{s.student_id}</td>
-                    <td className="py-2.5 px-4 text-gray-500">{s.gender || "-"}</td>
                     <td className="py-2.5 px-4 text-gray-500">{gradeLabel(s.grade)}</td>
                     <td className="py-2.5 px-4 text-gray-500">{s.class_num ? `${s.class_num}班` : "-"}</td>
                     <td className="py-2.5 px-4 text-gray-400 text-xs">
@@ -1616,7 +1614,44 @@ function ClassificationsView() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-gray-800 mb-4">📊 学生分类评估</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold text-gray-800">📊 学生分类评估</h2>
+        <button
+          onClick={() => {
+            const rows = data.map((d) => ({
+              "学生姓名": d.student_name,
+              "学号": d.student_id,
+              "年级": d.grade ? `${d.grade}年级` : "",
+              "班级": d.class_num ? `${d.class_num}班` : "",
+              "Q1答案": Array.isArray(d.q1_answers) ? d.q1_answers.join("；") : d.q1_answers,
+              "Q1得分": d.q1_score,
+              "Q2答案": d.q2_answer || "",
+              "Q2得分": d.q2_score,
+              "Q3答案": d.q3_answer || "",
+              "Q3得分": d.q3_score,
+              "总分": d.total_score,
+              "分组": d.srl_group === "high_srl" ? "高SRL" : "低SRL",
+              "耗时(秒)": d.total_time,
+              "提交时间": d.created_at ? new Date(d.created_at).toLocaleString("zh-CN") : "",
+            }));
+            const ws = XLSX.utils.json_to_sheet(rows);
+            ws["!cols"] = [
+              { wch: 10 }, { wch: 12 }, { wch: 6 }, { wch: 6 },
+              { wch: 40 }, { wch: 6 },
+              { wch: 40 }, { wch: 6 },
+              { wch: 40 }, { wch: 6 },
+              { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 16 },
+            ];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "学生分类");
+            XLSX.writeFile(wb, `学生分类评估_${new Date().toISOString().slice(0, 10)}.xlsx`);
+          }}
+          disabled={data.length === 0}
+          className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+        >
+          📊 导出Excel
+        </button>
+      </div>
 
       {/* 统计卡片 */}
       <div className="grid grid-cols-4 gap-4 mb-6">
