@@ -374,7 +374,10 @@ function StudentsManagement() {
       });
       const result = await res.json();
       if (res.ok) {
-        alert(`导入完成！成功 ${result.success} 人，失败 ${result.failed} 人`);
+        const failedDetails = (result.details || []).filter((d: any) => d.status !== "成功").map((d: any) => `${d.name}(${d.student_id}): ${d.error || d.status}`).join("\n");
+        const msg = `导入完成！成功 ${result.success} 人，失败 ${result.failed} 人`;
+        if (failedDetails) alert(msg + "\n\n失败详情：\n" + failedDetails);
+        else alert(msg);
         setShowImportPreview(false);
         setPreviewData(null);
         fetchStudents();
@@ -402,17 +405,21 @@ function StudentsManagement() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           grade: addForm.grade,
-          class_num: addForm.class_num,
-          students: [{ name: addForm.name, student_id: addForm.student_id, gender: addForm.gender, password: addForm.password }],
+          students: [{ name: addForm.name, student_id: addForm.student_id, gender: addForm.gender, class_num: addForm.class_num, password: addForm.password }],
         }),
       });
       const result = await res.json();
       if (res.ok) {
-        alert("添加成功！");
-        setShowAdd(false);
-        setAddForm({ name: "", student_id: "", gender: "男", grade: 3, class_num: 1, password: "vibe123" });
-        fetchStudents();
-        fetchCounts();
+        const detail = result.details?.[0];
+        if (detail?.status === "成功") {
+          alert("添加成功！");
+          setShowAdd(false);
+          setAddForm({ name: "", student_id: "", gender: "男", grade: 3, class_num: 1, password: "vibe123" });
+          fetchStudents();
+          fetchCounts();
+        } else {
+          alert("添加失败：" + (detail?.error || detail?.status || "未知错误"));
+        }
       } else {
         alert("添加失败：" + (result.error || "未知错误"));
       }
