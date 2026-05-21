@@ -267,6 +267,13 @@ export default function StudentPortal() {
     htmlCode: string;
   }[]>([]);
 
+  // 前进栈（撤销后可以重做）
+  const [forwardStack, setForwardStack] = useState<{
+    messages: { role: string; content: string }[];
+    rawMessages: { role: string; content: string }[];
+    htmlCode: string;
+  }[]>([]);
+
   // 推导当前游戏创作阶段
   const processStep: "ideation" | "creation" | "done" =
     reflectionSubmitted ? "done" : htmlCode ? "creation" : "ideation";
@@ -422,6 +429,7 @@ export default function StudentPortal() {
 
         setCurrentConvId(convId);
         setHistoryStack([]);
+        setForwardStack([]);
 
         // 从对话文档恢复游戏代码
         const code = convData?.html_code || "";
@@ -472,6 +480,7 @@ export default function StudentPortal() {
     setGameTitle("");
     setGameStarted(false);
     setHistoryStack([]);
+    setForwardStack([]);
 
     // 首次创建对话时，先做分类评估
     if (!classificationDone) {
@@ -769,6 +778,8 @@ export default function StudentPortal() {
         htmlCode,
       },
     ]);
+    // 发送新消息后清空前进栈
+    setForwardStack([]);
 
     const userMessage = { role: "user", content: text };
     const newMessages = [...messages, userMessage];
@@ -902,10 +913,33 @@ export default function StudentPortal() {
   const handleUndo = () => {
     if (historyStack.length === 0) return;
     const prev = historyStack[historyStack.length - 1];
+    // 保存当前状态到前进栈
+    setForwardStack((prev) => [...prev, {
+      messages: [...messages],
+      rawMessages: [...rawMessagesRef.current],
+      htmlCode,
+    }]);
     setHistoryStack((prev) => prev.slice(0, -1));
     setMessages(prev.messages);
     rawMessagesRef.current = prev.rawMessages;
     setHtmlCode(prev.htmlCode);
+    setGameStarted(false);
+  };
+
+  // 回到下一步
+  const handleRedo = () => {
+    if (forwardStack.length === 0) return;
+    const next = forwardStack[forwardStack.length - 1];
+    // 保存当前状态到历史栈
+    setHistoryStack((prev) => [...prev, {
+      messages: [...messages],
+      rawMessages: [...rawMessagesRef.current],
+      htmlCode,
+    }]);
+    setForwardStack((prev) => prev.slice(0, -1));
+    setMessages(next.messages);
+    rawMessagesRef.current = next.rawMessages;
+    setHtmlCode(next.htmlCode);
     setGameStarted(false);
   };
 
@@ -1134,7 +1168,16 @@ export default function StudentPortal() {
               className="text-sm bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1 rounded-lg transition flex items-center gap-1"
               title="返回上一步"
             >
-              ↩ 回到上一步
+              ↩ 上一步
+            </button>
+          )}
+          {forwardStack.length > 0 && (
+            <button
+              onClick={handleRedo}
+              className="text-sm bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1 rounded-lg transition flex items-center gap-1"
+              title="回到下一步"
+            >
+              下一步 ↪
             </button>
           )}
           <button
