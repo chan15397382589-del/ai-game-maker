@@ -247,6 +247,9 @@ export default function StudentPortal() {
   const [reflectionSubmitted, setReflectionSubmitted] = useState(false);
   const [processHint, setProcessHint] = useState<string | null>(null);
 
+  // 历史游戏快照
+  const [gameHistory, setGameHistory] = useState<{ id: number; html_code: string; conversation_id: string; created_at: string }[]>([]);
+
   // 语音输入状态
   const [isListening, setIsListening] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
@@ -292,6 +295,7 @@ export default function StudentPortal() {
         const token = await getToken();
         if (token) {
           await fetchConversations(token);
+          await fetchGameHistory(token);
           // 检查是否已完成分类评估
           try {
             const res = await fetch("/api/student/classification", {
@@ -370,6 +374,22 @@ export default function StudentPortal() {
       console.error("获取对话列表失败:", err);
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  // 获取历史游戏快照
+  const fetchGameHistory = async (token?: string) => {
+    const t = token || await getToken();
+    if (!t) return;
+    try {
+      const res = await fetch("/api/student/game-snapshots", {
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      if (res.ok) {
+        setGameHistory(await res.json());
+      }
+    } catch (err) {
+      console.error("获取游戏历史失败:", err);
     }
   };
 
@@ -656,6 +676,7 @@ export default function StudentPortal() {
       // 自动保存游戏代码到对话文档
       if (convId) {
         updateConversationSilent(convId, { html_code: code });
+        fetchGameHistory();
       }
     } else {
       // 如果已有游戏但 AI 没输出新代码，静默自动重试（最多1次）
@@ -703,7 +724,7 @@ export default function StudentPortal() {
             if (c) {
               setHtmlCode(c);
               setGameStarted(false);
-              if (convId) updateConversationSilent(convId, { html_code: c });
+              if (convId) { updateConversationSilent(convId, { html_code: c }); fetchGameHistory(); }
             }
           } catch {}
         }, 500);
@@ -1033,6 +1054,42 @@ export default function StudentPortal() {
               💡 达到上限，可删除旧对话后新建
             </p>
           )}
+        </div>
+
+        {/* 分隔线 */}
+        <div className="border-t border-gray-200 mx-2" />
+
+        {/* 历史游戏 */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="px-3 py-2 text-xs font-medium text-gray-500">
+            🎮 历史游戏 <span className="text-gray-300">({gameHistory.length})</span>
+          </div>
+          <div className="flex-1 overflow-y-auto px-2 pb-2">
+            {gameHistory.length === 0 ? (
+              <p className="text-[10px] text-gray-400 text-center py-2">还没有生成游戏</p>
+            ) : (
+              <div className="space-y-0.5">
+                {gameHistory.map((snap, idx) => (
+                  <div
+                    key={snap.id}
+                    onClick={() => {
+                      setHtmlCode(snap.html_code);
+                      setGameStarted(false);
+                      setViewMode("game");
+                    }}
+                    className="px-2 py-1.5 rounded-lg cursor-pointer hover:bg-gray-100 text-gray-600 transition"
+                  >
+                    <p className="text-xs font-medium truncate">
+                      🎮 版本 {gameHistory.length - idx}
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {new Date(snap.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
