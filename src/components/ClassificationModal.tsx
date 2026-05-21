@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 
-// 接苹果 - 故意有3个缺陷：苹果太快、篮子太小、无分数反馈
 const APPLE_GAME = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>接苹果</title><style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -37,8 +36,8 @@ function loop(){
 const QUESTIONS = [
   {
     id: 1,
-    title: "第 1 题",
-    subtitle: "你玩了这个接苹果游戏。你觉得这个游戏有哪些地方可以变得更好？（可以选多个）",
+    title: "第 1 题（多选题）",
+    subtitle: "你玩了这个接苹果游戏。你觉得这个游戏有哪些地方可以变得更好？",
     multi: true,
     options: [
       { label: "苹果掉得太快了，还没反应过来就掉下去了，不好接", score: 1, defect: "speed" },
@@ -50,7 +49,7 @@ const QUESTIONS = [
   },
   {
     id: 2,
-    title: "第 2 题",
+    title: "第 2 题（单选题）",
     subtitle: "如果只能改一个地方，你觉得最应该改哪里？",
     multi: false,
     options: [
@@ -64,7 +63,7 @@ const QUESTIONS = [
   },
   {
     id: 3,
-    title: "第 3 题",
+    title: "第 3 题（单选题）",
     subtitle: "如果把苹果掉下来的速度调慢，你最同意下面哪句话？",
     multi: false,
     options: [
@@ -89,7 +88,6 @@ async function getToken(): Promise<string> {
   } catch { return ""; }
 }
 
-// 随机打乱数组
 function shuffle(arr: any[]): any[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -100,16 +98,21 @@ function shuffle(arr: any[]): any[] {
 }
 
 export default function ClassificationModal({ convId, onComplete }: Props) {
-  const GAME_TIME = 30; // 30秒试玩
+  const GAME_TIME = 20;
+  const THINK_TIME = 10;
 
   const [gameStarted, setGameStarted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(GAME_TIME);
   const [phase, setPhase] = useState<"game" | "questions" | "done">("game");
+  const [currentQ, setCurrentQ] = useState(0);
+  const [thinkLeft, setThinkLeft] = useState(THINK_TIME);
+  const [canAnswer, setCanAnswer] = useState(false);
   const [answers, setAnswers] = useState<Record<number, string[]>>({ 1: [], 2: [], 3: [] });
   const [saving, setSaving] = useState(false);
   const [shuffledQuestions] = useState(() => QUESTIONS.map((q) => ({ ...q, options: shuffle(q.options) })));
   const [startTime] = useState(() => Date.now());
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const thinkRef = useRef<NodeJS.Timeout | null>(null);
 
   // 游戏倒计时
   useEffect(() => {
@@ -119,10 +122,32 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
     }
     if (timeLeft === 0 && phase === "game") {
       setPhase("questions");
+      setCurrentQ(0);
+      setThinkLeft(THINK_TIME);
+      setCanAnswer(false);
     }
   }, [gameStarted, timeLeft, phase]);
 
+  // 思考倒计时（每题进入时）
+  useEffect(() => {
+    if (phase === "questions" && thinkLeft > 0 && !canAnswer) {
+      thinkRef.current = setTimeout(() => setThinkLeft((t) => t - 1), 1000);
+      return () => { if (thinkRef.current) clearTimeout(thinkRef.current); };
+    }
+    if (thinkLeft === 0 && !canAnswer) {
+      setCanAnswer(true);
+    }
+  }, [phase, thinkLeft, canAnswer, currentQ]); // currentQ triggers reset
+
+  // 切换题目时重置思考倒计时
+  const goToQuestion = (idx: number) => {
+    setCurrentQ(idx);
+    setThinkLeft(THINK_TIME);
+    setCanAnswer(false);
+  };
+
   const toggleOption = (qId: number, label: string, multi: boolean) => {
+    if (!canAnswer) return;
     setAnswers((prev) => {
       const current = prev[qId] || [];
       if (multi) {
@@ -133,16 +158,18 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
     });
   };
 
+  const q = shuffledQuestions[currentQ];
+  const isLastQ = currentQ === shuffledQuestions.length - 1;
+  const hasAnswered = (answers[q?.id] || []).length > 0;
+
   const allAnswered = answers[1].length > 0 && answers[2].length > 0 && answers[3].length > 0;
 
-  // 计算得分
   const calcScores = useCallback(() => {
     let q1 = 0, q2 = 0, q3 = 0;
     const q1Opts = shuffledQuestions[0].options;
     const q2Opts = shuffledQuestions[1].options;
     const q3Opts = shuffledQuestions[2].options;
 
-    // Q1: 多选，选C(反馈)=2分，选A或B但未选C=1分
     const q1Answers = answers[1] || [];
     const hasFeedback = q1Answers.some((a) => q1Opts.find((o) => o.label === a)?.defect === "feedback");
     const hasSurface = q1Answers.some((a) => {
@@ -152,12 +179,10 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
     if (hasFeedback) q1 = 2;
     else if (hasSurface) q1 = 1;
 
-    // Q2: 单选，选B/C/E(系统层)=2，选A/D(表面层)=1
     const q2Ans = answers[2]?.[0];
     const q2Opt = q2Opts.find((o) => o.label === q2Ans);
     if (q2Opt) q2 = q2Opt.score;
 
-    // Q3: 单选
     const q3Ans = answers[3]?.[0];
     const q3Opt = q3Opts.find((o) => o.label === q3Ans);
     if (q3Opt) q3 = q3Opt.score;
@@ -202,22 +227,28 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-2">
-      <div className="bg-white rounded-3xl shadow-2xl w-full h-full max-h-full flex flex-col overflow-hidden">
+      <div className="bg-white rounded-3xl shadow-2xl w-[70%] h-[80%] flex flex-col overflow-hidden">
         {/* 顶栏 */}
         <div className="bg-indigo-600 text-white px-6 py-3 flex items-center gap-4 flex-shrink-0">
           <span className="text-2xl">🎮</span>
           <h2 className="text-lg font-bold">
             {phase === "game" && "先来玩一玩这个游戏吧！"}
-            {phase === "questions" && "回答几个小问题～"}
+            {phase === "questions" && `第 ${currentQ + 1} / 3 题`}
             {phase === "done" && "完成！"}
           </h2>
           {phase === "game" && (
-            <span className={`ml-auto text-xl font-bold ${timeLeft <= 10 ? "text-yellow-300 animate-pulse" : ""}`}>
+            <span className={`ml-auto text-xl font-bold ${timeLeft <= 5 ? "text-yellow-300 animate-pulse" : ""}`}>
               ⏱ {timeLeft}秒
             </span>
           )}
+          {phase === "questions" && !canAnswer && (
+            <span className="ml-auto text-yellow-300 text-sm animate-pulse">⏳ 请认真思考 {thinkLeft}秒</span>
+          )}
+          {/* 提示条 */}
           {phase === "questions" && (
-            <span className="ml-auto text-sm text-indigo-200">问题完成</span>
+            <span className="ml-auto text-xs text-indigo-200 bg-indigo-500 px-3 py-1 rounded-full">
+              📝 请认真回答问题
+            </span>
           )}
         </div>
 
@@ -233,7 +264,7 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
                 onClick={() => setGameStarted(true)}
               >
                 <div className="text-center">
-                  <p className="text-8xl mb-4 animate-bounce">🍎</p>
+                  <p className="text-7xl mb-4 animate-bounce">🍎</p>
                   <p className="text-2xl font-bold text-gray-700">点击开始游戏</p>
                   <p className="text-lg text-gray-500 mt-2">用 ← → 方向键移动篮子接苹果</p>
                 </div>
@@ -242,7 +273,7 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
           </div>
 
           {/* 右侧：题目 */}
-          <div className="w-[45%] flex-shrink-0 flex flex-col overflow-y-auto p-6 space-y-6 bg-gray-50">
+          <div className="w-[45%] flex-shrink-0 flex flex-col overflow-y-auto p-6 bg-gray-50">
             {phase === "game" && (
               <div className="flex items-center justify-center h-full text-center">
                 <div>
@@ -253,52 +284,80 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
               </div>
             )}
 
-            {phase === "questions" && (
-              <>
-                {shuffledQuestions.map((q, qi) => (
-                  <div key={q.id} className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+            {phase === "questions" && q && (
+              <div className="flex flex-col h-full">
+                {/* 题目进度 */}
+                <div className="flex gap-2 mb-4">
+                  {shuffledQuestions.map((_, i) => (
+                    <div key={i} className={`flex-1 h-2 rounded-full transition ${i < currentQ ? "bg-green-400" : i === currentQ ? "bg-indigo-500" : "bg-gray-200"}`} />
+                  ))}
+                </div>
+
+                {/* 题目卡片 */}
+                <div className="flex-1 flex flex-col">
+                  <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex-1 flex flex-col">
                     <h3 className="text-lg font-bold text-gray-800 mb-1">{q.title}</h3>
-                    <p className={`text-sm mb-4 ${q.multi ? "text-indigo-600" : "text-amber-600"}`}>
-                      {q.subtitle}
-                      {q.multi ? <span className="ml-1 text-xs text-indigo-400">（可多选）</span> : <span className="ml-1 text-xs text-amber-500">（选一个）</span>}
-                    </p>
-                    <div className="space-y-2">
-                      {q.options.map((opt) => {
-                        const selected = (answers[q.id] || []).includes(opt.label);
-                        return (
-                          <button
-                            key={opt.label}
-                            onClick={() => toggleOption(q.id, opt.label, q.multi)}
-                            className={`w-full text-left p-4 rounded-xl border-2 transition ${
-                              selected
-                                ? "border-indigo-400 bg-indigo-50 text-indigo-700 shadow-sm"
-                                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700"
-                            }`}
-                          >
-                            <span className="text-base">{opt.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-3 text-right">
-                      <span className={`text-xs ${(answers[q.id] || []).length > 0 ? "text-green-500" : "text-gray-300"}`}>
-                        {(answers[q.id] || []).length > 0 ? "✓ 已作答" : "○ 待作答"}
+                    <p className="text-sm text-gray-500 mb-4">{q.subtitle}</p>
+
+                    {!canAnswer ? (
+                      <div className="flex-1 flex items-center justify-center">
+                        <div className="text-center">
+                          <p className="text-5xl mb-3 animate-pulse">🤔</p>
+                          <p className="text-2xl font-bold text-indigo-600">{thinkLeft}</p>
+                          <p className="text-sm text-gray-400 mt-1">秒后可以作答</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {q.options.map((opt) => {
+                          const selected = (answers[q.id] || []).includes(opt.label);
+                          return (
+                            <button
+                              key={opt.label}
+                              onClick={() => toggleOption(q.id, opt.label, q.multi)}
+                              className={`w-full text-left p-3 rounded-xl border-2 transition ${
+                                selected
+                                  ? "border-indigo-400 bg-indigo-50 text-indigo-700 shadow-sm"
+                                  : "border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700"
+                              }`}
+                            >
+                              <span className="text-sm">{opt.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* 已选提示 + 按钮 */}
+                    <div className="mt-4 flex items-center justify-between">
+                      <span className={`text-xs ${hasAnswered ? "text-green-500" : "text-gray-300"}`}>
+                        {hasAnswered ? "✓ 已作答" : "○ 请选择"}
                       </span>
+                      {canAnswer && (
+                        <div className="flex gap-2">
+                          {isLastQ ? (
+                            <button
+                              onClick={handleComplete}
+                              disabled={!allAnswered || saving}
+                              className="bg-green-500 hover:bg-green-600 disabled:bg-gray-200 disabled:text-gray-400 text-white px-6 py-2 rounded-xl text-sm font-medium transition"
+                            >
+                              {saving ? "提交中..." : "✅ 提交答案"}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => goToQuestion(currentQ + 1)}
+                              disabled={!hasAnswered}
+                              className="bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white px-6 py-2 rounded-xl text-sm font-medium transition"
+                            >
+                              下一题 →
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                ))}
-
-                <button
-                  onClick={handleComplete}
-                  disabled={!allAnswered || saving}
-                  className="w-full bg-green-500 hover:bg-green-600 disabled:bg-gray-200 disabled:text-gray-400 text-white py-4 rounded-2xl text-lg font-bold transition"
-                >
-                  {saving ? "提交中..." : "✅ 提交答案"}
-                </button>
-                {!allAnswered && (
-                  <p className="text-center text-sm text-gray-400">请回答全部 3 道题后再提交</p>
-                )}
-              </>
+                </div>
+              </div>
             )}
 
             {phase === "done" && (

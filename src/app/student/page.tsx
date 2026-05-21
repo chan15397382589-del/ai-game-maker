@@ -239,7 +239,6 @@ export default function StudentPortal() {
   // 对话文档管理
   const [currentConvId, setCurrentConvId] = useState<string>("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [showFiles, setShowFiles] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [loadingSession, setLoadingSession] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -471,7 +470,6 @@ export default function StudentPortal() {
       content: "你好！我是小智老师 🤖✨\n\n你想创作什么类型的游戏呢？\n\n1. 🎯 迷宫游戏\n2. 🐹 打地鼠\n3. 🍎 接东西游戏\n4. 🏃 跑酷游戏\n\n你也可以在下面输入自己的想法！",
     }];
     setConversations(prev => [newConv, ...prev]);
-    setShowFiles(false);
   };
 
   // 删除对话文档
@@ -635,6 +633,14 @@ export default function StudentPortal() {
       };
       return updated;
     });
+
+    // 检测反思阶段触发
+    if (assistantContent.includes("[REFLECTION_START]") && !reflectionSubmitted) {
+      setTimeout(() => {
+        setReflectionPhase(true);
+        setReflectionData({});
+      }, 1500);
+    }
 
     // 提取游戏代码
     const code = extractHtmlCode(assistantContent);
@@ -911,9 +917,11 @@ export default function StudentPortal() {
   // ============================================================
   return (
     <div className="flex h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
-      {/* 创作过程导航栏 */}
-      <div className="w-14 bg-white border-r border-gray-200 flex flex-col items-center py-4 gap-1 flex-shrink-0 relative">
-        {processSteps.map((s) => {
+      {/* 左侧导航栏 */}
+      <div className="w-44 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+        {/* 创作过程 */}
+        <div className="flex items-center justify-center gap-1 py-3 px-2">
+          {processSteps.map((s) => {
           const isActive = processStep === s.key;
           const isPast = processSteps.findIndex(p => p.key === processStep) > processSteps.findIndex(p => p.key === s.key);
           return (
@@ -946,9 +954,89 @@ export default function StudentPortal() {
             >知道了</button>
           </div>
         )}
+        </div>
+
+        {/* 分隔线 */}
+        <div className="border-t border-gray-200 mx-2" />
+
+        {/* 我的对话 */}
+        <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="px-3 py-2 text-xs font-medium text-gray-500 flex items-center justify-between">
+            <span>📂 我的对话</span>
+            <span className="text-gray-300">{conversations.length}/2</span>
+          </div>
+
+          {/* 新建对话按钮 */}
+          <div className="px-2 pb-2">
+            <button
+              onClick={startNewConversation}
+              disabled={conversations.length >= 2}
+              className={`w-full py-1.5 px-3 rounded-lg text-xs font-medium transition ${
+                conversations.length >= 2
+                  ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  : "bg-indigo-50 hover:bg-indigo-100 text-indigo-600"
+              }`}
+            >
+              {conversations.length >= 2 ? "已满（2个）" : "➕ 新建游戏"}
+            </button>
+            <p className="text-[10px] text-gray-400 text-center mt-1">想创建新游戏？点这里</p>
+          </div>
+
+          {/* 对话列表 */}
+          <div className="flex-1 overflow-y-auto px-2 pb-2">
+            {loadingHistory ? (
+              <p className="text-gray-400 text-center py-2 text-[10px]">加载中...</p>
+            ) : conversations.length === 0 ? (
+              <p className="text-gray-400 text-center py-2 text-[10px]">暂无对话</p>
+            ) : (
+              <div className="space-y-0.5">
+                {conversations.map((conv) => (
+                  <div
+                    key={conv.id}
+                    className={`flex items-center rounded-lg transition group ${
+                      currentConvId === conv.id
+                        ? "bg-indigo-100 text-indigo-700"
+                        : "hover:bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    <div
+                      onClick={() => {
+                        if (loadingSession || conv.id === currentConvId) return;
+                        loadConversation(conv.id, conv);
+                      }}
+                      className="flex-1 min-w-0 px-2 py-1.5 cursor-pointer"
+                    >
+                      <p className="text-xs font-medium truncate">
+                        {conv.has_game ? "🎮 " : "📝 "}{conv.title}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        {conv.message_count} 条 · {new Date(conv.updated_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}
+                      disabled={deletingId === conv.id}
+                      className="text-gray-300 hover:text-red-500 p-1 transition opacity-0 group-hover:opacity-100 flex-shrink-0"
+                      title="删除此对话"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 删除提示 */}
+          {conversations.length >= 2 && (
+            <p className="text-[10px] text-gray-300 text-center py-1 px-2">
+              💡 达到上限，可删除旧对话后新建
+            </p>
+          )}
+        </div>
       </div>
 
-      {/* 左侧：对话区 */}
+      {/* 对话区 */}
       <div className="flex flex-col flex-1 border-r border-gray-200 bg-white">
         <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-indigo-600 text-white">
           <span className="text-2xl">🎮</span>
@@ -1093,96 +1181,6 @@ export default function StudentPortal() {
           >
             ⬇️ 下载
           </button>
-        </div>
-
-        {/* 文件管理区域（折叠面板） */}
-        <div className="border-b border-gray-200">
-          <button
-            onClick={() => setShowFiles(!showFiles)}
-            className="flex items-center justify-between w-full px-4 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-sm text-gray-600"
-          >
-            <span className="font-medium">📂 我的对话（{conversations.length}/2）</span>
-            <span>{showFiles ? "▲ 收起" : "▼ 展开"}</span>
-          </button>
-
-          {showFiles && (
-            <div className="max-h-56 overflow-y-auto bg-white border-t border-gray-100 p-3 space-y-1.5 text-sm">
-              <button
-                onClick={startNewConversation}
-                disabled={conversations.length >= 2}
-                className={`w-full py-2 px-3 rounded-lg text-sm font-medium transition ${
-                  conversations.length >= 2
-                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                    : "bg-indigo-50 hover:bg-indigo-100 text-indigo-600"
-                }`}
-              >
-                {conversations.length >= 2 ? "已达到上限（2个）" : "➕ 新对话"}
-              </button>
-
-              {loadingHistory ? (
-                <p className="text-gray-400 text-center py-3 text-xs">加载中...</p>
-              ) : conversations.length === 0 ? (
-                <p className="text-gray-400 text-center py-3 text-xs">暂无历史对话</p>
-              ) : (
-                <div className="space-y-1">
-                  {conversations.map((conv) => (
-                    <div
-                      key={conv.id}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg transition ${
-                        currentConvId === conv.id
-                          ? "bg-indigo-100 text-indigo-700"
-                          : "hover:bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {/* 点击加载对话 */}
-                      <div
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => {
-                          if (loadingSession || conv.id === currentConvId) return;
-                          loadConversation(conv.id, conv);
-                        }}
-                      >
-                        <p className="text-sm font-medium truncate">
-                          📝 {conv.title}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {conv.message_count} 条消息
-                          {conv.has_game ? " 🎮" : ""}
-                          {" · "}
-                          {new Date(conv.updated_at).toLocaleString("zh-CN", {
-                            month: "2-digit",
-                            day: "2-digit",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </p>
-                      </div>
-
-                      {/* 右侧：当前标签 + 删除按钮 */}
-                      <div className="flex items-center gap-1 ml-2">
-                        {currentConvId === conv.id && (
-                          <span className="text-xs bg-indigo-600 text-white px-2 py-0.5 rounded-full">
-                            当前
-                          </span>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteConversation(conv.id);
-                          }}
-                          disabled={deletingId === conv.id}
-                          className="text-gray-400 hover:text-red-500 transition p-1 rounded disabled:opacity-50"
-                          title="删除此对话"
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* 代码视图 */}
