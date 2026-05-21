@@ -15,9 +15,10 @@ c.width=window.innerWidth;
 c.height=window.innerHeight;
 const ctx=c.getContext('2d');
 let basket={x:c.width/2-8,w:16},apples=[],speed=4.5,score=0;
-document.addEventListener('keydown',e=>{
-  if(e.key==='ArrowLeft')basket.x=Math.max(0,basket.x-20);
-  if(e.key==='ArrowRight')basket.x=Math.min(c.width-basket.w,basket.x+20);
+c.addEventListener('mousemove',e=>{
+  basket.x=e.clientX-basket.w/2;
+  if(basket.x<0)basket.x=0;
+  if(basket.x>c.width-basket.w)basket.x=c.width-basket.w;
 });
 function loop(){
   ctx.clearRect(0,0,c.width,c.height);
@@ -98,8 +99,8 @@ function shuffle(arr: any[]): any[] {
 }
 
 export default function ClassificationModal({ convId, onComplete }: Props) {
-  const GAME_TIME = 20;
-  const THINK_TIME = 10;
+  const GAME_TIME = 15;
+  const THINK_TIME = 5;
 
   const [gameStarted, setGameStarted] = useState(false);
   const [timeLeft, setTimeLeft] = useState(GAME_TIME);
@@ -266,7 +267,7 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
                 <div className="text-center">
                   <p className="text-7xl mb-4 animate-bounce">🍎</p>
                   <p className="text-2xl font-bold text-gray-700">点击开始游戏</p>
-                  <p className="text-lg text-gray-500 mt-2">用 ← → 方向键移动篮子接苹果</p>
+                  <p className="text-lg text-gray-500 mt-2">移动鼠标控制篮子接苹果</p>
                 </div>
               </div>
             )}
