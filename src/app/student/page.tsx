@@ -827,26 +827,32 @@ export default function StudentPortal() {
 
   const sendMessage = () => doSend(input);
 
-  // 语音输入
+  // 语音输入 — 留下 baseText 基准
+  const voiceBaseRef = useRef("");
+
   const startListening = () => {
     const recognition = recognitionRef.current;
     if (!recognition) return;
 
     setIsListening(true);
-    setInput("");
+    voiceBaseRef.current = input;
+
+    let finalText = ""; // 累积的最终文本
 
     recognition.onresult = (event: any) => {
-      let final = "";
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
+        const transcript = (event.results[i][0].transcript || "").trim();
         if (event.results[i].isFinal) {
-          final += transcript;
+          finalText += transcript;
         } else {
           interim += transcript;
         }
       }
-      setInput((prev) => prev + final + interim);
+      // 去重：检测明显的重复模式（相同片段连续出现）
+      const combined = (finalText + interim).trim();
+      const deduped = deduplicateSpeech(combined);
+      setInput((voiceBaseRef.current + " " + deduped).trim());
     };
 
     recognition.onerror = () => {
@@ -854,6 +860,14 @@ export default function StudentPortal() {
     };
 
     recognition.onend = () => {
+      // 结束时将最终结果追加到 input
+      if (finalText.trim()) {
+        setInput((prev) => {
+          const base = voiceBaseRef.current.trim();
+          const prevWithoutBase = prev.replace(base, "").trim();
+          return (base + " " + prevWithoutBase).trim();
+        });
+      }
       setIsListening(false);
     };
 
@@ -866,6 +880,24 @@ export default function StudentPortal() {
       recognition.stop();
       setIsListening(false);
     }
+  };
+
+  // 语音去重：检测并修复重复片段
+  const deduplicateSpeech = (text: string): string => {
+    if (!text || text.length < 2) return text;
+    // 检测连续重复（如 "你好你好你好"）
+    for (let half = Math.floor(text.length / 2); half >= 2; half--) {
+      const firstHalf = text.substring(0, half);
+      const secondHalf = text.substring(half, half * 2);
+      if (firstHalf === secondHalf) {
+        return deduplicateSpeech(text.substring(0, half));
+      }
+    }
+    // 常见错误纠正
+    return text
+      .replace(/三遍三遍三遍/g, "")
+      .replace(/(.{1,5})\1{2,}/g, "$1") // 短片段重复3次以上
+      .trim();
   };
 
   // 返回上一步
