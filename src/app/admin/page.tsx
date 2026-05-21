@@ -197,7 +197,7 @@ function StudentsManagement() {
   const [resettingPwd, setResettingPwd] = useState(false);
 
   // 新增学生表单
-  const [addForm, setAddForm] = useState({ name: "", student_id: "", gender: "男", grade: 3, class_num: 1, password: "vibe123" });
+  const [addForm, setAddForm] = useState({ name: "", student_id: "", gender: "男", grade: 3, class_num: 1, password: "123456" });
 
   // ---- 获取学生列表 ----
   const fetchStudents = useCallback(async () => {
@@ -335,7 +335,7 @@ function StudentsManagement() {
             gender: gender || "男",
             grade: targetGrade,
             class_num: classNum,
-            password: "vibe123",
+            password: "123456",
             _error: errors.join("；"),
             _dup: dup,
             _note: note,
@@ -414,7 +414,7 @@ function StudentsManagement() {
         if (detail?.status === "成功") {
           alert("添加成功！");
           setShowAdd(false);
-          setAddForm({ name: "", student_id: "", gender: "男", grade: 3, class_num: 1, password: "vibe123" });
+          setAddForm({ name: "", student_id: "", gender: "男", grade: 3, class_num: 1, password: "123456" });
           fetchStudents();
           fetchCounts();
         } else {

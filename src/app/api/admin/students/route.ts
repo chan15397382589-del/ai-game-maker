@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
       const student_id = (s.student_id || "").trim();
       const gender = (s.gender || "").trim();
       const classNum = parseInt(s.class_num) || null;
-      const password = s.password || "vibe123";
+      const password = s.password || "123456";
 
       if (!name || !student_id) {
         results.push({ name, student_id, status: "跳过", error: "缺少姓名或学号" });
