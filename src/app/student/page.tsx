@@ -1128,9 +1128,18 @@ export default function StudentPortal() {
         <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-indigo-600 text-white">
           <span className="text-2xl">🎮</span>
           <h1 className="text-lg font-bold">AI 游戏创作课堂</h1>
+          {historyStack.length > 0 && (
+            <button
+              onClick={handleUndo}
+              className="ml-auto text-white hover:bg-indigo-500 p-1.5 rounded-lg transition text-xl leading-none"
+              title="返回上一步"
+            >
+              ↩
+            </button>
+          )}
           <button
             onClick={() => router.push("/student/reviews")}
-            className="ml-auto text-sm bg-white text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-lg transition"
+            className="text-sm bg-white text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-lg transition"
           >
             👥 同学作品
           </button>
@@ -1170,16 +1179,6 @@ export default function StudentPortal() {
         </div>
 
         <div className="p-4 border-t border-gray-100 bg-gray-50">
-          {historyStack.length > 0 && (
-            <div className="flex justify-center mb-2">
-              <button
-                onClick={handleUndo}
-                className="text-xs text-gray-500 hover:text-indigo-600 transition flex items-center gap-1 px-3 py-1 rounded-lg hover:bg-indigo-50"
-              >
-                ↩ 返回上一步
-              </button>
-            </div>
-          )}
           <div className="flex gap-2">
             {voiceSupported && (
               <button
