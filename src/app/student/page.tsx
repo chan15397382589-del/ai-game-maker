@@ -1296,7 +1296,7 @@ export default function StudentPortal() {
                   srcDoc={htmlCode}
                   title="游戏预览"
                   className="w-full h-full rounded-2xl bg-white shadow-inner"
-                  sandbox="allow-scripts"
+                  sandbox="allow-scripts" scrolling="no"
                 />
               ) : (
                 <div

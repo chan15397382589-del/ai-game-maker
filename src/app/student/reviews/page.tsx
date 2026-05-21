@@ -212,7 +212,7 @@ export default function ReviewsPage() {
                   <div className="w-32 h-32 flex-shrink-0 rounded-xl overflow-hidden border border-gray-200 bg-gray-100 relative">
                     <iframe srcDoc={item.html_code} title={item.game_title}
                       className="w-full h-full pointer-events-none"
-                      sandbox="allow-scripts" />
+                      sandbox="allow-scripts" scrolling="no" />
                     <div className="absolute inset-0" />
                   </div>
 

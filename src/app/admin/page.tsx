@@ -1577,7 +1577,7 @@ function ProjectsReview() {
             </div>
             <div className="flex-1 p-4 bg-gray-900 rounded-b-2xl">
               <iframe srcDoc={selectedProject.html_code} title={selectedProject.game_title}
-                className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts" />
+                className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts" scrolling="no" />
             </div>
           </div>
         </div>

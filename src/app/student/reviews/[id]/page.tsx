@@ -194,7 +194,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
         <div className="flex-1 min-w-0 border-r border-gray-200">
           {gameStarted ? (
             <iframe srcDoc={item.html_code} title={item.game_title}
-              className="w-full h-full" sandbox="allow-scripts" />
+              className="w-full h-full" sandbox="allow-scripts" scrolling="no" />
           ) : (
             <div className="w-full h-full bg-white flex items-center justify-center cursor-pointer hover:bg-gray-50 transition"
               onClick={() => setGameStarted(true)}>
