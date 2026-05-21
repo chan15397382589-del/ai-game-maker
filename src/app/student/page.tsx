@@ -256,6 +256,7 @@ export default function StudentPortal() {
   // 分类评估弹窗
   const [showClassification, setShowClassification] = useState(false);
   const [classificationDone, setClassificationDone] = useState(false);
+  const [srlGroup, setSrlGroup] = useState<string>("");
 
   // 历史记录栈（支持多步回退）
   const [historyStack, setHistoryStack] = useState<{
@@ -298,8 +299,9 @@ export default function StudentPortal() {
               headers: { Authorization: `Bearer ${token}` },
             });
             if (res.ok) {
-              const { done } = await res.json();
+              const { done, data } = await res.json();
               setClassificationDone(done);
+              if (done && data?.srl_group) setSrlGroup(data.srl_group);
               if (!done) setShowClassification(true);
             }
           } catch {}
@@ -666,6 +668,7 @@ export default function StudentPortal() {
                 userId,
                 sessionId: convId,
                 currentCode: existingCode,
+                group: srlGroup || undefined,
               }),
             });
             if (!retryRes.ok) return;
@@ -765,6 +768,7 @@ export default function StudentPortal() {
           userId,
           sessionId: convId,
           currentCode: htmlCode || undefined,
+          group: srlGroup || undefined,
         }),
       });
 
@@ -1261,9 +1265,20 @@ export default function StudentPortal() {
       {showClassification && currentConvId && (
         <ClassificationModal
           convId={currentConvId}
-          onComplete={() => {
+          onComplete={async () => {
             setClassificationDone(true);
             setShowClassification(false);
+            // 获取分组结果
+            try {
+              const token = await getToken();
+              const res = await fetch("/api/student/classification", {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              if (res.ok) {
+                const { data } = await res.json();
+                if (data?.srl_group) setSrlGroup(data.srl_group);
+              }
+            } catch {}
             // 设置初始对话消息
             setMessages([
               {

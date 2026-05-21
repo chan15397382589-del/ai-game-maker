@@ -3,7 +3,7 @@ import { supabaseAdmin, createChatCompletion, saveMessage } from "@/lib/deepseek
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, sessionId, currentCode } = await req.json();
+    const { messages, sessionId, currentCode, group } = await req.json();
 
     // 从请求头获取 token 并验证用户身份（不信任客户端传入的 userId）
     const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const response = await createChatCompletion(messages, currentCode);
+    const response = await createChatCompletion(messages, currentCode, group);
 
     // 创建流式响应
     const stream = new ReadableStream({

@@ -73,7 +73,7 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState("");
   const [ready, setReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "classifications">("students");
   const router = useRouter();
 
   useEffect(() => { checkUser(); }, []);
@@ -131,6 +131,7 @@ export default function AdminDashboard() {
             { key: "students", label: "👥 学生管理" },
             { key: "messages", label: "💬 对话审计" },
             { key: "projects", label: "🎮 作品审核" },
+            { key: "classifications", label: "📊 学生分类" },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -151,6 +152,8 @@ export default function AdminDashboard() {
         ) : (
           activeTab === "students" ? (
             <StudentsManagement />
+          ) : activeTab === "classifications" ? (
+            <ClassificationsView />
           ) : (
             <div className="bg-white rounded-2xl shadow-md p-6">
               {activeTab === "messages" && <MessagesAudit />}
@@ -1570,6 +1573,133 @@ function ProjectsReview() {
                 className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts" />
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 学生分类评估查看
+// ============================================================
+function ClassificationsView() {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const token = await getAuthToken();
+        if (!token) return;
+        const res = await fetch("/api/admin/classifications", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setData(await res.json());
+      } catch (err) {
+        console.error("获取分类数据失败:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const lowSrlCount = data.filter((d) => d.srl_group === "low_srl").length;
+  const highSrlCount = data.filter((d) => d.srl_group === "high_srl").length;
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-gray-800 mb-4">📊 学生分类评估</h2>
+
+      {/* 统计卡片 */}
+      <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+          <p className="text-3xl font-bold text-indigo-600">{data.length}</p>
+          <p className="text-sm text-gray-500 mt-1">已评估</p>
+        </div>
+        <div className="bg-amber-50 rounded-xl border border-amber-200 p-4 text-center">
+          <p className="text-3xl font-bold text-amber-600">{lowSrlCount}</p>
+          <p className="text-sm text-amber-700 mt-1">低设计SRL组</p>
+        </div>
+        <div className="bg-green-50 rounded-xl border border-green-200 p-4 text-center">
+          <p className="text-3xl font-bold text-green-600">{highSrlCount}</p>
+          <p className="text-sm text-green-700 mt-1">高设计SRL组</p>
+        </div>
+        <div className="bg-indigo-50 rounded-xl border border-indigo-200 p-4 text-center">
+          <p className="text-base font-medium text-indigo-600">
+            低SRL: 直接生成式<br />高SRL: 苏格拉底式
+          </p>
+          <p className="text-xs text-indigo-400 mt-1">AI教学模式</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="text-center text-gray-400 py-8">加载中...</p>
+      ) : data.length === 0 ? (
+        <p className="text-center text-gray-400 py-8">暂无评估数据</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-gray-200">
+          <table className="w-full text-left">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">学生</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">年级</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">班级</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">Q1观察</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">Q2评价</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">Q3推理</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">总分</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">分组</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">耗时</th>
+                <th className="py-3 px-4 font-semibold text-gray-700 text-sm">时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((d) => (
+                <tr key={d.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <td className="py-3 px-4">
+                    <p className="text-sm font-medium text-gray-800">{d.student_name}</p>
+                    <p className="text-xs text-gray-400">{d.student_id}</p>
+                  </td>
+                  <td className="py-3 px-4 text-sm text-gray-600">{d.grade ? `${d.grade}年级` : "-"}</td>
+                  <td className="py-3 px-4 text-sm text-gray-600">{d.class_num ? `${d.class_num}班` : "-"}</td>
+                  <td className="py-3 px-4">
+                    <span className={`text-sm font-medium ${d.q1_score >= 2 ? "text-green-600" : d.q1_score === 1 ? "text-amber-600" : "text-red-500"}`}>
+                      {d.q1_score}/2
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className={`text-sm font-medium ${d.q2_score >= 2 ? "text-green-600" : d.q2_score === 1 ? "text-amber-600" : "text-red-500"}`}>
+                      {d.q2_score}/2
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className={`text-sm font-medium ${d.q3_score >= 2 ? "text-green-600" : d.q3_score === 1 ? "text-amber-600" : "text-red-500"}`}>
+                      {d.q3_score}/2
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className={`text-sm font-bold ${d.total_score >= 4 ? "text-green-600" : "text-amber-600"}`}>
+                      {d.total_score}/6
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                      d.srl_group === "high_srl"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-amber-100 text-amber-700"
+                    }`}>
+                      {d.srl_group === "high_srl" ? "高SRL" : "低SRL"}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-sm text-gray-500">{d.total_time}秒</td>
+                  <td className="py-3 px-4 text-xs text-gray-400">
+                    {new Date(d.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
