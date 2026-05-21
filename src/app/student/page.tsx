@@ -1131,15 +1131,15 @@ export default function StudentPortal() {
           {historyStack.length > 0 && (
             <button
               onClick={handleUndo}
-              className="ml-auto text-white hover:bg-indigo-500 p-1.5 rounded-lg transition text-xl leading-none"
+              className="text-sm bg-indigo-500 hover:bg-indigo-400 text-white px-3 py-1 rounded-lg transition flex items-center gap-1"
               title="返回上一步"
             >
-              ↩
+              ↩ 回到上一步
             </button>
           )}
           <button
             onClick={() => router.push("/student/reviews")}
-            className="text-sm bg-white text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-lg transition"
+            className="ml-auto text-sm bg-white text-indigo-600 hover:bg-indigo-50 px-3 py-1 rounded-lg transition"
           >
             👥 同学作品
           </button>
