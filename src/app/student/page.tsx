@@ -669,10 +669,8 @@ export default function StudentPortal() {
       setGameStarted(false);
       // 代码提取成功，重置重试计数
       retryCountRef.current = 0;
-      // 代码生成完成，1秒后自动切换到游戏视图
-      setTimeout(() => {
-        setViewMode("game");
-      }, 1000);
+      // 代码生成完成，立即切换到游戏视图
+      setViewMode("game");
       // 自动保存游戏代码到对话文档
       if (convId) {
         updateConversationSilent(convId, { html_code: code });
