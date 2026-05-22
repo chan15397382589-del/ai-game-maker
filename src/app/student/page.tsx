@@ -213,6 +213,20 @@ interface Conversation {
   updated_at: string;
 }
 
+// 语音去重（模块级，供多处使用）
+function deduplicateSpeech(text: string): string {
+  if (!text || text.length < 2) return text;
+  for (let half = Math.floor(text.length / 2); half >= 2; half--) {
+    if (text.substring(0, half) === text.substring(half, half * 2)) {
+      return deduplicateSpeech(text.substring(0, half));
+    }
+  }
+  return text
+    .replace(/三遍三遍三遍/g, "")
+    .replace(/(.{1,5})\1{2,}/g, "$1")
+    .trim();
+}
+
 // ============================================================
 // 主组件
 // ============================================================
@@ -669,14 +683,6 @@ export default function StudentPortal() {
       return updated;
     });
 
-    // 检测反思阶段触发
-    if (assistantContent.includes("[REFLECTION_START]") && !reflectionSubmitted) {
-      setTimeout(() => {
-        setReflectionPhase(true);
-        setReflectionData({});
-      }, 1500);
-    }
-
     // 提取游戏代码
     const code = extractHtmlCode(assistantContent);
     if (code) {
@@ -910,24 +916,6 @@ export default function StudentPortal() {
       recognition.stop();
       setIsListening(false);
     }
-  };
-
-  // 语音去重：检测并修复重复片段
-  const deduplicateSpeech = (text: string): string => {
-    if (!text || text.length < 2) return text;
-    // 检测连续重复（如 "你好你好你好"）
-    for (let half = Math.floor(text.length / 2); half >= 2; half--) {
-      const firstHalf = text.substring(0, half);
-      const secondHalf = text.substring(half, half * 2);
-      if (firstHalf === secondHalf) {
-        return deduplicateSpeech(text.substring(0, half));
-      }
-    }
-    // 常见错误纠正
-    return text
-      .replace(/三遍三遍三遍/g, "")
-      .replace(/(.{1,5})\1{2,}/g, "$1") // 短片段重复3次以上
-      .trim();
   };
 
   // 返回上一步
@@ -1496,6 +1484,9 @@ function ReflectionPanel({
   const [card1, setCard1] = useState('');
   const [card2, setCard2] = useState('');
   const [card3, setCard3] = useState('');
+  const [isListeningRefl, setIsListeningRefl] = useState(false);
+  const reflRecogRef = useRef<any>(null);
+  const reflBaseRef = useRef("");
 
   const steps = [
     { icon: '📷', title: '说说你的游戏', sub: '给你的游戏取个名字，再介绍一下它怎么玩～', value: card1, setValue: setCard1, placeholder: '比如：我的游戏叫接星星大作战，天上会飘下来很多星星，要用篮子接住，接一个加10分！' },
@@ -1511,6 +1502,38 @@ function ReflectionPanel({
     else { onSave({ card1: card1.trim(), card2: card2.trim(), card3: card3.trim() }); }
   };
 
+  // 反思语音输入
+  const startReflListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    const rec = new SpeechRecognition();
+    rec.lang = "zh-CN";
+    rec.interimResults = true;
+    rec.continuous = false;
+    reflRecogRef.current = rec;
+    setIsListeningRefl(true);
+    reflBaseRef.current = current.value;
+
+    let finalT = "";
+    rec.onresult = (event: any) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const t = event.results[i][0].transcript.trim();
+        event.results[i].isFinal ? (finalT += t) : (interim += t);
+      }
+      const deduped = deduplicateSpeech((finalT + interim).trim());
+      current.setValue((reflBaseRef.current + " " + deduped).trim());
+    };
+    rec.onend = () => setIsListeningRefl(false);
+    rec.onerror = () => setIsListeningRefl(false);
+    rec.start();
+  };
+
+  const stopReflListening = () => {
+    reflRecogRef.current?.stop();
+    setIsListeningRefl(false);
+  };
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
@@ -1521,14 +1544,23 @@ function ReflectionPanel({
         <div className="px-6 pb-3">
           <p className="text-lg font-bold text-gray-800 mb-1">{current.icon} {current.title}</p>
           <p className="text-sm text-gray-500 mb-4">{current.sub}</p>
-          <textarea
-            value={current.value}
-            onChange={(e) => current.setValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && canNext) { e.preventDefault(); handleNext(); } }}
-            placeholder={current.placeholder}
-            className="w-full p-3 text-base border border-gray-300 rounded-xl resize-none h-32 focus:border-amber-400 focus:ring-2 focus:ring-amber-200 outline-none leading-relaxed"
-            autoFocus
-          />
+          <div className="relative">
+            <textarea
+              value={current.value}
+              onChange={(e) => current.setValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && canNext) { e.preventDefault(); handleNext(); } }}
+              placeholder={current.placeholder}
+              className="w-full p-3 pr-12 text-base border border-gray-300 rounded-xl resize-none h-32 focus:border-amber-400 focus:ring-2 focus:ring-amber-200 outline-none leading-relaxed"
+              autoFocus
+            />
+            <button
+              onClick={isListeningRefl ? stopReflListening : startReflListening}
+              className={`absolute bottom-3 right-3 w-8 h-8 rounded-full flex items-center justify-center text-lg transition ${
+                isListeningRefl ? "bg-red-500 text-white animate-pulse" : "bg-gray-100 text-gray-400 hover:bg-amber-100 hover:text-amber-600"
+              }`}
+              title={isListeningRefl ? "停止录音" : "语音输入"}
+            >🎤</button>
+          </div>
         </div>
         <div className="flex items-center justify-between px-6 pb-6 pt-2">
           <div />
