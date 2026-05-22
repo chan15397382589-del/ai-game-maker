@@ -334,7 +334,7 @@ export default function StudentPortal() {
   }, []);
 
   // 初始化语音识别
-  useEffect(() => {
+  const initRecognition = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       setVoiceSupported(true);
@@ -343,8 +343,13 @@ export default function StudentPortal() {
       recognition.interimResults = true;
       recognition.continuous = false;
       recognitionRef.current = recognition;
+      return recognition;
     }
-  }, []);
+    setVoiceSupported(false);
+    return null;
+  };
+
+  useEffect(() => { initRecognition(); }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -865,7 +870,15 @@ export default function StudentPortal() {
       setInput((voiceBaseRef.current + " " + deduped).trim());
     };
 
-    recognition.onerror = () => {
+    recognition.onerror = (event: any) => {
+      console.warn("语音识别错误:", event.error);
+      if (event.error === "not-allowed") {
+        alert("麦克风权限未开启，请在浏览器设置中允许麦克风访问");
+      } else if (event.error === "no-speech") {
+        // 没检测到语音，静默重试
+      } else if (event.error === "network") {
+        alert("语音识别需要网络连接，请检查网络");
+      }
       setIsListening(false);
     };
 
@@ -881,7 +894,14 @@ export default function StudentPortal() {
       setIsListening(false);
     };
 
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (e: any) {
+      console.error("启动语音识别失败:", e);
+      setIsListening(false);
+      // 尝试重建 SpeechRecognition 实例
+      initRecognition();
+    }
   };
 
   const stopListening = () => {
