@@ -1161,9 +1161,6 @@ export default function StudentPortal() {
       {/* 对话区 */}
       <div className="flex flex-col flex-1 border-r border-gray-200 bg-white">
         <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-indigo-600 text-white">
-          <div className="w-9 h-9 flex-shrink-0">
-            <XiaozhiAvatar state={loading ? "thinking" : htmlCode ? "success" : "idle"} />
-          </div>
           <h1 className="text-lg font-bold">AI 游戏创作课堂</h1>
           {historyStack.length > 0 && (
             <button
@@ -1199,14 +1196,18 @@ export default function StudentPortal() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 relative">
+          {/* 小智老师形象 - 左上角 */}
+          <div className="absolute top-3 left-3 w-16 h-16 z-10">
+            <XiaozhiAvatar state={loading || isCoding ? "thinking" : htmlCode ? "success" : "idle"} />
+          </div>
           {messages.map((msg, i) => (
             <div
               key={`msg-${i}-${msg.role}-${msg.content.length}`}
-              className={`flex items-end gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex items-end gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"} ${i === 0 ? "ml-20" : ""}`}
             >
               {msg.role === "assistant" && (
-                <div className="w-7 h-7 flex-shrink-0">
+                <div className="w-8 h-8 flex-shrink-0">
                   <XiaozhiAvatar state="idle" />
                 </div>
               )}
