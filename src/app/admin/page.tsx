@@ -129,7 +129,7 @@ export default function AdminDashboard() {
         <div className="flex gap-2 mb-6">
           {[
             { key: "students", label: "👥 学生管理" },
-            { key: "messages", label: "💬 对话审计" },
+            { key: "messages", label: "💬 对话记录" },
             { key: "projects", label: "🎮 作品审核" },
             { key: "classifications", label: "📊 学生分类" },
           ].map((tab) => (
@@ -980,7 +980,7 @@ function StudentsManagement() {
   );
 }
 
-// ==================== 对话审计 ====================
+// ==================== 对话记录 ====================
 function MessagesAudit() {
   // 树导航状态
   const [selectedNode, setSelectedNode] = useState<TreeNode>({ type: "all", label: "全部学生" });
@@ -1253,8 +1253,9 @@ function MessagesAudit() {
           </div>
           <button onClick={() => exportToExcel(true)} disabled={exporting}
             className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
-            {exporting ? "导出中..." : "📊 导出全部对话"}
+            {exporting ? "导出中..." : "📊 导出对话记录"}
           </button>
+          <span className="text-xs text-gray-300 mx-1">|</span>
           <button onClick={async () => {
             setExporting(true);
             try {
@@ -1277,14 +1278,14 @@ function MessagesAudit() {
               const ws = XLSX.utils.json_to_sheet(rows);
               ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 16 }, { wch: 45 }, { wch: 45 }, { wch: 45 }, { wch: 20 }];
               const wb = XLSX.utils.book_new();
-              XLSX.utils.book_append_sheet(wb, ws, "全部反馈");
-              XLSX.writeFile(wb, `全部学生反馈_${new Date().toISOString().slice(0, 10)}.xlsx`);
+              XLSX.utils.book_append_sheet(wb, ws, "学生反馈");
+              XLSX.writeFile(wb, `学生反馈_${new Date().toISOString().slice(0, 10)}.xlsx`);
             } catch { alert("导出失败"); }
             finally { setExporting(false); }
           }}
           disabled={exporting}
           className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
-            {exporting ? "导出中..." : "📊 导出全部反馈"}
+            {exporting ? "导出中..." : "📊 导出学生反馈"}
           </button>
         </div>
 
