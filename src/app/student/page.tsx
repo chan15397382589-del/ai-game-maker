@@ -1495,7 +1495,7 @@ function ReflectionPanel({
   ];
 
   const current = steps[step];
-  const canNext = current.value.trim().length > 0;
+  const canNext = current.value.trim().length >= 10;
 
   const handleNext = () => {
     if (step < 2) { setStep(step + 1); }
@@ -1561,6 +1561,9 @@ function ReflectionPanel({
               title={isListeningRefl ? "停止录音" : "语音输入"}
             >🎤</button>
           </div>
+          <p className={`text-xs mt-1 ${current.value.trim().length >= 10 ? "text-green-500" : "text-gray-400"}`}>
+            {current.value.trim().length >= 10 ? `✓ 已输入 ${current.value.trim().length} 字` : `至少输入 10 个字（当前 ${current.value.trim().length} 字）`}
+          </p>
         </div>
         <div className="flex items-center justify-between px-6 pb-6 pt-2">
           <div />
