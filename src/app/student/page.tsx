@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { useRouter } from "next/navigation";
 import ClassificationModal from "@/components/ClassificationModal";
+import XiaozhiAvatar from "@/components/XiaozhiAvatar";
 
 // ============================================================
 // 工具函数：获取认证 token
@@ -1160,7 +1161,9 @@ export default function StudentPortal() {
       {/* 对话区 */}
       <div className="flex flex-col flex-1 border-r border-gray-200 bg-white">
         <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-indigo-600 text-white">
-          <span className="text-2xl">🎮</span>
+          <div className="w-9 h-9 flex-shrink-0">
+            <XiaozhiAvatar state={loading ? "thinking" : htmlCode ? "success" : "idle"} />
+          </div>
           <h1 className="text-lg font-bold">AI 游戏创作课堂</h1>
           {historyStack.length > 0 && (
             <button
@@ -1200,8 +1203,13 @@ export default function StudentPortal() {
           {messages.map((msg, i) => (
             <div
               key={`msg-${i}-${msg.role}-${msg.content.length}`}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex items-end gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
+              {msg.role === "assistant" && (
+                <div className="w-7 h-7 flex-shrink-0">
+                  <XiaozhiAvatar state="idle" />
+                </div>
+              )}
               <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}>
                 {msg.content.split("\n").map((line, j) => (
                   <p key={j} className={j > 0 ? "mt-1" : ""}>
