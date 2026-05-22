@@ -199,6 +199,11 @@ function StudentsManagement() {
   // 新增学生表单
   const [addForm, setAddForm] = useState({ name: "", student_id: "", gender: "男", grade: 3, class_num: 1, password: "123456" });
 
+  // 编辑学生
+  const [editStudent, setEditStudent] = useState<StudentRow | null>(null);
+  const [editForm, setEditForm] = useState({ student_id: "", grade: 3, class_num: 1 });
+  const [savingEdit, setSavingEdit] = useState(false);
+
   // ---- 获取学生列表 ----
   const fetchStudents = useCallback(async () => {
     setLoading(true);
@@ -445,6 +450,46 @@ function StudentsManagement() {
       fetchCounts();
     } catch (err: any) {
       alert("删除失败：" + err.message);
+    }
+  };
+
+  // ---- 编辑学生 ----
+  const handleEditStudent = (s: StudentRow) => {
+    setEditStudent(s);
+    setEditForm({
+      student_id: s.student_id || "",
+      grade: s.grade || 3,
+      class_num: s.class_num || 1,
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editStudent?.id) return;
+    setSavingEdit(true);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch("/api/admin/students", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          id: editStudent.id,
+          student_id: editForm.student_id.trim(),
+          grade: editForm.grade,
+          class_num: editForm.class_num,
+        }),
+      });
+      if (res.ok) {
+        setEditStudent(null);
+        fetchStudents();
+        fetchCounts();
+      } else {
+        const err = await res.json();
+        alert("修改失败：" + (err.error || "未知错误"));
+      }
+    } catch (err: any) {
+      alert("修改异常：" + err.message);
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -733,6 +778,12 @@ function StudentsManagement() {
                           查看
                         </button>
                         <button
+                          onClick={() => handleEditStudent(s)}
+                          className="text-amber-500 hover:text-amber-700 hover:bg-amber-50 px-2 py-1 rounded text-xs transition"
+                        >
+                          编辑
+                        </button>
+                        <button
                           onClick={() => handleDeleteStudent(s.id!, s.name)}
                           className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded text-xs transition"
                         >
@@ -793,6 +844,41 @@ function StudentsManagement() {
             <div className="flex gap-2 mt-5 justify-end">
               <button onClick={() => setShowAdd(false)} className="btn-secondary text-sm">取消</button>
               <button onClick={handleAddStudent} className="btn-primary text-sm">确认添加</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========== 编辑学生弹窗 ========== */}
+      {editStudent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setEditStudent(null)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-800 mb-4">✏️ 编辑 {editStudent.name}</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">学号</label>
+                <input value={editForm.student_id} onChange={(e) => setEditForm({ ...editForm, student_id: e.target.value })} className="input-field text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">年级</label>
+                  <select value={editForm.grade} onChange={(e) => setEditForm({ ...editForm, grade: parseInt(e.target.value) })} className="input-field text-sm">
+                    {GRADES.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">班级</label>
+                  <select value={editForm.class_num} onChange={(e) => setEditForm({ ...editForm, class_num: parseInt(e.target.value) })} className="input-field text-sm">
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map((c) => <option key={c} value={c}>{c}班</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-5 justify-end">
+                <button onClick={() => setEditStudent(null)} className="btn-secondary text-sm">取消</button>
+                <button onClick={handleSaveEdit} disabled={savingEdit || !editForm.student_id.trim()} className="btn-primary text-sm disabled:opacity-50">
+                  {savingEdit ? "保存中..." : "确认修改"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

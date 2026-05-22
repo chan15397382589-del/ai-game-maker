@@ -90,11 +90,11 @@ const PHASE1_QUESTIONS = [
     subtitle: "如果把苹果的速度变慢，你最同意哪句话？",
     multi: false,
     options: [
-      { label: "变简单了，好接了", score: 1 },
-      { label: "变简单了——太简单了也会无聊", score: 2 },
-      { label: "变简单了——要是再加个分数就更好玩了", score: 2 },
-      { label: "没什么变化", score: 0 },
-      { label: "变难了", score: 0 },
+      { label: "速度变慢就很好接了，玩起来更轻松", score: 1 },
+      { label: "太慢的话玩一会就觉得没意思了，不想玩了", score: 2 },
+      { label: "不仅变慢，还想加上分数——接到一个苹果跳一下分，玩的人更开心", score: 2 },
+      { label: "速度变了和没变一样，感觉差不多", score: 0 },
+      { label: "速度变慢反而更难接了，把握不好时机", score: 0 },
     ],
   },
 ];
@@ -361,7 +361,8 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
                 <div className="text-center">
                   <p className="text-7xl mb-4 animate-bounce">🍎</p>
                   <p className="text-2xl font-bold text-gray-700">点击开始游戏</p>
-                  <p className="text-lg text-gray-500 mt-2">用 ← → 方向键移动篮子接苹果</p>
+                  <p className="text-lg text-gray-500 mt-2">按键盘 ← → 左右键操控篮子接苹果</p>
+                  <p className="text-sm text-amber-500 mt-1">⚠️ 游戏有3个小问题，玩的时候留意哦～</p>
                 </div>
               </div>
             )}
@@ -372,7 +373,7 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
             {/* 游戏阶段 */}
             {phase === "game" && (
               <div className="flex items-center justify-center h-full text-center">
-                <div><p className="text-4xl mb-3">⏳</p><p className="text-xl text-gray-500 font-medium">先玩一玩游戏</p><p className="text-gray-400 mt-2">时间到了会出现问题哦～</p></div>
+                <div><p className="text-4xl mb-3">⏳</p><p className="text-xl text-gray-500 font-medium">先玩一玩游戏</p><p className="text-gray-400 mt-2">时间到了会出现问题哦～</p><p className="text-base text-indigo-500 mt-4 font-medium">🎮 按键盘 ← → 左右键操控</p><p className="text-sm text-gray-400 mt-1">接住苹果试试看～</p></div>
               </div>
             )}
 
