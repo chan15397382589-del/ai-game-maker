@@ -1196,22 +1196,22 @@ export default function StudentPortal() {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 relative">
-          {/* 小智老师形象 - 左上角 */}
-          <div className="absolute top-3 left-3 w-16 h-16 z-10">
-            <XiaozhiAvatar state={loading || isCoding ? "thinking" : htmlCode ? "success" : "idle"} />
-          </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.map((msg, i) => (
             <div
               key={`msg-${i}-${msg.role}-${msg.content.length}`}
-              className={`flex items-end gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"} ${i === 0 ? "ml-20" : ""}`}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               {msg.role === "assistant" && (
-                <div className="w-8 h-8 flex-shrink-0">
-                  <XiaozhiAvatar state="idle" />
+                <div className="w-14 h-14 flex-shrink-0 mr-3 mt-1">
+                  <XiaozhiAvatar state={
+                    i === messages.length - 1 && loading ? "thinking"
+                    : i === messages.length - 1 && htmlCode ? "success"
+                    : "idle"
+                  } />
                 </div>
               )}
-              <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai"}>
+              <div className={msg.role === "user" ? "chat-bubble-user" : `chat-bubble-ai ${msg.role === "assistant" ? "max-w-[75%]" : ""}`}>
                 {msg.content.split("\n").map((line, j) => (
                   <p key={j} className={j > 0 ? "mt-1" : ""}>
                     {line}
