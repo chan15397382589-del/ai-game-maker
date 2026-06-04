@@ -1,8 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { Tldraw, useEditor } from "tldraw";
-import "tldraw/tldraw.css";
+import { useState, useCallback, useRef } from "react";
+import dynamic from "next/dynamic";
+
+// 动态导入 Excalidraw（避免 SSR 问题）
+const Excalidraw = dynamic(
+  () => import("@excalidraw/excalidraw").then((mod) => mod.Excalidraw),
+  { ssr: false }
+);
 
 interface DrawingCanvasProps {
   onSave?: (imageData: string) => void;
@@ -11,23 +16,24 @@ interface DrawingCanvasProps {
 }
 
 export default function DrawingCanvas({ onSave, width = 800, height = 600 }: DrawingCanvasProps) {
-  const [editor, setEditor] = useState<any>(null);
+  const [excalidrawAPI, setExcalidrawAPI] = useState<any>(null);
 
   const handleSave = useCallback(async () => {
-    if (!editor) return;
+    if (!excalidrawAPI) return;
 
-    // 获取画布内容作为图片
-    const shapeIds = editor.getCurrentPageShapeIds();
-    if (shapeIds.size === 0) {
+    const elements = excalidrawAPI.getSceneElements();
+    if (!elements || elements.length === 0) {
       onSave?.("");
       return;
     }
 
     // 导出为图片
-    const { blob } = await editor.toImage([...shapeIds], {
-      format: "png",
-      background: true,
-      padding: 0.2,
+    const { exportToBlob } = await import("@excalidraw/excalidraw");
+    const blob = await exportToBlob({
+      elements,
+      appState: { exportWithDarkMode: false },
+      files: excalidrawAPI.getFiles(),
+      mimeType: "image/png",
     });
 
     // 转为 base64
@@ -37,13 +43,12 @@ export default function DrawingCanvas({ onSave, width = 800, height = 600 }: Dra
       onSave?.(base64);
     };
     reader.readAsDataURL(blob);
-  }, [editor, onSave]);
+  }, [excalidrawAPI, onSave]);
 
   const handleClear = useCallback(() => {
-    if (!editor) return;
-    const shapeIds = editor.getCurrentPageShapeIds();
-    editor.deleteShapes([...shapeIds]);
-  }, [editor]);
+    if (!excalidrawAPI) return;
+    excalidrawAPI.updateScene({ elements: [] });
+  }, [excalidrawAPI]);
 
   return (
     <div className="flex flex-col h-full">
@@ -61,12 +66,27 @@ export default function DrawingCanvas({ onSave, width = 800, height = 600 }: Dra
         >
             清空
         </button>
+        <span className="text-xs text-gray-500 ml-2">使用左侧工具栏画图</span>
       </div>
 
-      {/* tldraw 画布 */}
+      {/* Excalidraw 画布 */}
       <div className="flex-1 border border-gray-200 rounded-b-lg overflow-hidden">
-        <Tldraw
-          onMount={(editor) => setEditor(editor)}
+        <Excalidraw
+          excalidrawAPI={(api) => setExcalidrawAPI(api)}
+          initialData={{
+            appState: {
+              viewBackgroundColor: "#ffffff",
+            },
+          }}
+          UIOptions={{
+            canvasActions: {
+              changeViewBackgroundColor: false,
+              export: false,
+              loadScene: false,
+              saveToActiveFile: false,
+              toggleTheme: false,
+            },
+          }}
         />
       </div>
     </div>

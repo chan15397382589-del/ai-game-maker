@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import VoiceButton from "@/components/VoiceButton";
+import { isRandomInput } from "@/utils/inputValidation";
 
 // 素材库定义（每个分类80个）
 // 素材库定义（每个分类80个，全部使用 Unicode 6.0-9.0 高兼容性emoji）
@@ -485,6 +486,25 @@ export default function ModuleIdeation({ userId }: Props) {
   }, [items, strokes, currentPhase, autoSaveDrawing]);
 
   const saveDesign = async () => {
+    // 验证游戏名称
+    if (isRandomInput(gameName)) {
+      alert("请认真输入游戏名称，不要乱打键盘哦～");
+      return;
+    }
+
+    // 验证规则
+    const validRules = rules.filter((r) => r.trim());
+    if (validRules.length === 0) {
+      alert("请至少写一条游戏规则！");
+      return;
+    }
+    for (const rule of validRules) {
+      if (isRandomInput(rule)) {
+        alert("请认真填写游戏规则，不要乱打键盘哦～");
+        return;
+      }
+    }
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
@@ -493,7 +513,7 @@ export default function ModuleIdeation({ userId }: Props) {
       await fetch("/api/student/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ task_id: "1-1", design_image: imageData, game_rules: rules.filter((r) => r.trim()), game_name: gameName, design_reason: `游戏类型：${gameType || customType}`, duration_seconds: drawTime }),
+        body: JSON.stringify({ task_id: "1-1", design_image: imageData, game_rules: validRules, game_name: gameName, design_reason: `游戏类型：${gameType || customType}`, duration_seconds: drawTime }),
       });
       setDesignDone(true);
       setCurrentPhase("discuss");
@@ -539,6 +559,13 @@ export default function ModuleIdeation({ userId }: Props) {
 
   const sendMessage = async () => {
     if (!chatInput.trim() || !groupCode) return;
+
+    // 输入验证
+    if (isRandomInput(chatInput)) {
+      alert("请认真发言，不要乱打键盘哦～");
+      return;
+    }
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
@@ -696,39 +723,67 @@ export default function ModuleIdeation({ userId }: Props) {
           </div>
 
           {/* 右侧：游戏类型 + 规则 + 名称 */}
-          <div className="w-72 bg-white rounded-2xl shadow-md border border-gray-100 p-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
+          <div className="w-72 bg-white rounded-2xl shadow-md border border-gray-100 p-4 overflow-y-auto">
+            {/* 计时器 */}
+            <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-gray-700">⏱️ {formatTime(drawTime)}</span>
               {isSaving && <span className="text-xs text-green-500 animate-pulse">保存中...</span>}
             </div>
-            <div>
-              <h3 className="text-base font-bold text-gray-700 mb-2">  游戏类型</h3>
+
+            {/* 游戏类型 */}
+            <div className="mb-4">
+              <h3 className="text-sm font-bold text-gray-700 mb-2">  游戏类型</h3>
               <div className="grid grid-cols-3 gap-2">
                 {["接东西", "躲避", "跑酷", "迷宫", "对战", "其他"].map((type) => (
                   <button key={type} onClick={() => setGameType(type)} className={`py-2 rounded-lg text-sm font-medium transition ${gameType === type ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{type}</button>
                 ))}
               </div>
-              {gameType === "其他" && <input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="输入你想做的游戏类型" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mt-2 outline-none" />}
+              {gameType === "其他" && (
+                <input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="输入游戏类型" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mt-2 outline-none" />
+              )}
             </div>
-            <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
-              <h3 className="text-base font-bold text-gray-700 mb-2">  游戏规则</h3>
-              <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-200 mb-2">
+
+            {/* 游戏规则 */}
+            <div className="mb-4">
+              <h3 className="text-sm font-bold text-gray-700 mb-2">  游戏规则</h3>
+              <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-200 mb-3">
+                <p className="text-xs text-amber-600 mb-1.5">  点击快速填入：</p>
                 {RULE_HINTS.map((hint, i) => (
-                  <button key={i} onClick={() => { const idx = rules.findIndex((r) => !r.trim()); if (idx >= 0) { const nr = [...rules]; nr[idx] = hint; setRules(nr); } }} className="block w-full text-left text-sm text-amber-700 hover:bg-amber-100 px-2 py-1 rounded">• {hint}</button>
+                  <button key={i} onClick={() => { const idx = rules.findIndex((r) => !r.trim()); if (idx >= 0) { const nr = [...rules]; nr[idx] = hint; setRules(nr); } }}
+                    className="block w-full text-left text-xs text-amber-700 hover:bg-amber-100 px-2 py-1.5 rounded mb-1">• {hint}</button>
                 ))}
               </div>
-              {rules.map((rule, i) => (
-                <div key={i} className="mb-2">
-                  <label className="text-xs text-gray-500 mb-1">规则{i + 1}：</label>
-                  <input value={rule} onChange={(e) => { const nr = [...rules]; nr[i] = e.target.value; setRules(nr); }} placeholder="如果...就..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 outline-none" />
-                </div>
-              ))}
+
+              {/* 规则输入 */}
+              <div className="space-y-4">
+                {rules.map((rule, i) => (
+                  <div key={i}>
+                    <label className="text-base text-gray-700 mb-2 font-medium block">规则：</label>
+                    <div className="flex gap-2">
+                      <textarea value={rule} onChange={(e) => { const nr = [...rules]; nr[i] = e.target.value; setRules(nr); }}
+                        placeholder="如果...就..."
+                        rows={3}
+                        className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-base focus:border-indigo-400 outline-none resize-none" />
+                      <VoiceButton onResult={(text) => { const nr = [...rules]; nr[i] = text; setRules(nr); }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div>
-              <label className="text-sm text-gray-500 mb-1">游戏名称</label>
-              <input value={gameName} onChange={(e) => setGameName(e.target.value)} placeholder="给游戏取个名字！" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 outline-none" />
+
+            {/* 游戏名称 */}
+            <div className="mb-4">
+              <label className="text-sm text-gray-500 mb-1.5 block">游戏名称</label>
+              <input value={gameName} onChange={(e) => setGameName(e.target.value)}
+                placeholder="给游戏取个名字！"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 outline-none" />
             </div>
-            <button onClick={saveDesign} disabled={(!gameType && !customType.trim()) || !gameName.trim()} className="w-full py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-lg text-sm font-medium transition">保存并进入讨论 →</button>
+
+            {/* 保存按钮 */}
+            <button onClick={saveDesign} disabled={(!gameType && !customType.trim()) || !gameName.trim()}
+              className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition">
+              保存并进入讨论 →
+            </button>
           </div>
         </div>
       )}
@@ -765,7 +820,13 @@ export default function ModuleIdeation({ userId }: Props) {
           ) : (
             <div className="flex-1 bg-white rounded-2xl shadow-md border border-gray-100 p-4 flex flex-col min-h-0">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-base font-bold text-gray-800">  小组讨论</h2>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => { setGroupCode(null); setChatMessages([]); setGroupMembers([]); setShowJoinInput(false); }}
+                    className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm text-gray-600 transition">
+                    ← 返回
+                  </button>
+                  <h2 className="text-base font-bold text-gray-800">  小组讨论</h2>
+                </div>
                 <div className="flex items-center gap-2"><span className="text-sm text-gray-500">口令：</span><span className="text-lg font-mono font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg">{groupCode}</span></div>
               </div>
               <div className="flex-1 flex gap-4 min-h-0">

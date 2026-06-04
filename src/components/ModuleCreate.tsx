@@ -125,17 +125,44 @@ export default function ModuleCreate({ userId }: Props) {
   }, [designLoaded, designData]);
 
   const extractHtmlCode = (content: string): string => {
+    // 1. 匹配 ```html ... ```
     const htmlFence = /```html\s*\n([\s\S]*?)```/i;
     let match = content.match(htmlFence);
     if (match) return match[1].trim();
+
+    // 2. 匹配 ``` ... ``` (包含HTML标签)
     const anyFence = /```\s*\n([\s\S]*?)```/;
     match = content.match(anyFence);
     if (match && match[1].includes("<")) return match[1].trim();
+
+    // 3. 匹配没有闭合的 ```html (流式传输中可能未闭合)
+    const unclosedHtml = /```html\s*\n([\s\S]*)/i;
+    match = content.match(unclosedHtml);
+    if (match && match[1].length > 100) return match[1].trim();
+
+    // 4. 相DOCTYPE或<html
     if (content.includes("<!DOCTYPE") || content.includes("<html")) {
       const start = content.indexOf("<!DOCTYPE") !== -1 ? content.indexOf("<!DOCTYPE") : content.indexOf("<html");
       const end = content.lastIndexOf("</html>");
       if (start !== -1 && end !== -1) return content.substring(start, end + 7);
+      // 如果没有</html>，取到末尾
+      if (start !== -1) return content.substring(start);
     }
+
+    // 5. 匹配包含<canvas或<script的代码块
+    if (content.includes("<canvas") || content.includes("<script")) {
+      const start = Math.max(
+        content.indexOf("<canvas"),
+        content.indexOf("<script"),
+        content.indexOf("<div")
+      );
+      if (start > 0) {
+        const end = content.lastIndexOf("</html>");
+        if (end !== -1) return content.substring(start, end + 7);
+        return content.substring(start);
+      }
+    }
+
     return "";
   };
 
@@ -267,7 +294,26 @@ export default function ModuleCreate({ userId }: Props) {
     const displayText = finalText || "游戏代码已生成，请查看右侧预览区！";
     setMessages((prev) => { const msgs = [...prev]; const lastIdx = msgs.length - 1; if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) { msgs[lastIdx] = { role: "assistant", content: displayText }; } else { msgs.push({ role: "assistant", content: displayText }); } return msgs; });
     setRawMessages((prev) => [...prev, { role: "assistant", content: assistantContent }]);
-    if (finalCode) { setHtmlCode(finalCode); setLiveCode(finalCode); setViewMode("game"); setGameStarted(false); }
+    if (finalCode) {
+      setHtmlCode(finalCode);
+      setLiveCode(finalCode);
+      setViewMode("game");
+      setGameStarted(false);
+      // 保存HTML代码到对话
+      if (currentConvId) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const token = session?.access_token;
+          if (token) {
+            await fetch("/api/student/sessions", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ id: currentConvId, html_code: finalCode }),
+            });
+          }
+        } catch {}
+      }
+    }
   };
 
   const handleUpload = async () => {
