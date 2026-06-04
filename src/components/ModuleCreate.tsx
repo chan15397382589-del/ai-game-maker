@@ -268,19 +268,21 @@ export default function ModuleCreate({ userId }: Props) {
         if (data === "[DONE]") continue;
         try {
           const parsed = JSON.parse(data);
+          if (parsed.error) {
+            console.error("AI Error:", parsed.error);
+            return;
+          }
           if (parsed.content) {
             assistantContent += parsed.content;
             const fenceMatches = parsed.content.match(/```/g);
             if (fenceMatches) fenceCount += fenceMatches.length;
             const inCodeBlock = fenceCount % 2 !== 0;
             if (inCodeBlock) { setIsCoding(true); setViewMode("code"); const code = extractHtmlCode(assistantContent); if (code) setLiveCode(code); }
-            // 只在非代码块时更新显示
-            if (!inCodeBlock) {
-              const textOnly = extractTextOnly(assistantContent);
-              if (textOnly && textOnly.length - lastDisplayLen > 50) {
-                lastDisplayLen = textOnly.length;
-                setMessages((prev) => { const msgs = [...prev]; const lastIdx = msgs.length - 1; if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) { msgs[lastIdx] = { role: "assistant", content: textOnly, _s: true } as any; } else { msgs.push({ role: "assistant", content: textOnly, _s: true } as any); } return msgs; });
-              }
+            // 实时更新显示（降低阈值，更频繁更新）
+            const textOnly = extractTextOnly(assistantContent);
+            if (textOnly && textOnly.length - lastDisplayLen > 20) {
+              lastDisplayLen = textOnly.length;
+              setMessages((prev) => { const msgs = [...prev]; const lastIdx = msgs.length - 1; if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) { msgs[lastIdx] = { role: "assistant", content: textOnly, _s: true } as any; } else { msgs.push({ role: "assistant", content: textOnly, _s: true } as any); } return msgs; });
             }
           }
         } catch {}
@@ -290,8 +292,9 @@ export default function ModuleCreate({ userId }: Props) {
     setIsCoding(false);
     const finalCode = extractHtmlCode(assistantContent);
     const finalText = extractTextOnly(assistantContent);
-    // 只显示有文字内容的消息，如果只有代码则显示提示
-    const displayText = finalText || "游戏代码已生成，请查看右侧预览区！";
+
+    // 显示最终消息（保留AI的完整回复）
+    const displayText = finalText || (finalCode ? "游戏代码已生成，请查看右侧预览区！" : "AI没有回复，请重试");
     setMessages((prev) => { const msgs = [...prev]; const lastIdx = msgs.length - 1; if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) { msgs[lastIdx] = { role: "assistant", content: displayText }; } else { msgs.push({ role: "assistant", content: displayText }); } return msgs; });
     setRawMessages((prev) => [...prev, { role: "assistant", content: assistantContent }]);
     if (finalCode) {
