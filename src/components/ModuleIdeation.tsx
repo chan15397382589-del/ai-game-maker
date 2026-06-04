@@ -42,38 +42,45 @@ const MATERIALS = {
     { emoji: "👹", label: "鬼怪" }, { emoji: "🎃", label: "南瓜怪" },
   ],
   bg: [
-    // 1-20: 自然天空
-    { emoji: "☁️", label: "蓝天" }, { emoji: "🌤️", label: "晴天" }, { emoji: "⛅", label: "多云" },
-    { emoji: "🌧️", label: "雨天" }, { emoji: "⛈️", label: "雷雨" }, { emoji: "❄️", label: "雪天" },
-    { emoji: "🌙", label: "夜晚" }, { emoji: "⭐", label: "星空" }, { emoji: "🌈", label: "彩虹" },
-    { emoji: "☀️", label: "太阳" }, { emoji: "🌕", label: "满月" }, { emoji: "🌅", label: "日落" },
-    { emoji: "🌄", label: "日出" }, { emoji: "🌌", label: "银河" }, { emoji: "🌍", label: "地球" },
-    { emoji: "💫", label: "流星" }, { emoji: "☄️", label: "彗星" }, { emoji: "✨", label: "星光" },
-    { emoji: "🌀", label: "旋风" }, { emoji: "🌪️", label: "龙卷风" },
-    // 21-40: 地形地貌
-    { emoji: "🌿", label: "草地" }, { emoji: "🌲", label: "森林" }, { emoji: "🌴", label: "棕榈树" },
-    { emoji: "🏜️", label: "沙漠" }, { emoji: "⛰️", label: "山脉" }, { emoji: "🌋", label: "火山" },
-    { emoji: "🏝️", label: "岛屿" }, { emoji: "🌊", label: "海洋" }, { emoji: "🏞️", label: "湖泊" },
-    { emoji: "❄️", label: "冰川" }, { emoji: "🪨", label: "岩石" }, { emoji: "🕳️", label: "洞穴" },
-    { emoji: "🌾", label: "麦田" }, { emoji: "🌵", label: "仙人掌" }, { emoji: "🍄", label: "蘑菇" },
-    { emoji: "🌸", label: "樱花" }, { emoji: "🌺", label: "木槿" }, { emoji: "🌹", label: "玫瑰" },
-    { emoji: "🌻", label: "向日葵" }, { emoji: "🎋", label: "竹子" },
-    // 41-60: 建筑场景
-    { emoji: "🏰", label: "城堡" }, { emoji: "🏯", label: "宫殿" }, { emoji: "⛪", label: "教堂" },
-    { emoji: "🕌", label: "寺庙" }, { emoji: "🕋", label: "圣殿" }, { emoji: "🏙️", label: "城市" },
-    { emoji: "🏘️", label: "村庄" }, { emoji: "🏚️", label: "废墟" }, { emoji: "🏗️", label: "工地" },
-    { emoji: "🏠", label: "房子" }, { emoji: "🏫", label: "学校" }, { emoji: "🏥", label: "医院" },
-    { emoji: "🏪", label: "商店" }, { emoji: "🏭", label: "工厂" }, { emoji: "🌉", label: "桥" },
-    { emoji: "🌁", label: "雾桥" }, { emoji: "🎪", label: "马戏团" }, { emoji: "🎭", label: "剧场" },
-    { emoji: "🏟️", label: "体育场" }, { emoji: "🎡", label: "摩天轮" },
-    // 61-80: 特殊场景
-    { emoji: "🧱", label: "砖墙" }, { emoji: "🚧", label: "栅栏" }, { emoji: "🌲", label: "木头" },
-    { emoji: "⛓️", label: "地牢" }, { emoji: "🧗", label: "梯子" }, { emoji: "🚪", label: "门" },
-    { emoji: "🏠", label: "窗户" }, { emoji: "🛤️", label: "铁轨" }, { emoji: "⚓", label: "港口" },
-    { emoji: "🚀", label: "火箭" }, { emoji: "🛸", label: "飞碟" }, { emoji: "🛰️", label: "卫星" },
-    { emoji: "🗺️", label: "地图" }, { emoji: "🧭", label: "罗盘" }, { emoji: "🔥", label: "火焰" },
-    { emoji: "💧", label: "水面" }, { emoji: "💨", label: "风" }, { emoji: "⚡", label: "闪电" },
-    { emoji: "🌊", label: "瀑布" }, { emoji: "🎆", label: "烟花" },
+    // 1-12: 自然天空背景（渐变色）
+    { label: "蓝天", bg: "linear-gradient(180deg, #87CEEB 0%, #E0F0FF 100%)" },
+    { label: "晴天", bg: "linear-gradient(180deg, #4A90D9 0%, #87CEEB 50%, #E0F0FF 100%)" },
+    { label: "多云", bg: "linear-gradient(180deg, #B0C4DE 0%, #D3D3D3 100%)" },
+    { label: "雨天", bg: "linear-gradient(180deg, #708090 0%, #A9A9A9 100%)" },
+    { label: "夜晚", bg: "linear-gradient(180deg, #0C1445 0%, #1A237E 50%, #283593 100%)" },
+    { label: "星空", bg: "linear-gradient(180deg, #000033 0%, #0D1B2A 50%, #1B2838 100%)" },
+    { label: "日落", bg: "linear-gradient(180deg, #FF6B35 0%, #F7931E 30%, #FFD700 60%, #87CEEB 100%)" },
+    { label: "日出", bg: "linear-gradient(180deg, #FFB347 0%, #FFCC33 30%, #87CEEB 100%)" },
+    { label: "银河", bg: "linear-gradient(180deg, #0C0C1E 0%, #1A1A3E 50%, #2D2D5E 100%)" },
+    { label: "黄昏", bg: "linear-gradient(180deg, #FF7E5F 0%, #FEB47B 50%, #FFD89B 100%)" },
+    { label: "极光", bg: "linear-gradient(180deg, #0C1445 0%, #11998e 30%, #38ef7d 60%, #0C1445 100%)" },
+    { label: "暴风", bg: "linear-gradient(180deg, #2C3E50 0%, #4CA1AF 100%)" },
+    // 13-24: 地形地貌背景
+    { label: "草地", bg: "linear-gradient(180deg, #87CEEB 0%, #87CEEB 40%, #4CAF50 40%, #2E7D32 100%)" },
+    { label: "森林", bg: "linear-gradient(180deg, #2D5016 0%, #1B5E20 50%, #2E7D32 100%)" },
+    { label: "沙漠", bg: "linear-gradient(180deg, #F5DEB3 0%, #DEB887 50%, #D2B48C 100%)" },
+    { label: "雪地", bg: "linear-gradient(180deg, #E8E8E8 0%, #F5F5F5 50%, #FFFFFF 100%)" },
+    { label: "海洋", bg: "linear-gradient(180deg, #87CEEB 0%, #4682B4 50%, #2E5090 100%)" },
+    { label: "火山", bg: "linear-gradient(180deg, #1A1A1A 0%, #8B0000 50%, #FF4500 100%)" },
+    { label: "冰川", bg: "linear-gradient(180deg, #B0E0E6 0%, #ADD8E6 50%, #E0FFFF 100%)" },
+    { label: "岩洞", bg: "linear-gradient(180deg, #2F2F2F 0%, #4A4A4A 50%, #696969 100%)" },
+    { label: "丛林", bg: "linear-gradient(180deg, #228B22 0%, #006400 50%, #228B22 100%)" },
+    { label: "荒原", bg: "linear-gradient(180deg, #C4A882 0%, #A0826E 50%, #8B7355 100%)" },
+    { label: "海底", bg: "linear-gradient(180deg, #006994 0%, #004E6A 50%, #003344 100%)" },
+    { label: "太空", bg: "linear-gradient(180deg, #000000 0%, #0D1117 50%, #161B22 100%)" },
+    // 25-36: 场景背景
+    { label: "城市", bg: "linear-gradient(180deg, #87CEEB 0%, #87CEEB 30%, #708090 30%, #556B7A 100%)" },
+    { label: "城堡", bg: "linear-gradient(180deg, #87CEEB 0%, #87CEEB 35%, #808080 35%, #696969 100%)" },
+    { label: "村庄", bg: "linear-gradient(180deg, #87CEEB 0%, #87CEEB 35%, #4CAF50 35%, #388E3C 100%)" },
+    { label: "地牢", bg: "linear-gradient(180deg, #1A1A1A 0%, #2D2D2D 50%, #404040 100%)" },
+    { label: "竞技场", bg: "linear-gradient(180deg, #87CEEB 0%, #87CEEB 30%, #CD853F 30%, #8B6914 100%)" },
+    { label: "太空站", bg: "linear-gradient(180deg, #000000 0%, #1A1A2E 50%, #30305A 100%)" },
+    { label: "迷宫", bg: "linear-gradient(180deg, #2F4F4F 0%, #3C5C5C 50%, #4A6A6A 100%)" },
+    { label: "糖果世界", bg: "linear-gradient(180deg, #FFB6C1 0%, #FF69B4 50%, #FF1493 100%)" },
+    { label: "彩虹", bg: "linear-gradient(180deg, #FF0000 0%, #FF7F00 20%, #FFFF00 40%, #00FF00 60%, #0000FF 80%, #8B00FF 100%)" },
+    { label: "废墟", bg: "linear-gradient(180deg, #A0A0A0 0%, #808080 50%, #606060 100%)" },
+    { label: "矿山", bg: "linear-gradient(180deg, #4A4A4A 0%, #6B6B6B 50%, #8C8C8C 100%)" },
+    { label: "云端", bg: "linear-gradient(180deg, #E6F3FF 0%, #FFFFFF 50%, #F0F8FF 100%)" },
   ],
   prop: [
     // 1-20: 武器装备
@@ -149,12 +156,13 @@ export default function ModuleIdeation({ userId }: Props) {
   const [drawTime, setDrawTime] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [savedDesignImage, setSavedDesignImage] = useState<string | null>(null);
+  const [canvasBg, setCanvasBg] = useState<string>("#FFFFFF"); // 画布背景色
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSaveRef = useRef<number>(0);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // 撤销/重做历史
-  const [history, setHistory] = useState<{ items: CanvasItem[]; strokes: DrawStroke[] }[]>([]);
+  const [history, setHistory] = useState<{ items: CanvasItem[]; strokes: DrawStroke[]; bg: string }[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
   // 小组讨论
@@ -261,9 +269,8 @@ export default function ModuleIdeation({ userId }: Props) {
     canvas.height = CH * dpr;
     ctx.scale(dpr, dpr);
 
-    // 白色背景
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, CW, CH);
+    // 清空画布（透明背景，由CSS gradient提供背景）
+    ctx.clearRect(0, 0, CW, CH);
 
     // 绘制笔画
     for (const stroke of strokes) {
@@ -393,7 +400,12 @@ export default function ModuleIdeation({ userId }: Props) {
     e.preventDefault();
     try {
       const data = JSON.parse(e.dataTransfer.getData("text/plain"));
-      if (data.emoji) {
+      if (data.type === "bg" && data.bg) {
+        // 背景素材：改变画布背景
+        saveToHistory();
+        setCanvasBg(data.bg);
+      } else if (data.emoji) {
+        // 角色/道具素材：添加到画布
         const canvas = canvasRef.current!;
         const rect = canvas.getBoundingClientRect();
         const x = (e.clientX - rect.left) * (CW / rect.width);
@@ -416,7 +428,7 @@ export default function ModuleIdeation({ userId }: Props) {
   const saveToHistory = () => {
     setHistory((prev) => {
       const newHistory = prev.slice(0, historyIndex + 1);
-      newHistory.push({ items: [...items], strokes: [...strokes] });
+      newHistory.push({ items: [...items], strokes: [...strokes], bg: canvasBg });
       return newHistory;
     });
     setHistoryIndex((prev) => prev + 1);
@@ -428,6 +440,7 @@ export default function ModuleIdeation({ userId }: Props) {
     const state = history[historyIndex];
     setItems(state.items);
     setStrokes(state.strokes);
+    setCanvasBg(state.bg);
     setHistoryIndex((prev) => prev - 1);
   };
 
@@ -437,6 +450,7 @@ export default function ModuleIdeation({ userId }: Props) {
     const state = history[historyIndex + 1];
     setItems(state.items);
     setStrokes(state.strokes);
+    setCanvasBg(state.bg);
     setHistoryIndex((prev) => prev + 1);
   };
 
@@ -619,10 +633,25 @@ export default function ModuleIdeation({ userId }: Props) {
             <div className="flex-1 bg-amber-50 border-2 border-amber-300 rounded-b-xl p-2 overflow-y-auto">
               <div className="grid grid-cols-4 gap-2">
                 {MATERIALS[materialTab].map((item, i) => (
-                  <div key={i} draggable onDragStart={(e) => { e.dataTransfer.setData("text/plain", JSON.stringify({ emoji: item.emoji, size: materialTab === "bg" ? 60 : 40 })); e.dataTransfer.effectAllowed = "copy"; }}
-                    className="flex flex-col items-center p-2 rounded-lg hover:bg-amber-100 cursor-grab active:cursor-grabbing transition select-none">
-                    <span className="text-2xl leading-none">{item.emoji}</span>
-                    <span className="text-xs text-amber-800 font-bold mt-1">{item.label}</span>
+                  <div key={i} draggable
+                    onDragStart={(e) => {
+                      const bgItem = item as any;
+                      const dragData = materialTab === "bg"
+                        ? { type: "bg", bg: bgItem.bg, label: item.label }
+                        : { emoji: bgItem.emoji, size: 40 };
+                      e.dataTransfer.setData("text/plain", JSON.stringify(dragData));
+                      e.dataTransfer.effectAllowed = "copy";
+                    }}
+                    className="flex flex-col items-center p-2 rounded-lg hover:bg-amber-100 cursor-grab active:cursor-grabbing transition select-none"
+                    style={materialTab === "bg" ? { background: (item as any).bg, minHeight: 50, borderRadius: 8 } : {}}>
+                    {materialTab === "bg" ? (
+                      <span className="text-xs text-white font-bold drop-shadow-md">{item.label}</span>
+                    ) : (
+                      <>
+                        <span className="text-2xl leading-none">{(item as any).emoji}</span>
+                        <span className="text-xs text-amber-800 font-bold mt-1">{item.label}</span>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -631,7 +660,7 @@ export default function ModuleIdeation({ userId }: Props) {
 
           {/* 中间画布 */}
           <div className="flex-1 bg-gray-200 rounded-2xl shadow-inner p-4 flex justify-center items-center border-4 border-gray-300 relative overflow-hidden">
-            <div className="bg-white shadow-2xl relative shrink-0" style={{ width: "100%", maxWidth: CW, height: CH }}>
+            <div className="shadow-2xl relative shrink-0" style={{ width: "100%", maxWidth: CW, height: CH, background: canvasBg }}>
               <canvas ref={canvasRef} className="block absolute top-0 left-0 w-full h-full z-10" style={{ cursor: mode === "draw" ? "crosshair" : "default" }}
                 onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
                 onDragOver={handleDragOver} onDrop={handleDrop} />

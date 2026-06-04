@@ -629,13 +629,26 @@ function StudentsManagement() {
 
   // ---- 随机分配SRL条件 ----
   const handleAssignSRL = async () => {
-    if (!confirm("将按班级随机分配学生到「对照组」和「实验组」，已有分配会被覆盖。确定继续？")) return;
+    const scope = selectedNode.type === "class"
+      ? `${selectedNode.grade}年级${selectedNode.classNum}班`
+      : selectedNode.type === "grade"
+      ? `${selectedNode.grade}年级全部班级`
+      : "全部学生";
+    if (!confirm(`将对「${scope}」进行随机分组，已有分配会被覆盖。确定继续？`)) return;
     setAssigningSRL(true);
     try {
       const token = await getAuthToken();
+      const body: any = {};
+      if (selectedNode.type === "class" || selectedNode.type === "grade") {
+        body.grade = selectedNode.grade;
+      }
+      if (selectedNode.type === "class" && selectedNode.classNum) {
+        body.class_num = selectedNode.classNum;
+      }
       const res = await fetch("/api/admin/assign-srl", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
       });
       const result = await res.json();
       if (res.ok) {

@@ -199,9 +199,16 @@ export default function ModuleCreate({ userId }: Props) {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ messages: newRaw.map((m) => ({ role: m.role, content: m.content })), currentCode: htmlCode || undefined, sessionId: currentConvId }),
       });
-      if (!res.ok) { setLoading(false); sendingRef.current = false; return; }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert("请求失败：" + (err.error || `HTTP ${res.status}`));
+        setLoading(false); sendingRef.current = false; return;
+      }
       await processStream(res);
-    } catch {} finally { setLoading(false); sendingRef.current = false; }
+    } catch (e: any) {
+      console.error("发送失败:", e);
+      alert("发送失败：" + (e.message || "未知错误"));
+    } finally { setLoading(false); sendingRef.current = false; }
   };
 
   const handleSend = async () => { if (input.trim()) await handleSendWithContent(input.trim()); };

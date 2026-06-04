@@ -2,20 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/deepseek";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
 
-// 按班级随机分配SRL条件（每班平均分配 srl_scaffold 和 control）
+// 按指定班级随机分配SRL条件（每班平均分配 srl_scaffold 和 control）
 export async function POST(req: NextRequest) {
   const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
   const adminCheck = await getVerifiedAdmin(token);
   if (adminCheck instanceof NextResponse) return adminCheck;
 
   try {
-    // 获取所有未分配的学生，按年级班级分组
-    const { data: students, error } = await supabaseAdmin
+    const body = await req.json().catch(() => ({}));
+    const { grade, class_num } = body;
+
+    // 查询学生（可按年级/班级筛选）
+    let query = supabaseAdmin
       .from("users")
       .select("id, grade, class_num")
-      .eq("role", "student")
-      .order("grade")
-      .order("class_num");
+      .eq("role", "student");
+
+    if (grade) query = query.eq("grade", parseInt(grade));
+    if (class_num) query = query.eq("class_num", parseInt(class_num));
+
+    const { data: students, error } = await query.order("grade").order("class_num");
 
     if (error) throw error;
     if (!students || students.length === 0) {
