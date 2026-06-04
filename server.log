@@ -383,3 +383,27 @@ Import traces:
  GET /api/admin/students 200 in 272ms (next.js: 1808µs, application-code: 271ms)
 ✓ Compiled in 93ms
  GET /admin 200 in 122ms (next.js: 87ms, application-code: 35ms)
+ GET /api/admin/students 200 in 713ms (next.js: 76ms, application-code: 636ms)
+ GET /api/admin/students? 200 in 315ms (next.js: 1818µs, application-code: 314ms)
+ GET /api/admin/students 200 in 262ms (next.js: 1927µs, application-code: 260ms)
+ GET /api/admin/students? 200 in 312ms (next.js: 2ms, application-code: 309ms)
+ GET /admin 200 in 213ms (next.js: 68ms, application-code: 145ms)
+ GET /admin 200 in 113ms (next.js: 4ms, application-code: 109ms)
+ GET /admin 200 in 89ms (next.js: 5ms, application-code: 84ms)
+ GET /admin 200 in 89ms (next.js: 24ms, application-code: 65ms)
+ GET /admin 200 in 89ms (next.js: 44ms, application-code: 45ms)
+ GET /admin 200 in 89ms (next.js: 64ms, application-code: 25ms)
+TypeError: fetch failed
+    at ignore-listed frames {
+  [cause]: Error [ConnectTimeoutError]: Connect Timeout Error (attempted addresses: 172.64.149.246:443, 104.18.38.10:443, timeout: 10000ms)
+      at ignore-listed frames {
+    code: 'UND_ERR_CONNECT_TIMEOUT'
+  }
+}
+TypeError: fetch failed
+    at ignore-listed frames {
+  [cause]: Error [ConnectTimeoutError]: Connect Timeout Error (attempted addresses: 172.64.149.246:443, 104.18.38.10:443, timeout: 10000ms)
+      at ignore-listed frames {
+    code: 'UND_ERR_CONNECT_TIMEOUT'
+  }
+}
