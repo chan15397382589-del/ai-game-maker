@@ -1,9 +1,36 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import XiaozhiAvatar from "@/components/XiaozhiAvatar";
+
+// AI消息自动格式化：提问高亮、正向反馈加色、游戏规则加粗
+function formatAIMessage(text: string): ReactNode[] {
+  const lines = text.split("\n");
+  return lines.map((line, i) => {
+    if (!line.trim()) return <p key={i}>&nbsp;</p>;
+    const isQuestion = /[？?]/.test(line) && !/^[✅❌⚠️▶️\-]/.test(line);
+    const isRule = /^[\-·•]\s/.test(line.trim()) || /怎么玩|按.*键|点击.*屏|跳起来|躲开|分数|越来越/.test(line);
+    const positiveMatch = line.match(/(好[呀啊的！!]?|不错|真棒|厉害|太好了|很好|对[！!]?\s*[，,]?|你说得[很对]+|清楚|明白了|好规则)/);
+    if (isQuestion) {
+      return <p key={i} className={`ai-question ${i > 0 ? "mt-1" : ""}`}>{line}</p>;
+    }
+    if (isRule) {
+      return <p key={i} className={`ai-rule ${i > 0 ? "mt-1" : ""}`}>{line}</p>;
+    }
+    if (positiveMatch) {
+      const parts = line.split(positiveMatch[0]);
+      return (
+        <p key={i} className={i > 0 ? "mt-1" : ""}>
+          {parts[0]}<span className="ai-positive">{positiveMatch[0]}</span>{parts[1]}
+        </p>
+      );
+    }
+    return <p key={i} className={i > 0 ? "mt-1" : ""}>{line}</p>;
+  });
+}
 
 // ============================================================
 // 常量与类型
@@ -22,6 +49,7 @@ interface StudentRow {
   gender: string;
   grade: number | null;
   class_num: number | null;
+  srl_condition?: string | null;
   password?: string;
   status?: string;
   created_at?: string;
@@ -73,7 +101,7 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState("");
   const [ready, setReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "classifications">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "classifications" | "prior_knowledge" | "data_tracking" | "game_maker" | "tasks">("students");
   const router = useRouter();
 
   useEffect(() => { checkUser(); }, []);
@@ -132,6 +160,10 @@ export default function AdminDashboard() {
             { key: "messages", label: "💬 对话记录" },
             { key: "projects", label: "🎮 作品审核" },
             { key: "classifications", label: "📊 学生分类" },
+            { key: "prior_knowledge", label: "📝 学生前测" },
+            { key: "data_tracking", label: "  数据采集" },
+            { key: "tasks", label: "  任务数据" },
+            { key: "game_maker", label: "  游戏制作" },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -154,6 +186,14 @@ export default function AdminDashboard() {
             <StudentsManagement />
           ) : activeTab === "classifications" ? (
             <ClassificationsView />
+          ) : activeTab === "prior_knowledge" ? (
+            <PriorKnowledgeView />
+          ) : activeTab === "data_tracking" ? (
+            <DataTrackingView />
+          ) : activeTab === "tasks" ? (
+            <TasksDataView />
+          ) : activeTab === "game_maker" ? (
+            <GameMaker />
           ) : (
             <div className="bg-white rounded-2xl shadow-md p-6">
               {activeTab === "messages" && <MessagesAudit />}
@@ -195,6 +235,7 @@ function StudentsManagement() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchDeleting, setBatchDeleting] = useState(false);
   const [resettingPwd, setResettingPwd] = useState(false);
+  const [assigningSRL, setAssigningSRL] = useState(false);
 
   // 新增学生表单
   const [addForm, setAddForm] = useState({ name: "", student_id: "", gender: "男", grade: 3, class_num: 1, password: "123456" });
@@ -453,6 +494,27 @@ function StudentsManagement() {
     }
   };
 
+  // ---- 重置学生对话 ----
+  const handleResetStudent = async (userId: string, name: string) => {
+    if (!confirm(`确定要重置「${name}」的所有对话数据吗？\n\n将删除：所有对话、消息、游戏快照、交互事件\n此操作不可恢复！`)) return;
+    try {
+      const token = await getAuthToken();
+      const res = await fetch("/api/admin/reset-conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ userId }),
+      });
+      const result = await res.json();
+      if (res.ok) {
+        alert(result.message || "重置成功");
+      } else {
+        alert("重置失败：" + (result.error || "未知错误"));
+      }
+    } catch (err: any) {
+      alert("重置异常：" + err.message);
+    }
+  };
+
   // ---- 编辑学生 ----
   const handleEditStudent = (s: StudentRow) => {
     setEditStudent(s);
@@ -562,6 +624,32 @@ function StudentsManagement() {
       alert("重置异常：" + err.message);
     } finally {
       setResettingPwd(false);
+    }
+  };
+
+  // ---- 随机分配SRL条件 ----
+  const handleAssignSRL = async () => {
+    if (!confirm("将按班级随机分配学生到「对照组」和「实验组」，已有分配会被覆盖。确定继续？")) return;
+    setAssigningSRL(true);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch("/api/admin/assign-srl", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await res.json();
+      if (res.ok) {
+        alert(result.message + "\n\n" + (result.details || []).map((d: any) =>
+          `${d.grade_class}: 共${d.total}人 → 实验组${d.scaffold}人 + 对照组${d.control}人`
+        ).join("\n"));
+        fetchStudents();
+      } else {
+        alert("分配失败：" + (result.error || "未知错误"));
+      }
+    } catch (err: any) {
+      alert("分配异常：" + err.message);
+    } finally {
+      setAssigningSRL(false);
     }
   };
 
@@ -699,6 +787,10 @@ function StudentsManagement() {
                 className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-3 py-2 rounded-lg transition flex items-center gap-1 disabled:opacity-50">
                 {resettingPwd ? "重置中..." : "🔑 重置密码"}
               </button>
+              <button onClick={handleAssignSRL} disabled={assigningSRL}
+                className="bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium px-3 py-2 rounded-lg transition flex items-center gap-1 disabled:opacity-50">
+                {assigningSRL ? "分配中..." : "  随机分组"}
+              </button>
             </div>
           </div>
           {/* 搜索框 */}
@@ -751,6 +843,7 @@ function StudentsManagement() {
                   <th className="py-3 px-4 font-semibold text-gray-700">学号</th>
                   <th className="py-3 px-4 font-semibold text-gray-700">年级</th>
                   <th className="py-3 px-4 font-semibold text-gray-700">班级</th>
+                  <th className="py-3 px-4 font-semibold text-gray-700">分组</th>
                   <th className="py-3 px-4 font-semibold text-gray-700">创建时间</th>
                   <th className="py-3 px-4 font-semibold text-gray-700 text-right">操作</th>
                 </tr>
@@ -766,6 +859,15 @@ function StudentsManagement() {
                     <td className="py-2.5 px-4 text-gray-600 font-mono text-xs">{s.student_id}</td>
                     <td className="py-2.5 px-4 text-gray-500">{gradeLabel(s.grade)}</td>
                     <td className="py-2.5 px-4 text-gray-500">{s.class_num ? `${s.class_num}班` : "-"}</td>
+                    <td className="py-2.5 px-4">
+                      {s.srl_condition === "srl_scaffold" ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-purple-100 text-purple-700 font-medium">实验组</span>
+                      ) : s.srl_condition === "control" ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-blue-100 text-blue-700 font-medium">对照组</span>
+                      ) : (
+                        <span className="text-gray-300 text-xs">未分组</span>
+                      )}
+                    </td>
                     <td className="py-2.5 px-4 text-gray-400 text-xs">
                       {s.created_at ? new Date(s.created_at).toLocaleDateString("zh-CN") : "-"}
                     </td>
@@ -782,6 +884,12 @@ function StudentsManagement() {
                           className="text-amber-500 hover:text-amber-700 hover:bg-amber-50 px-2 py-1 rounded text-xs transition"
                         >
                           编辑
+                        </button>
+                        <button
+                          onClick={() => handleResetStudent(s.id!, s.name)}
+                          className="text-orange-500 hover:text-orange-700 hover:bg-orange-50 px-2 py-1 rounded text-xs transition"
+                        >
+                          重置对话
                         </button>
                         <button
                           onClick={() => handleDeleteStudent(s.id!, s.name)}
@@ -1286,6 +1394,56 @@ function MessagesAudit() {
           disabled={exporting}
           className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
             {exporting ? "导出中..." : "📊 导出学生反馈"}
+          </button>
+          <span className="text-xs text-gray-300 mx-1">|</span>
+          <button onClick={async () => {
+            setExporting(true);
+            try {
+              const token = await getAuthToken();
+              if (!token) return;
+              const url = selectedStudent
+                ? `/api/admin/coding-export?user_id=${encodeURIComponent(selectedStudent)}`
+                : "/api/admin/coding-export";
+              const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+              if (!res.ok) { alert("导出失败"); return; }
+              const rows = await res.json();
+              if (!rows.length) { alert("暂无对话数据"); return; }
+              const excelRows = rows.map((r: any) => ({
+                "编码员": r.coder_id,
+                "学号": r.student_id,
+                "姓名": r.student_name,
+                "年级": r.grade,
+                "班级": r.class_num,
+                "SRL分组": r.srl_condition,
+                "会话ID": r.session_id?.slice(0, 8) || "",
+                "轮次": r.turn_id,
+                "时间": r.timestamp,
+                "输入方式": r.input_method === "voice" ? "语音" : r.input_method === "text" ? "文字" : "",
+                "学生发言": r.student_text,
+                "AI回复摘要": r.ai_text,
+                "AI行为码": r.ai_code,
+                "学生主码": r.student_primary_code,
+                "学生辅码1": r.student_aux_code_1,
+                "学生辅码2": r.student_aux_code_2,
+                "CT实践": r.ct_mapping,
+                "备注": r.notes,
+              }));
+              const ws = XLSX.utils.json_to_sheet(excelRows);
+              ws["!cols"] = [
+                { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 6 }, { wch: 6 },
+                { wch: 12 }, { wch: 10 }, { wch: 6 }, { wch: 18 }, { wch: 6 },
+                { wch: 50 }, { wch: 50 }, { wch: 8 },
+                { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 20 },
+              ];
+              const wb = XLSX.utils.book_new();
+              XLSX.utils.book_append_sheet(wb, ws, "行为编码表");
+              XLSX.writeFile(wb, `行为编码表_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            } catch { alert("导出失败"); }
+            finally { setExporting(false); }
+          }}
+          disabled={exporting}
+          className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
+            {exporting ? "导出中..." : "  导出编码表"}
           </button>
         </div>
 
@@ -1869,4 +2027,1102 @@ function ReflectionCard({ reflectionJson }: { reflectionJson: string }) {
   } catch {
     return null;
   }
+}
+
+// ============================================================
+// 学生前测查看
+// ============================================================
+function PriorKnowledgeView() {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const token = await getAuthToken();
+        if (!token) return;
+        const res = await fetch("/api/admin/prior-knowledge", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setData(await res.json());
+      } catch (err) {
+        console.error("获取前测数据失败:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const answeredCount = data.filter((d) => !d.skipped).length;
+  const skippedCount = data.filter((d) => d.skipped).length;
+
+  if (loading) {
+    return <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">
+      <p className="animate-pulse">加载中...</p>
+    </div>;
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold text-gray-800">📝 学生前测</h2>
+        <button
+          onClick={() => {
+            const rows = data.map((d) => ({
+              "学生姓名": d.student_name,
+              "学号": d.student_id,
+              "年级": d.grade ? `${d.grade}年级` : "",
+              "班级": d.class_num ? `${d.class_num}班` : "",
+              "Q1:玩过什么游戏": d.skipped ? "（跳过）" : (d.q1_gaming || ""),
+              "Q2:学过编程吗": d.skipped ? "（跳过）" : (d.q2_programming || ""),
+              "Q3:喜欢什么游戏": d.skipped ? "（跳过）" : (d.q3_favorite || ""),
+              "是否跳过": d.skipped ? "是" : "否",
+              "提交时间": d.created_at ? new Date(d.created_at).toLocaleString("zh-CN") : "",
+            }));
+            const ws = XLSX.utils.json_to_sheet(rows);
+            ws["!cols"] = [
+              { wch: 10 }, { wch: 12 }, { wch: 6 }, { wch: 6 },
+              { wch: 40 }, { wch: 30 }, { wch: 40 },
+              { wch: 8 }, { wch: 16 },
+            ];
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "学生前测");
+            XLSX.writeFile(wb, `学生前测_${new Date().toISOString().slice(0, 10)}.xlsx`);
+          }}
+          disabled={data.length === 0}
+          className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+        >
+          📊 导出Excel
+        </button>
+      </div>
+
+      {/* 统计卡片 */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+          <p className="text-3xl font-bold text-indigo-600">{data.length}</p>
+          <p className="text-sm text-gray-500 mt-1">总人数</p>
+        </div>
+        <div className="bg-green-50 rounded-xl border border-green-200 p-4 text-center">
+          <p className="text-3xl font-bold text-green-600">{answeredCount}</p>
+          <p className="text-sm text-green-700 mt-1">已作答</p>
+        </div>
+        <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 text-center">
+          <p className="text-3xl font-bold text-gray-500">{skippedCount}</p>
+          <p className="text-sm text-gray-600 mt-1">已跳过</p>
+        </div>
+      </div>
+
+      {/* 数据表格 */}
+      {data.length === 0 ? (
+        <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">
+          暂无前测数据
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">姓名</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">学号</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">年级班级</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">玩过什么游戏</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">学过编程吗</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">喜欢什么游戏</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-600">状态</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">时间</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {data.map((d) => (
+                  <tr key={d.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium text-gray-800">{d.student_name}</td>
+                    <td className="px-4 py-3 text-gray-600">{d.student_id}</td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {d.grade ? `${d.grade}年级` : ""}{d.class_num ? `${d.class_num}班` : ""}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 max-w-[200px]">
+                      {d.skipped ? <span className="text-gray-400">—</span> : <span className="line-clamp-2">{d.q1_gaming || "—"}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 max-w-[200px]">
+                      {d.skipped ? <span className="text-gray-400">—</span> : <span className="line-clamp-2">{d.q2_programming || "—"}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 max-w-[200px]">
+                      {d.skipped ? <span className="text-gray-400">—</span> : <span className="line-clamp-2">{d.q3_favorite || "—"}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {d.skipped ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-500">跳过</span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">已答</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-gray-400 text-xs">
+                      {d.created_at ? new Date(d.created_at).toLocaleString("zh-CN") : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 数据采集视图
+// ============================================================
+
+function DataTrackingView() {
+  const [data, setData] = useState<{ interactionEvents: any[]; gameEvents: any[]; inputMethodStats: any }>({
+    interactionEvents: [],
+    gameEvents: [],
+    inputMethodStats: { text: 0, voice: 0, hasCode: 0 },
+  });
+  const [loading, setLoading] = useState(true);
+  const [activeSubTab, setActiveSubTab] = useState<"interaction" | "game">("interaction");
+  const [filterType, setFilterType] = useState<string>("");
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const token = await getAuthToken();
+        if (!token) return;
+        const res = await fetch("/api/admin/tracking", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) setData(await res.json());
+      } catch (err) {
+        console.error("获取追踪数据失败:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const undoCount = data.interactionEvents.filter((e) => e.event_type === "undo").length;
+  const redoCount = data.interactionEvents.filter((e) => e.event_type === "redo").length;
+  const totalInteraction = data.interactionEvents.length;
+  const totalGame = data.gameEvents.length;
+
+  const filteredInteraction = filterType
+    ? data.interactionEvents.filter((e) => e.event_type === filterType)
+    : data.interactionEvents;
+
+  const eventTypes = [...new Set(data.interactionEvents.map((e) => e.event_type))];
+
+  if (loading) {
+    return <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">
+      <p className="animate-pulse">加载中...</p>
+    </div>;
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold text-gray-800">  数据采集</h2>
+        <button
+          onClick={() => {
+            const date = new Date().toISOString().slice(0, 10);
+            const wb = XLSX.utils.book_new();
+            const intRows = data.interactionEvents.map((e) => ({
+              "学生姓名": e.student_name,
+              "学号": e.student_id,
+              "年级": e.grade ? `${e.grade}年级` : "",
+              "班级": e.class_num ? `${e.class_num}班` : "",
+              "事件类型": e.event_type,
+              "附加信息": JSON.stringify(e.metadata || {}),
+              "时间": e.created_at ? new Date(e.created_at).toLocaleString("zh-CN") : "",
+            }));
+            const ws1 = XLSX.utils.json_to_sheet(intRows.length > 0 ? intRows : [{ "提示": "暂无数据" }]);
+            ws1["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 6 }, { wch: 6 }, { wch: 16 }, { wch: 40 }, { wch: 16 }];
+            XLSX.utils.book_append_sheet(wb, ws1, "交互事件");
+            const gameRows = data.gameEvents.map((e) => ({
+              "学生姓名": e.student_name,
+              "学号": e.student_id,
+              "年级": e.grade ? `${e.grade}年级` : "",
+              "班级": e.class_num ? `${e.class_num}班` : "",
+              "事件类型": e.event_type,
+              "游戏数据": JSON.stringify(e.event_data || {}),
+              "时间": e.created_at ? new Date(e.created_at).toLocaleString("zh-CN") : "",
+            }));
+            const ws2 = XLSX.utils.json_to_sheet(gameRows.length > 0 ? gameRows : [{ "提示": "暂无数据" }]);
+            ws2["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 6 }, { wch: 6 }, { wch: 16 }, { wch: 40 }, { wch: 16 }];
+            XLSX.utils.book_append_sheet(wb, ws2, "游戏事件");
+            const statsRows = [
+              { "指标": "文字输入次数", "数值": data.inputMethodStats.text },
+              { "指标": "语音输入次数", "数值": data.inputMethodStats.voice },
+              { "指标": "AI回复含代码次数", "数值": data.inputMethodStats.hasCode },
+              { "指标": "Undo次数", "数值": undoCount },
+              { "指标": "Redo次数", "数值": redoCount },
+            ];
+            const ws3 = XLSX.utils.json_to_sheet(statsRows);
+            ws3["!cols"] = [{ wch: 20 }, { wch: 10 }];
+            XLSX.utils.book_append_sheet(wb, ws3, "统计概览");
+            XLSX.writeFile(wb, `数据采集_${date}.xlsx`);
+          }}
+          disabled={totalInteraction + totalGame === 0}
+          className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+        >
+          📊 导出Excel
+        </button>
+      </div>
+
+      {/* 统计卡片 */}
+      <div className="grid grid-cols-5 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+          <p className="text-3xl font-bold text-indigo-600">{totalInteraction + totalGame}</p>
+          <p className="text-sm text-gray-500 mt-1">总事件数</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+          <p className="text-3xl font-bold text-blue-600">{totalInteraction}</p>
+          <p className="text-sm text-gray-500 mt-1">交互事件</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+          <p className="text-3xl font-bold text-purple-600">{totalGame}</p>
+          <p className="text-sm text-gray-500 mt-1">游戏事件</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+          <p className="text-3xl font-bold text-orange-600">{undoCount + redoCount}</p>
+          <p className="text-sm text-gray-500 mt-1">Undo/Redo</p>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+          <p className="text-3xl font-bold text-green-600">{data.inputMethodStats.voice}</p>
+          <p className="text-sm text-gray-500 mt-1">语音输入</p>
+        </div>
+      </div>
+
+      {/* 子Tab + 筛选 */}
+      <div className="flex items-center gap-4 mb-4">
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setActiveSubTab("interaction"); setFilterType(""); }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              activeSubTab === "interaction" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            交互事件 ({totalInteraction})
+          </button>
+          <button
+            onClick={() => setActiveSubTab("game")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              activeSubTab === "game" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
+          >
+            游戏事件 ({totalGame})
+          </button>
+        </div>
+        {activeSubTab === "interaction" && eventTypes.length > 0 && (
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
+          >
+            <option value="">全部类型</option>
+            {eventTypes.map((t) => (
+              <option key={t} value={t}>{t}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* 数据表格 */}
+      {activeSubTab === "interaction" ? (
+        filteredInteraction.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">暂无交互事件数据</div>
+        ) : (
+          <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">姓名</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">学号</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">年级班级</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">事件类型</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">附加信息</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">时间</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredInteraction.slice(0, 200).map((e) => (
+                    <tr key={e.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-800">{e.student_name}</td>
+                      <td className="px-4 py-3 text-gray-600">{e.student_id}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {e.grade ? `${e.grade}年级` : ""}{e.class_num ? `${e.class_num}班` : ""}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">{e.event_type}</span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">
+                        {e.metadata && Object.keys(e.metadata).length > 0 ? JSON.stringify(e.metadata) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">
+                        {e.created_at ? new Date(e.created_at).toLocaleString("zh-CN") : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      ) : (
+        data.gameEvents.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">暂无游戏事件数据</div>
+        ) : (
+          <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">姓名</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">学号</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">年级班级</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">事件类型</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">游戏数据</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">时间</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {data.gameEvents.slice(0, 200).map((e) => (
+                    <tr key={e.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-800">{e.student_name}</td>
+                      <td className="px-4 py-3 text-gray-600">{e.student_id}</td>
+                      <td className="px-4 py-3 text-gray-600">
+                        {e.grade ? `${e.grade}年级` : ""}{e.class_num ? `${e.class_num}班` : ""}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-700">{e.event_type}</span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">
+                        {e.event_data && Object.keys(e.event_data).length > 0 ? JSON.stringify(e.event_data) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">
+                        {e.created_at ? new Date(e.created_at).toLocaleString("zh-CN") : ""}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 任务数据查看
+// ============================================================
+function TasksDataView() {
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [groupMessages, setGroupMessages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTaskTab, setActiveTaskTab] = useState<"designs" | "discussions">("designs");
+  const [selectedTaskId, setSelectedTaskId] = useState("1-1");
+
+  const fetchTasks = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      const res = await fetch(`/api/admin/tasks?task_id=${selectedTaskId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setTasks(await res.json());
+    } catch {}
+    finally { setLoading(false); }
+  }, [selectedTaskId]);
+
+  const fetchGroupMessages = useCallback(async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      const res = await fetch("/api/admin/group-messages", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setGroupMessages(await res.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchTasks(); fetchGroupMessages(); }, [fetchTasks, fetchGroupMessages]);
+
+  // 导出设计图到Word
+  const exportDesignsToWord = async () => {
+    const designs = tasks.filter((t: any) => t.design_image);
+    if (designs.length === 0) { alert("没有设计图数据"); return; }
+
+    const docHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>学生设计图</title>
+      <style>body{font-family:Arial;padding:20px}h1{text-align:center}.student{margin:30px 0;padding:20px;border:1px solid #ddd;border-radius:8px}
+      h2{color:#333}img{max-width:400px;border:1px solid #ccc;border-radius:8px;margin:10px 0}
+      .rules{background:#f5f5f5;padding:15px;border-radius:8px;margin:10px 0}
+      .rule{margin:5px 0}</style></head><body>
+      <h1>学生游戏设计图汇总</h1>
+      ${designs.map((t: any) => `
+        <div class="student">
+          <h2>${t.user?.name || '未知'} (${t.user?.student_id || ''})</h2>
+          <p>游戏名称：${t.game_name || '未命名'}</p>
+          <img src="${t.design_image}" alt="设计图" />
+          <div class="rules">
+            <strong>游戏规则：</strong>
+            ${(t.game_rules || []).map((r: string, i: number) => `<p class="rule">规则${i + 1}：如果${r}，就____________</p>`).join('')}
+          </div>
+          <p><strong>设计理由：</strong>${t.design_reason || '未填写'}</p>
+        </div>
+      `).join('')}
+    </body></html>`;
+
+    const blob = new Blob([docHtml], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `学生设计图_${selectedTaskId}_${new Date().toISOString().slice(0, 10)}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // 导出小组聊天记录
+  const exportGroupMessages = () => {
+    if (groupMessages.length === 0) { alert("没有聊天记录"); return; }
+
+    const csvContent = [
+      ["小组", "学生", "学号", "类型", "内容", "语音转文字", "时间"].join(","),
+      ...groupMessages.map((m: any) => [
+        m.group?.name || m.group_id,
+        m.sender?.name || "",
+        m.sender?.student_id || "",
+        m.message_type === "voice" ? "语音" : "文字",
+        `"${(m.content || "").replace(/"/g, '""')}"`,
+        `"${(m.voice_transcript || "").replace(/"/g, '""')}"`,
+        new Date(m.created_at).toLocaleString("zh-CN"),
+      ].join(","))
+    ].join("\n");
+
+    const blob = new Blob(["﻿" + csvContent], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `小组聊天记录_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-md p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-lg font-bold text-gray-800">  任务数据</h2>
+        <div className="flex gap-2">
+          <select
+            value={selectedTaskId}
+            onChange={(e) => setSelectedTaskId(e.target.value)}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+          >
+            <option value="survey">基础情况调查</option>
+            <option value="1-1">1-1 个人设计</option>
+            <option value="1-2">1-2 小组讨论</option>
+            <option value="2-1">2-1 AI协作</option>
+            <option value="2-2">2-2 修改迭代</option>
+            <option value="3-1">3-1 作品展示</option>
+            <option value="3-2">3-2 同伴互评</option>
+          </select>
+          <button
+            onClick={exportDesignsToWord}
+            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition"
+          >  导出Word</button>
+          <button
+            onClick={exportGroupMessages}
+            className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition"
+          >  导出聊天记录</button>
+        </div>
+      </div>
+
+      {/* 标签切换 */}
+      <div className="flex gap-2 mb-4">
+        <button
+          onClick={() => setActiveTaskTab("designs")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeTaskTab === "designs" ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-600"}`}
+        >  设计图</button>
+        <button
+          onClick={() => setActiveTaskTab("discussions")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeTaskTab === "discussions" ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-600"}`}
+        >  小组讨论</button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-40 text-gray-400">
+          <span className="animate-pulse">加载中...</span>
+        </div>
+      ) : selectedTaskId === "survey" ? (
+        /* 基础情况调查数据 */
+        <div className="overflow-x-auto">
+          {tasks.length === 0 ? (
+            <div className="text-center py-12 text-gray-400">暂无调查数据</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">姓名</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">学号</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">班级</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">玩过游戏吗</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">玩过哪些游戏</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">接触过编程吗</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">设计过游戏吗</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">好游戏最重要的是</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map((task: any) => {
+                  let answers: any = {};
+                  try { answers = JSON.parse(task.design_reason || "{}"); } catch {}
+                  return (
+                    <tr key={task.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium">{task.user?.name || "未知"}</td>
+                      <td className="px-4 py-3 text-gray-600 font-mono text-xs">{task.user?.student_id}</td>
+                      <td className="px-4 py-3 text-gray-500">{task.user?.grade}年级{task.user?.class_num}班</td>
+                      <td className="px-4 py-3 text-gray-600">{answers.q1 || "-"}</td>
+                      <td className="px-4 py-3 text-gray-600">{answers.q2 || "-"}</td>
+                      <td className="px-4 py-3 text-gray-600">{answers.q3 || "-"}</td>
+                      <td className="px-4 py-3 text-gray-600">{answers.q4 || "-"}</td>
+                      <td className="px-4 py-3 text-gray-600">{answers.q5 || "-"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : activeTaskTab === "designs" ? (
+        /* 设计图列表 */
+        <div className="grid grid-cols-2 gap-4">
+          {tasks.length === 0 ? (
+            <div className="col-span-2 text-center py-12 text-gray-400">暂无数据</div>
+          ) : (
+            tasks.map((task: any) => (
+              <div key={task.id} className="border border-gray-200 rounded-xl p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm font-bold text-gray-800">{task.user?.name || "未知"}</span>
+                  <span className="text-xs text-gray-400">{task.user?.student_id}</span>
+                  <span className="text-xs text-gray-400">{task.user?.grade}年级{task.user?.class_num}班</span>
+                </div>
+                {task.design_image ? (
+                  <img src={task.design_image} alt="设计图" className="w-full max-w-[300px] border border-gray-200 rounded-lg mb-3" />
+                ) : (
+                  <div className="w-full max-w-[300px] h-[200px] bg-gray-50 rounded-lg flex items-center justify-center mb-3">
+                    <span className="text-gray-300">无设计图</span>
+                  </div>
+                )}
+                {task.game_name && <p className="text-sm"><strong>游戏名：</strong>{task.game_name}</p>}
+                {task.game_rules && task.game_rules.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs font-medium text-gray-500">游戏规则：</p>
+                    {task.game_rules.map((rule: string, i: number) => (
+                      <p key={i} className="text-xs text-gray-600">规则{i + 1}：如果{rule}</p>
+                    ))}
+                  </div>
+                )}
+                {task.design_reason && <p className="text-xs text-gray-500 mt-2">设计理由：{task.design_reason}</p>}
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+        /* 小组讨论记录 */
+        <div className="space-y-4">
+          {groupMessages.length === 0 ? (
+            <div className="text-center py-12 text-gray-400">暂无小组讨论记录</div>
+          ) : (
+            Object.entries(
+              groupMessages.reduce((acc: any, msg: any) => {
+                const gid = msg.group_id;
+                if (!acc[gid]) acc[gid] = [];
+                acc[gid].push(msg);
+                return acc;
+              }, {})
+            ).map(([groupId, messages]: [string, any]) => (
+              <div key={groupId} className="border border-gray-200 rounded-xl p-4">
+                <h3 className="text-sm font-bold text-gray-700 mb-3">  {messages[0]?.group?.name || groupId}</h3>
+                <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                  {messages.map((msg: any) => (
+                    <div key={msg.id} className="flex items-start gap-2">
+                      <span className="text-xs font-medium text-indigo-600 w-16">{msg.sender?.name}</span>
+                      <div className="flex-1">
+                        {msg.message_type === "voice" ? (
+                          <div className="bg-amber-50 rounded-lg px-3 py-2">
+                            <p className="text-xs text-amber-700">🎤 语音消息</p>
+                            <p className="text-sm text-gray-700">{msg.voice_transcript || msg.content}</p>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-700">{msg.content}</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-400">{new Date(msg.created_at).toLocaleTimeString("zh-CN")}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// 游戏制作（教师演示用，可切换对照组/实验组）
+// 对齐学生端界面风格
+// ============================================================
+interface GameMakerState {
+  messages: { role: string; content: string }[];
+  rawMessages: { role: string; content: string }[];
+  htmlCode: string;
+  liveCode: string;
+  gameStarted: boolean;
+  convId: string | null;
+}
+
+function makeWelcome(mode: "control" | "srl_scaffold"): { role: string; content: string }[] {
+  const content = mode === "control"
+    ? "你好！我是小智老师（对照组模式：BASE引导）。你想做什么游戏？"
+    : "你好！我是小智老师（实验组模式：BASE+SRL元认知引导）。你想做什么游戏？先想一想——最重要的一条规则是什么？";
+  return [{ role: "assistant", content }];
+}
+
+function GameMaker() {
+  const [srlMode, setSrlMode] = useState<"control" | "srl_scaffold">("control");
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [isCoding, setIsCoding] = useState(false);
+  const [viewMode, setViewMode] = useState<"code" | "game">("code");
+  const [gameTitle, setGameTitle] = useState("");
+  const [saving, setSaving] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sendingRef = useRef(false);
+
+  // 两套独立状态
+  const [controlState, setControlState] = useState<GameMakerState>({
+    messages: makeWelcome("control"),
+    rawMessages: makeWelcome("control"),
+    htmlCode: "", liveCode: "", gameStarted: false, convId: null,
+  });
+  const [srlState, setSrlState] = useState<GameMakerState>({
+    messages: makeWelcome("srl_scaffold"),
+    rawMessages: makeWelcome("srl_scaffold"),
+    htmlCode: "", liveCode: "", gameStarted: false, convId: null,
+  });
+
+  const current = srlMode === "control" ? controlState : srlState;
+  const setCurrent = srlMode === "control" ? setControlState : setSrlState;
+
+  const switchMode = (mode: "control" | "srl_scaffold") => {
+    if (mode === srlMode || loading) return;
+    setSrlMode(mode);
+    setIsCoding(false);
+    setViewMode("code");
+  };
+
+  const extractHtmlCode = (content: string): string => {
+    const htmlFence = /```html\s*\n([\s\S]*?)```/i;
+    let match = content.match(htmlFence);
+    if (match) return match[1].trim();
+    const anyFence = /```\s*\n([\s\S]*?)```/;
+    match = content.match(anyFence);
+    if (match && match[1].includes("<")) return match[1].trim();
+    if (content.includes("<!DOCTYPE") || content.includes("<html")) {
+      const start = content.indexOf("<!DOCTYPE") !== -1 ? content.indexOf("<!DOCTYPE") : content.indexOf("<html");
+      const end = content.lastIndexOf("</html>");
+      if (start !== -1 && end !== -1) return content.substring(start, end + 7);
+    }
+    return "";
+  };
+
+  const extractTextOnly = (content: string): string => {
+    return content.replace(/```[\s\S]*?```/g, "").replace(/`[^`]+`/g, "").replace(/\*\*([^*]+)\*\*/g, "$1").trim();
+  };
+
+  // 创建/获取对话 session
+  const ensureConversation = async (token: string): Promise<string | null> => {
+    if (current.convId) return current.convId;
+    try {
+      const res = await fetch("/api/student/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: `游戏制作-${srlMode === "control" ? "对照组" : "实验组"}-${new Date().toLocaleString("zh-CN")}` }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const id = data.id || data.conversation?.id;
+        setCurrent((prev) => ({ ...prev, convId: id }));
+        return id;
+      }
+    } catch {}
+    return null;
+  };
+
+  // 发送消息
+  const handleSend = async () => {
+    if (!input.trim() || sendingRef.current) return;
+    const userMsg = input.trim();
+    setInput("");
+    sendingRef.current = true;
+
+    const userMsgObj = { role: "user", content: userMsg };
+    const newRaw = [...current.rawMessages, userMsgObj];
+    setCurrent((prev) => ({
+      ...prev,
+      messages: [...prev.messages, userMsgObj],
+      rawMessages: newRaw,
+    }));
+    setLoading(true);
+
+    try {
+      const token = await getAuthToken();
+      if (!token) { alert("请重新登录"); setLoading(false); sendingRef.current = false; return; }
+      const convId = await ensureConversation(token);
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          messages: newRaw.map((m) => ({ role: m.role, content: m.content })),
+          currentCode: current.htmlCode || undefined,
+          srlCondition: srlMode,
+          sessionId: convId,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert("请求失败：" + (err.error || `HTTP ${res.status}`));
+        setLoading(false);
+        sendingRef.current = false;
+        return;
+      }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let assistantContent = "";
+      let fenceCount = 0;
+      let lastDisplayLen = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.content) {
+              assistantContent += parsed.content;
+              const fenceMatches = parsed.content.match(/```/g);
+              if (fenceMatches) fenceCount += fenceMatches.length;
+              const inCodeBlock = fenceCount % 2 !== 0;
+              if (inCodeBlock) {
+                setIsCoding(true);
+                setViewMode("code");
+                const code = extractHtmlCode(assistantContent);
+                if (code) setCurrent((prev) => ({ ...prev, liveCode: code }));
+              }
+              const textOnly = extractTextOnly(assistantContent);
+              if (textOnly && textOnly.length - lastDisplayLen > 50) {
+                lastDisplayLen = textOnly.length;
+                setCurrent((prev) => {
+                  const msgs = [...prev.messages];
+                  const lastIdx = msgs.length - 1;
+                  if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) {
+                    msgs[lastIdx] = { role: "assistant", content: textOnly, _s: true } as any;
+                  } else {
+                    msgs.push({ role: "assistant", content: textOnly, _s: true } as any);
+                  }
+                  return { ...prev, messages: msgs };
+                });
+              }
+            }
+          } catch {}
+        }
+      }
+
+      setIsCoding(false);
+      const finalCode = extractHtmlCode(assistantContent);
+      const finalText = extractTextOnly(assistantContent) || assistantContent;
+
+      setCurrent((prev) => {
+        const msgs = [...prev.messages];
+        const lastIdx = msgs.length - 1;
+        if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) {
+          msgs[lastIdx] = { role: "assistant", content: finalText };
+        } else {
+          msgs.push({ role: "assistant", content: finalText });
+        }
+        return {
+          ...prev,
+          messages: msgs,
+          rawMessages: [...prev.rawMessages, { role: "assistant", content: assistantContent }],
+          htmlCode: finalCode || prev.htmlCode,
+          liveCode: finalCode || prev.liveCode,
+          gameStarted: false,
+        };
+      });
+      if (finalCode) setViewMode("game");
+
+    } catch (err: any) {
+      alert("请求异常：" + err.message);
+    } finally {
+      setLoading(false);
+      sendingRef.current = false;
+    }
+  };
+
+  // 上传作品
+  const handleUpload = async () => {
+    if (!current.htmlCode || !gameTitle.trim()) return;
+    setSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ game_title: gameTitle.trim(), html_code: current.htmlCode }),
+      });
+      if (res.ok) alert("上传成功！");
+      else alert("上传失败");
+    } catch { alert("上传异常"); }
+    finally { setSaving(false); }
+  };
+
+  // 下载游戏
+  const handleDownload = () => {
+    if (!current.htmlCode) return;
+    const blob = new Blob([current.htmlCode], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${gameTitle || "游戏"}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // 重置
+  const handleReset = () => {
+    const welcome = makeWelcome(srlMode);
+    setCurrent({
+      messages: welcome, rawMessages: welcome,
+      htmlCode: "", liveCode: "", gameStarted: false, convId: null,
+    });
+    setIsCoding(false);
+    setViewMode("code");
+    setGameTitle("");
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [current.messages]);
+
+  return (
+    <div className="flex gap-4 h-[calc(100vh-160px)] min-h-[500px]">
+      {/* ========== 左侧：模式选择 ========== */}
+      <div className="w-44 bg-white rounded-2xl shadow-md border border-gray-100 overflow-y-auto shrink-0 flex flex-col">
+        <div className="px-3 py-3 text-xs font-medium text-gray-500">  演示模式</div>
+        <div className="px-2 space-y-1">
+          {[
+            { key: "control" as const, label: "对照组", sub: "BASE引导", color: "blue", icon: " " },
+            { key: "srl_scaffold" as const, label: "实验组", sub: "BASE+SRL", color: "purple", icon: " " },
+          ].map((m) => (
+            <button
+              key={m.key}
+              onClick={() => switchMode(m.key)}
+              disabled={loading}
+              className={`w-full text-left px-3 py-3 rounded-xl transition text-sm ${
+                srlMode === m.key
+                  ? `bg-${m.color}-100 text-${m.color}-700 font-medium shadow-sm`
+                  : "text-gray-600 hover:bg-gray-50"
+              } ${loading ? "opacity-50 cursor-not-allowed" : ""}`}
+            >
+              <span className="text-base">{m.icon}</span>
+              <div className="font-medium mt-0.5">{m.label}</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">{m.sub}</div>
+              {srlMode === m.key && <div className={`absolute right-0 w-1 h-5 bg-${m.color}-500 rounded-full`} />}
+            </button>
+          ))}
+        </div>
+        <div className="border-t border-gray-100 mx-2 my-2" />
+        <div className="px-2">
+          <button onClick={handleReset} disabled={loading} className="w-full text-left px-3 py-2 rounded-xl text-xs text-gray-500 hover:bg-gray-50 transition disabled:opacity-50">
+              重新开始
+          </button>
+        </div>
+        <div className="flex-1" />
+        <div className="px-3 py-2 text-[10px] text-gray-400 border-t border-gray-100">
+          {srlMode === "control" ? "仅CT训练引导" : "CT训练 + 元认知觉察"}
+        </div>
+      </div>
+
+      {/* ========== 中间：对话区（对齐学生端） ========== */}
+      <div className="flex flex-col flex-1 border-r border-gray-200 bg-white rounded-2xl shadow-md overflow-hidden">
+        {/* 顶栏 */}
+        <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-indigo-600 text-white">
+          <h1 className="text-lg font-bold">  游戏制作演示</h1>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${srlMode === "control" ? "bg-blue-500" : "bg-purple-500"}`}>
+            {srlMode === "control" ? "对照组" : "实验组"}
+          </span>
+        </div>
+
+        {/* 消息列表 */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {current.messages.map((msg: any, i: number) => (
+            <div
+              key={`${srlMode}-${i}-${msg.content.length}`}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              {msg.role === "assistant" && (
+                <div className="w-14 h-14 flex-shrink-0 mr-3 mt-1">
+                  <XiaozhiAvatar state={
+                    i === current.messages.length - 1 && loading ? "thinking"
+                    : i === current.messages.length - 1 && current.htmlCode ? "success"
+                    : "idle"
+                  } />
+                </div>
+              )}
+              <div className={msg.role === "user" ? "chat-bubble-user" : `chat-bubble-ai max-w-[75%]`}>
+                {msg.role === "assistant"
+                  ? formatAIMessage(extractTextOnly(msg.content))
+                  : msg.content.split("\n").map((line: string, j: number) => (
+                      <p key={j} className={j > 0 ? "mt-1" : ""}>{line}</p>
+                    ))
+                }
+              </div>
+            </div>
+          ))}
+          {loading && !isCoding && (
+            <div className="flex justify-start">
+              <div className="chat-bubble-ai">
+                <span className="animate-pulse">小智老师正在思考...</span>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* 输入栏 */}
+        <div className="p-4 border-t border-gray-100 bg-gray-50">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              placeholder="和小智老师聊聊你想做的游戏..."
+              className="input-field flex-1"
+              disabled={loading}
+            />
+            <button onClick={handleSend} disabled={loading || !input.trim()} className="btn-primary disabled:opacity-50">
+              发送
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ========== 右侧：预览区（对齐学生端） ========== */}
+      <div className="flex flex-col flex-1 bg-gray-50 rounded-2xl shadow-md overflow-hidden">
+        {/* 标题栏 */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-white">
+          <h2 className="text-base font-bold text-gray-800 whitespace-nowrap">预览</h2>
+          <div className="flex flex-row rounded-lg bg-gray-100 p-0.5">
+            <button onClick={() => setViewMode("code")} className={`px-3 py-1.5 rounded-md text-xs font-medium transition whitespace-nowrap ${viewMode === "code" ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+              代码
+            </button>
+            <button onClick={() => setViewMode("game")} className={`px-3 py-1.5 rounded-md text-xs font-medium transition whitespace-nowrap ${viewMode === "game" ? "bg-white text-gray-800 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
+              游戏
+            </button>
+          </div>
+          <input type="text" value={gameTitle} onChange={(e) => setGameTitle(e.target.value)} placeholder="游戏名称" className="input-field w-20 text-xs px-2 py-1" />
+          <button onClick={handleUpload} disabled={!current.htmlCode || !gameTitle.trim() || saving} className="bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-1 rounded-lg text-xs font-medium transition disabled:opacity-50 whitespace-nowrap" title="上传到作品库">
+            {saving ? "..." : " 上传"}
+          </button>
+          <button onClick={handleDownload} disabled={!current.htmlCode} className="bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded-lg text-xs font-medium transition disabled:opacity-50 whitespace-nowrap" title="下载为 HTML 文件">
+             下载
+          </button>
+        </div>
+
+        {/* 代码视图 */}
+        {viewMode === "code" && (
+          <div className="flex-1 min-h-0 flex flex-col p-4">
+            {isCoding || current.liveCode || current.htmlCode ? (
+              <div className="flex-1 min-h-0 bg-gray-900 rounded-2xl overflow-hidden flex flex-col shadow-lg">
+                <div className="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700 flex-shrink-0">
+                  <div className={`w-2.5 h-2.5 rounded-full ${isCoding ? "bg-green-400 animate-pulse" : "bg-gray-500"}`}></div>
+                  <span className="text-gray-400 text-xs font-mono">{isCoding ? "正在编写代码..." : "game.html"}</span>
+                  <span className="ml-auto text-gray-600 text-xs font-mono">{(current.liveCode || current.htmlCode).split("\n").length} 行</span>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden relative">
+                  <div className="absolute inset-0 overflow-y-auto p-4 font-mono text-xs leading-5">
+                    {(current.liveCode || current.htmlCode).split("\n").map((line: string, i: number) => (
+                      <div key={i} className="flex">
+                        <span className="text-gray-600 w-8 text-right mr-3 select-none flex-shrink-0">{i + 1}</span>
+                        <span className="text-gray-300 whitespace-pre break-all">{line}</span>
+                      </div>
+                    ))}
+                    {isCoding && <span className="inline-block w-1.5 h-3.5 bg-green-400 animate-pulse ml-0.5 align-middle"></span>}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400">
+                <div className="text-center">
+                  <p className="text-5xl mb-3">&lt;/&gt;</p>
+                  <p className="text-sm">和 AI 对话来生成游戏代码</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 游戏视图 */}
+        {viewMode === "game" && (
+          <div className="flex-1 min-h-0 p-4">
+            {current.htmlCode ? (
+              current.gameStarted ? (
+                <iframe key={current.htmlCode} srcDoc={current.htmlCode} title="游戏预览" className="w-full h-full rounded-2xl bg-white shadow-inner" sandbox="allow-scripts" scrolling="no" />
+              ) : (
+                <div className="w-full h-full rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer hover:from-indigo-100 hover:to-purple-100 transition" onClick={() => setCurrent((prev) => ({ ...prev, gameStarted: true }))}>
+                  <div className="text-center">
+                    <div className="text-7xl mb-4 animate-bounce">▶️</div>
+                    <p className="text-2xl font-bold text-indigo-600 mb-2">先来玩一玩这个游戏吧！</p>
+                    <p className="text-sm text-indigo-400">点击开始试玩</p>
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-400">
+                <div className="text-center">
+                  <p className="text-6xl mb-4"> </p>
+                  <p className="text-lg">和 AI 对话，生成你的第一个游戏吧！</p>
+                  <p className="text-sm mt-2 text-gray-300">生成的游戏代码会自动显示在这里</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

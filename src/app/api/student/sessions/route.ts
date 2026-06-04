@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/deepseek";
 
-const MAX_CONVERSATIONS = 2; // 每位学生最多2个对话文档
-
 // 获取当前用户（从 token）
 async function getUser(req: NextRequest) {
   const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
@@ -64,19 +62,6 @@ export async function POST(req: NextRequest) {
     const user = await getUser(req);
     if (!user) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
-    }
-
-    // 检查是否已达到最大数量
-    const { count } = await supabaseAdmin
-      .from("conversations")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
-
-    if ((count || 0) >= MAX_CONVERSATIONS) {
-      return NextResponse.json(
-        { error: `每位学生最多只能有 ${MAX_CONVERSATIONS} 个对话文档，请先删除其他文档` },
-        { status: 400 }
-      );
     }
 
     // 创建新对话

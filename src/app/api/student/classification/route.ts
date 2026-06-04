@@ -9,7 +9,7 @@ async function getUser(req: NextRequest) {
   return user;
 }
 
-// POST — 保存学生分类评估结果
+// POST — 保存学生分类评估结果（支持前测/后测）
 export async function POST(req: NextRequest) {
   try {
     const user = await getUser(req);
@@ -20,13 +20,18 @@ export async function POST(req: NextRequest) {
     const {
       conversation_id, q1_answers, q2_answer, q3_answer,
       q1_score, q2_score, q3_score, total_score, group, total_time,
+      test_type,
     } = await req.json();
 
-    // 先删除旧记录（如果存在）
+    // test_type: 'pre'（默认）或 'post'
+    const type = test_type || "pre";
+
+    // 先删除同类型的旧记录（如果存在）
     await supabaseAdmin
       .from("student_classifications")
       .delete()
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("test_type", type);
 
     const { error } = await supabaseAdmin
       .from("student_classifications")
@@ -42,6 +47,7 @@ export async function POST(req: NextRequest) {
         total_score: total_score || 0,
         srl_group: group || "low_srl",
         total_time: total_time || 0,
+        test_type: type,
       });
 
     if (error) {
@@ -56,7 +62,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// GET — 获取学生分类结果
+// GET — 获取学生分类结果（支持 test_type 参数）
 export async function GET(req: NextRequest) {
   try {
     const user = await getUser(req);
@@ -64,10 +70,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
+    const url = new URL(req.url);
+    const testType = url.searchParams.get("test_type") || "pre";
+
     const { data } = await supabaseAdmin
       .from("student_classifications")
       .select("*")
       .eq("user_id", user.id)
+      .eq("test_type", testType)
       .limit(1)
       .single();
 

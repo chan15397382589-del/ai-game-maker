@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
     const filterGrade = searchParams.get("grade");
     const filterClass = searchParams.get("class_num");
 
-    let query = db.from("shared_items").select("*").order("created_at", { ascending: false });
+    let query = db.from("shared_items").select("id, user_id, conversation_id, game_title, html_code, grade, class_num, created_at").order("created_at", { ascending: false });
 
     if (filterGrade) {
       const grade = parseInt(filterGrade);

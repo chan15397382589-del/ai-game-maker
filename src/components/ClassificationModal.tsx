@@ -164,13 +164,13 @@ function shuffle(arr: any[]): any[] {
   return a;
 }
 
-interface Props { convId: string; onComplete: () => void; }
+interface Props { convId: string; onComplete: () => void; testType?: "pre" | "post"; }
 
 async function getToken(): Promise<string> {
   try { const { data: { session } } = await supabase.auth.getSession(); return session?.access_token || ""; } catch { return ""; }
 }
 
-export default function ClassificationModal({ convId, onComplete }: Props) {
+export default function ClassificationModal({ convId, onComplete, testType = "pre" }: Props) {
   const GAME_TIME = 15;
   const THINK_TIME = 5;
 
@@ -315,6 +315,7 @@ export default function ClassificationModal({ convId, onComplete }: Props) {
             total_score: scores.total, group: scores.group, total_time: totalTime,
             phase2_choices: phase2Choices,
             phase2_final_params: gameParams,
+            test_type: testType,
           }),
         });
       }

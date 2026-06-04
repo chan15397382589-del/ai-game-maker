@@ -8,31 +8,8 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const { data } = await supabase.auth.getUser();
-        if (!data.user) {
-          router.replace("/login");
-          return;
-        }
-
-        const { data: userData } = await supabase
-          .from("users")
-          .select("role")
-          .eq("id", data.user.id)
-          .single();
-
-        if (userData?.role === "admin") {
-          router.replace("/admin");
-        } else {
-          router.replace("/student");
-        }
-      } catch {
-        router.replace("/login");
-      }
-    };
-
-    checkAuth();
+    // 直接跳转到登录页，由登录页处理 session 检查
+    router.replace("/login");
   }, [router]);
 
   return (

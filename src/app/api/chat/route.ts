@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin, createChatCompletion, saveMessage } from "@/lib/deepseek";
+import { supabaseAdmin, createChatCompletion, saveMessage, classifyAiSuggestion } from "@/lib/deepseek";
 
 export async function POST(req: NextRequest) {
   try {
-    const { messages, sessionId, currentCode, group } = await req.json();
+    const { messages, sessionId, currentCode, srlCondition, inputMethod, skipSave } = await req.json();
 
     // 从请求头获取 token 并验证用户身份（不信任客户端传入的 userId）
     const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
@@ -19,15 +19,15 @@ export async function POST(req: NextRequest) {
     // 使用从 token 解析的真实 userId
     const userId = user.id;
 
-    // 保存用户消息到数据库
-    if (messages.length > 0) {
+    // 保存用户消息到数据库（skipSave=true 时不保存，用于静默重试）
+    if (!skipSave && messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === "user") {
-        await saveMessage(userId, "user", lastMessage.content, token, sessionId);
+        await saveMessage(userId, "user", lastMessage.content, token, sessionId, inputMethod);
       }
     }
 
-    const response = await createChatCompletion(messages, currentCode, group);
+    const response = await createChatCompletion(messages, currentCode, srlCondition);
 
     // 创建流式响应
     const stream = new ReadableStream({
@@ -36,16 +36,20 @@ export async function POST(req: NextRequest) {
         let assistantContent = "";
 
         try {
-          for await (const chunk of response) {
-            const content = chunk.choices[0]?.delta?.content || "";
-            assistantContent += content;
-            const data = `data: ${JSON.stringify({ content })}\n\n`;
-            controller.enqueue(encoder.encode(data));
+          for await (const event of response) {
+            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+              const content = event.delta.text;
+              assistantContent += content;
+              const data = `data: ${JSON.stringify({ content })}\n\n`;
+              controller.enqueue(encoder.encode(data));
+            }
           }
 
           // 流结束后，保存完整的 AI 回复到数据库
           if (assistantContent) {
-            await saveMessage(userId, "assistant", assistantContent, token, sessionId);
+            const hasCode = /```html/i.test(assistantContent) || /```[\s\S]*?```/.test(assistantContent);
+            const aiSuggestionType = classifyAiSuggestion(assistantContent);
+            await saveMessage(userId, "assistant", assistantContent, token, sessionId, undefined, hasCode, aiSuggestionType);
           }
         } catch (streamError: any) {
           // 流处理异常，发送错误事件后关闭

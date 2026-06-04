@@ -4,6 +4,7 @@ import { useState, useEffect, use } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { useRouter } from "next/navigation";
 import { validateComment } from "@/lib/profanity";
+import VoiceButton from "@/components/VoiceButton";
 
 const GRADES = [
   { value: 3, label: "三年级" },
@@ -35,6 +36,12 @@ interface Comment {
   author_name: string;
 }
 
+interface ChatMessage {
+  role: string;
+  content: string;
+  created_at: string;
+}
+
 async function getToken(): Promise<string> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -53,6 +60,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
 
   const [item, setItem] = useState<SharedItem | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
   const [commentError, setCommentError] = useState("");
@@ -64,7 +72,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
     supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) { router.push("/login"); return; }
       setUserId(data.user.id);
-      await Promise.all([fetchItem(), fetchComments()]);
+      await Promise.all([fetchItem(), fetchComments(), fetchChatMessages()]);
       setLoading(false);
     }).catch(() => router.push("/login"));
   }, []);
@@ -73,13 +81,11 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
     const token = await getToken();
     if (!token) return;
     try {
-      const res = await fetch("/api/reviews", {
+      const res = await fetch(`/api/reviews/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        const items: SharedItem[] = await res.json();
-        const found = items.find((i) => i.id === parseInt(id));
-        if (found) setItem(found);
+        setItem(await res.json());
       }
     } catch (err) {
       console.error("获取作品失败:", err);
@@ -96,6 +102,19 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
       if (res.ok) setComments(await res.json());
     } catch (err) {
       console.error("获取评论失败:", err);
+    }
+  };
+
+  const fetchChatMessages = async () => {
+    const token = await getToken();
+    if (!token) return;
+    try {
+      const res = await fetch(`/api/reviews/${id}/messages`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setChatMessages(await res.json());
+    } catch (err) {
+      console.error("获取对话记录失败:", err);
     }
   };
 
@@ -191,10 +210,16 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
       {/* 主体：左右结构 */}
       <div className="flex-1 min-h-0 flex">
         {/* 左侧：游戏预览 */}
-        <div className="flex-1 min-w-0 border-r border-gray-200">
+        <div className="flex-1 min-w-0 border-r border-gray-200 relative">
           {gameStarted ? (
-            <iframe srcDoc={item.html_code} title={item.game_title}
-              className="w-full h-full" sandbox="allow-scripts" scrolling="no" />
+            <>
+              <iframe key={item.html_code} srcDoc={item.html_code} title={item.game_title}
+                className="w-full h-full" sandbox="allow-scripts allow-same-origin" scrolling="no" />
+              <button
+                onClick={() => setGameStarted(false)}
+                className="absolute top-4 right-4 bg-white hover:bg-gray-50 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg border border-gray-200 transition z-10"
+              >🔄 重新开始</button>
+            </>
           ) : (
             <div className="w-full h-full bg-white flex items-center justify-center cursor-pointer hover:bg-gray-50 transition"
               onClick={() => setGameStarted(true)}>
@@ -206,7 +231,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
           )}
         </div>
 
-        {/* 右侧：点赞 + 评论 */}
+        {/* 右侧：点赞 + 对话记录 + 评论 */}
         <div className="flex-1 flex-shrink-0 flex flex-col bg-white">
           {/* 点赞区 */}
           <div className="p-4 border-b border-gray-200">
@@ -222,42 +247,78 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
             </button>
           </div>
 
-          {/* 评论列表 */}
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
-            <p className="text-sm font-medium text-gray-600 mb-1">💬 评论 ({comments.length})</p>
-            {comments.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">还没有评论，来写第一条吧～</p>
-            ) : (
-              comments.map((c) => (
-                <div key={c.id} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-medium text-indigo-600">{c.author_name}</span>
-                    <span className="text-xs text-gray-400">
-                      {new Date(c.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-700">{c.content}</p>
-                </div>
-              ))
-            )}
+          {/* 对话记录（展示游戏创作过程） */}
+          <div className="border-b border-gray-200">
+            <div className="px-4 py-2.5 flex items-center justify-between">
+              <span className="text-sm font-bold text-gray-700">  创作过程</span>
+              <span className="text-xs text-gray-400">学生与小智老师的对话</span>
+            </div>
+            <div className="max-h-[280px] overflow-y-auto px-4 pb-3 space-y-2">
+              {chatMessages.length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-4">暂无对话记录</p>
+              ) : (
+                chatMessages.map((msg, i) => {
+                  const isCodeOnly = /^```[\s\S]*```$/.test(msg.content.trim());
+                  if (isCodeOnly) return null;
+                  const textContent = msg.content.replace(/```html[\s\S]*?```/g, "").replace(/```[\s\S]*?```/g, "").trim();
+                  if (!textContent) return null;
+                  return (
+                    <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                      <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs ${
+                        msg.role === "user"
+                          ? "bg-indigo-500 text-white rounded-br-md"
+                          : "bg-gray-50 text-gray-700 rounded-bl-md border border-gray-100"
+                      }`}>
+                        <p className="whitespace-pre-wrap break-words leading-relaxed">{textContent}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
 
-          {/* 评论输入 */}
-          <div className="p-4 border-t border-gray-200">
-            <div className="flex gap-2">
-              <input type="text" value={commentText}
-                onChange={(e) => { setCommentText(e.target.value); setCommentError(""); }}
-                onKeyDown={(e) => e.key === "Enter" && handleComment()}
-                placeholder="写一句关于这个游戏的想法..."
-                className="flex-1 px-4 py-3 text-sm border border-gray-200 rounded-xl focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 outline-none"
-                disabled={submittingComment} />
-              <button onClick={handleComment}
-                disabled={submittingComment || !commentText.trim()}
-                className="bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white px-6 py-3 rounded-xl text-sm font-medium transition">
-                {submittingComment ? "..." : "发送"}
-              </button>
+          {/* 评论区 */}
+          <div className="flex-1 min-h-0 flex flex-col">
+            <div className="px-4 py-2.5 border-b border-gray-100">
+              <span className="text-sm font-bold text-gray-700">💬 评论 ({comments.length})</span>
             </div>
-            {commentError && <p className="text-xs text-red-500 mt-1">{commentError}</p>}
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2">
+              {comments.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-6">还没有评论，来写第一条吧～</p>
+              ) : (
+                comments.map((c) => (
+                  <div key={c.id} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-medium text-indigo-600">{c.author_name}</span>
+                      <span className="text-xs text-gray-400">
+                        {new Date(c.created_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-700">{c.content}</p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* 评论输入 */}
+            <div className="p-4 border-t border-gray-200">
+              <div className="flex gap-2">
+                <VoiceButton onResult={(text) => setCommentText((prev) => prev + text)} />
+                <input type="text" value={commentText}
+                  onChange={(e) => { setCommentText(e.target.value); setCommentError(""); }}
+                  onKeyDown={(e) => e.key === "Enter" && handleComment()}
+                  placeholder="写一句关于这个游戏的想法..."
+                  className="flex-1 px-4 py-3 text-sm border border-gray-200 rounded-xl focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 outline-none"
+                  disabled={submittingComment} />
+                <button onClick={handleComment}
+                  disabled={submittingComment || !commentText.trim()}
+                  className="bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white px-6 py-3 rounded-xl text-sm font-medium transition">
+                  {submittingComment ? "..." : "发送"}
+                </button>
+              </div>
+              {commentError && <p className="text-xs text-red-500 mt-1">{commentError}</p>}
+            </div>
           </div>
         </div>
       </div>

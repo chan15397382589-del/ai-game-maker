@@ -49,6 +49,25 @@ echo.
 echo  Starting server...
 echo.
 
+:: Start server in background
+start /b cmd /c "npm run dev > server.log 2>&1"
+
+:: Wait for server to be ready
+echo  Waiting for server to start...
+:wait_loop
+timeout /t 2 /nobreak >nul
+curl -s http://localhost:3000 >nul 2>&1
+if %errorlevel% neq 0 goto wait_loop
+
+echo  Server is ready!
+echo.
+
+:: Open browser
 start http://localhost:3000
-call npm run dev
-pause
+
+echo  Press any key to stop the server...
+pause >nul
+
+:: Kill the server process
+taskkill /f /im node.exe >nul 2>&1
+del server.log 2>nul

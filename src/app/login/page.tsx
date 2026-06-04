@@ -42,32 +42,9 @@ export default function LoginPage() {
       return;
     }
 
-    // 先用 getSession 读取本地缓存（不触发网络请求，不会报 refresh token 错误）
-    const checkAndRedirect = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user) { setCheckingSession(false); return; }
-
-        const { data: userData, error: dbError } = await supabase
-          .from("users")
-          .select("role")
-          .eq("id", session.user.id)
-          .single();
-
-        if (dbError) { clearStaleStorage(); setCheckingSession(false); return; }
-
-        if (userData?.role === "admin") {
-          router.push("/admin");
-        } else {
-          router.push("/student");
-        }
-      } catch {
-        clearStaleStorage();
-        setCheckingSession(false);
-      }
-    };
-
-    checkAndRedirect();
+    // 先清除可能损坏的本地存储
+    clearStaleStorage();
+    setCheckingSession(false);
   }, []);
 
   const handleLogin = async () => {

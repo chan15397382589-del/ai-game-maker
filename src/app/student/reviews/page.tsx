@@ -197,27 +197,31 @@ export default function ReviewsPage() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-4 gap-4">
               {items.map((item) => (
                 <div key={item.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden cursor-pointer hover:shadow-md transition group"
                   onClick={() => router.push(`/student/reviews/${item.id}`)}>
                   {/* 游戏缩略图 */}
-                  <div className="aspect-square bg-gray-100 relative overflow-hidden">
-                    <iframe srcDoc={item.html_code} title={item.game_title}
-                      className="w-full h-full pointer-events-none"
-                      sandbox="allow-scripts" scrolling="no" />
-                    <div className="absolute inset-0" />
+                  <div className="aspect-square bg-gray-50 relative overflow-hidden">
+                    <iframe
+                      srcDoc={item.html_code}
+                      title={item.game_title}
+                      className="w-full h-full border-0"
+                      sandbox="allow-scripts"
+                      loading="lazy"
+                      scrolling="no"
+                    />
                     {item.is_mine && (
                       <button onClick={(e) => { e.stopPropagation(); handleDelete(item.id); }}
-                        className="absolute top-1 right-1 bg-white/80 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg p-1 text-xs transition opacity-0 group-hover:opacity-100"
+                        className="absolute top-1 right-1 bg-white/80 hover:bg-red-50 text-gray-400 hover:text-red-500 rounded-lg p-1 text-xs transition opacity-0 group-hover:opacity-100 z-10"
                         title="撤回分享">🗑️</button>
                     )}
                   </div>
-                  {/* 信息 */}
-                  <div className="p-3">
-                    <h3 className="text-sm font-bold text-gray-800 truncate">{item.game_title}</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">{item.author_name}</p>
-                    <div className="flex items-center gap-3 mt-2">
+                  {/* 信息栏：左名字 中游戏名 右点赞评论 */}
+                  <div className="flex items-center justify-between px-3 py-2.5">
+                    <span className="text-sm font-bold text-gray-800 truncate flex-shrink-0 max-w-[80px]">{item.author_name}</span>
+                    <span className="text-xs text-indigo-600 font-medium truncate mx-2 flex-1 text-center">{item.game_title}</span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       <button
                         onClick={(e) => { e.stopPropagation(); handleLike(item); }}
                         className={`flex items-center gap-0.5 text-xs transition ${item.liked_by_me ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}
