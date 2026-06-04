@@ -168,12 +168,16 @@ export default function ModuleCreate({ userId }: Props) {
 
   const extractTextOnly = (content: string): string => {
     return content
-      .replace(/```html\s*\n[\s\S]*?```/gi, "")  // 移除html代码块
+      .replace(/```html\s*\n[\s\S]*?```/gi, "")  // 移除完整html代码块
+      .replace(/```html[\s\S]*?```/gi, "")        // 移除无换行html代码块
       .replace(/```\s*\n[\s\S]*?```/g, "")         // 移除其他代码块
       .replace(/```[\s\S]*?```/g, "")               // 移除无换行代码块
+      .replace(/```[\s\S]*/g, "")                   // 移除未闭合的代码块（流式传输中）
       .replace(/`[^`]+`/g, "")                      // 移除行内代码
       .replace(/\*\*([^*]+)\*\*/g, "$1")            // 移除加粗标记
       .replace(/\[.*?\]\(.*?\)/g, "")               // 移除链接
+      .replace(/<[^>]+>/g, "")                      // 移除HTML标签
+      .replace(/\n{3,}/g, "\n\n")                   // 压缩多余空行
       .trim();
   };
 

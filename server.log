@@ -297,3 +297,7 @@ Import traces:
  GET /api/student/tasks?task_id=survey 200 in 185ms (next.js: 3ms, application-code: 182ms)
  GET /api/student/tasks?task_id=1-1 200 in 256ms (next.js: 2ms, application-code: 253ms)
  GET /api/student/tasks?task_id=1-1 200 in 197ms (next.js: 2ms, application-code: 195ms)
+✓ Compiled in 81ms
+ GET /student 200 in 144ms (next.js: 113ms, application-code: 31ms)
+✓ Compiled in 101ms
+ GET /student 200 in 143ms (next.js: 112ms, application-code: 32ms)
