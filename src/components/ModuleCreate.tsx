@@ -376,7 +376,11 @@ export default function ModuleCreate({ userId }: Props) {
             <span> </span><span>任务中心</span>
           </button>
         </div>
-        <div className="px-3 py-2 text-xs font-medium text-gray-500">  我的对话</div>
+        <div className="px-3 py-2 flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-500">  我的对话</span>
+          <button onClick={() => { setCurrentConvId(null); setMessages([]); setRawMessages([]); setHtmlCode(""); setLiveCode(""); setGameStarted(false); }}
+            className="text-xs text-indigo-500 hover:text-indigo-700 font-medium">+ 新对话</button>
+        </div>
         <div className="flex-1 overflow-y-auto px-2 pb-2">
           {loadingHistory ? <p className="text-gray-400 text-center py-2 text-xs">加载中...</p> : conversations.length === 0 ? <p className="text-gray-400 text-center py-2 text-xs">暂无对话</p> : (
             <div className="space-y-0.5">

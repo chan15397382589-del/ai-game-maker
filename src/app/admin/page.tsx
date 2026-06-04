@@ -2440,19 +2440,24 @@ function TasksDataView() {
   const [loading, setLoading] = useState(true);
   const [activeTaskTab, setActiveTaskTab] = useState<"designs" | "discussions">("designs");
   const [selectedTaskId, setSelectedTaskId] = useState("1-1");
+  const [selectedGrade, setSelectedGrade] = useState<string>("");
+  const [selectedClass, setSelectedClass] = useState<string>("");
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
       const token = await getAuthToken();
       if (!token) return;
-      const res = await fetch(`/api/admin/tasks?task_id=${selectedTaskId}`, {
+      let url = `/api/admin/tasks?task_id=${selectedTaskId}`;
+      if (selectedGrade) url += `&grade=${selectedGrade}`;
+      if (selectedClass) url += `&class_num=${selectedClass}`;
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setTasks(await res.json());
     } catch {}
     finally { setLoading(false); }
-  }, [selectedTaskId]);
+  }, [selectedTaskId, selectedGrade, selectedClass]);
 
   const fetchGroupMessages = useCallback(async () => {
     try {
@@ -2537,11 +2542,35 @@ function TasksDataView() {
         <h2 className="text-lg font-bold text-gray-800">  任务数据</h2>
         <div className="flex gap-2">
           <select
+            value={selectedGrade}
+            onChange={(e) => { setSelectedGrade(e.target.value); setSelectedClass(""); }}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+          >
+            <option value="">全部年级</option>
+            <option value="3">三年级</option>
+            <option value="4">四年级</option>
+            <option value="5">五年级</option>
+            <option value="6">六年级</option>
+          </select>
+          <select
+            value={selectedClass}
+            onChange={(e) => setSelectedClass(e.target.value)}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+          >
+            <option value="">全部班级</option>
+            <option value="1">1班</option>
+            <option value="2">2班</option>
+            <option value="3">3班</option>
+            <option value="4">4班</option>
+            <option value="5">5班</option>
+            <option value="6">6班</option>
+          </select>
+          <select
             value={selectedTaskId}
             onChange={(e) => setSelectedTaskId(e.target.value)}
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
           >
-            <option value="survey">基础情况调查</option>
+            <option value="survey">前测</option>
             <option value="1-1">1-1 个人设计</option>
             <option value="1-2">1-2 小组讨论</option>
             <option value="2-1">2-1 AI协作</option>
