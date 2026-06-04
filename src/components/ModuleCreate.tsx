@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, type ReactNode } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import XiaozhiAvatar from "@/components/XiaozhiAvatar";
 import VoiceButton from "@/components/VoiceButton";
+import { getValidationMessage } from "@/utils/inputValidation";
 
 function formatAIMessage(text: string): ReactNode[] {
   const lines = text.split("\n");
@@ -179,6 +180,15 @@ export default function ModuleCreate({ userId }: Props) {
 
   const handleSendWithContent = async (content: string) => {
     if (!content.trim() || sendingRef.current) return;
+
+    // 输入验证
+    const recentUserMessages = messages.filter(m => m.role === "user").map(m => m.content);
+    const validationError = getValidationMessage(content, recentUserMessages);
+    if (validationError) {
+      alert(validationError);
+      return;
+    }
+
     sendingRef.current = true;
     const userMsgObj = { role: "user", content };
     const newRaw = [...rawMessages, userMsgObj];
