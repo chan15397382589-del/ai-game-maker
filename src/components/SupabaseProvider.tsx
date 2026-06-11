@@ -1,53 +1,52 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { Session } from "@supabase/supabase-js";
 
-// 运行时环境变量（Next.js 会在构建时内联 NEXT_PUBLIC_* 变量）
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+// 懒加载：首次访问时才读取环境变量并创建客户端
+let _client: SupabaseClient | null = null;
 
-// 直接创建客户端（构建时使用占位符，运行时使用真实值）
-export const supabase = createClient(
-  supabaseUrl || "https://placeholder.supabase.co",
-  supabaseAnonKey || "placeholder"
-);
+export function getSupabase(): SupabaseClient {
+  if (!_client) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) {
+      console.error("[Supabase] 环境变量缺失，无法初始化客户端");
+    }
+    _client = createClient(url || "", key || "");
+  }
+  return _client;
+}
+
+// 兼容旧代码的导出
+export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
+  get(_, prop, receiver) {
+    const client = getSupabase();
+    const value = Reflect.get(client, prop, receiver);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});
 
 export default function SupabaseProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [session, setSession] = useState<Session | null>(null);
-
   useEffect(() => {
-    // 尝试恢复 session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSession(session);
-      } else {
-        // session 无效才清除
-        clearSupabaseStorage();
-      }
-    }).catch(() => {
-      // 出错时清除
-      clearSupabaseStorage();
-    });
+    const client = getSupabase();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
+    client.auth.getSession().then(({ data: { session } }) => {
+      if (!session) clearSupabaseStorage();
+    }).catch(() => clearSupabaseStorage());
 
+    const { data: { subscription } } = client.auth.onAuthStateChange(() => {});
     return () => subscription.unsubscribe();
   }, []);
 
   return <>{children}</>;
 }
 
-// 清除 Supabase 存储在 localStorage 中的过期 session
 function clearSupabaseStorage() {
   const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
