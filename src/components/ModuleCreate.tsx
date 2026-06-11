@@ -72,6 +72,7 @@ export default function ModuleCreate({ userId }: Props) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
   const [openGameAvailable, setOpenGameAvailable] = useState(false);
+  const openGameServer = process.env.NEXT_PUBLIC_OPENGAME_SERVER || "http://localhost:3001";
 
   // 左侧栏状态
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -278,7 +279,8 @@ export default function ModuleCreate({ userId }: Props) {
       setMessages((prev) => [...prev, { role: "user", content: `请帮我制作游戏"${designData.game_name}"` }]);
 
       try {
-        const ws = new WebSocket("ws://localhost:3001");
+        const wsUrl = openGameServer.replace(/^http/, "ws");
+        const ws = new WebSocket(wsUrl);
         let taskId = "";
         let outputBuffer = "";
 
@@ -319,7 +321,7 @@ export default function ModuleCreate({ userId }: Props) {
                   const allFiles = [...(data.result?.files || []), ...(data.result?.outputFiles || [])];
                   const htmlFile = allFiles.find((f: string) => f.endsWith(".html"));
                   if (htmlFile && taskId) {
-                    const htmlRes = await fetch(`http://localhost:3001/api/tasks/${taskId}/files/${htmlFile}`);
+                    const htmlRes = await fetch(`${openGameServer}/api/tasks/${taskId}/files/${htmlFile}`);
                     if (htmlRes.ok) {
                       const code = await htmlRes.text();
                       setIsCoding(false); setHtmlCode(code); setLiveCode(code); setViewMode("game");
