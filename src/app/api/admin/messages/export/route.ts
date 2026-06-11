@@ -46,8 +46,7 @@ export async function GET(req: NextRequest) {
     const studentData = new Map<string, { student: any; sessions: Map<string, { firstTime: string; messages: { role: string; content: string; time: string }[] }> }>();
 
     (messages || []).forEach((msg: any) => {
-      const student = studentMap.get(msg.user_id);
-      if (!student) return;
+      const student = studentMap.get(msg.user_id) || { name: "未知学生", student_id: msg.user_id, grade: null, class_num: null };
 
       const uid = msg.user_id;
       const sid = msg.session_id || "__no_session__";
