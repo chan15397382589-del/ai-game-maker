@@ -70,9 +70,8 @@ export async function GET(req: NextRequest) {
     const result: any[] = [];
 
     studentData.forEach(({ student, sessions }, uid) => {
-      // 按时间排序会话
+      // 按时间排序会话（包括没有 session_id 的消息）
       const sortedSessions = Array.from(sessions.entries())
-        .filter(([sid]) => sid !== "__no_session__")
         .sort((a, b) => new Date(a[1].firstTime).getTime() - new Date(b[1].firstTime).getTime());
 
       if (sortedSessions.length === 0) return;
