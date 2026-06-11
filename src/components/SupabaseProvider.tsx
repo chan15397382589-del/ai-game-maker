@@ -1,36 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 import { Session } from "@supabase/supabase-js";
 
-// 延迟初始化 Supabase 客户端，确保运行时环境变量已加载
-let _supabase: SupabaseClient | null = null;
+// 运行时环境变量（Next.js 会在构建时内联 NEXT_PUBLIC_* 变量）
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-function getSupabaseClient(): SupabaseClient {
-  if (!_supabase) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url || !key) {
-      console.error("[Supabase] 环境变量缺失: NEXT_PUBLIC_SUPABASE_URL 或 NEXT_PUBLIC_SUPABASE_ANON_KEY");
-    }
-    _supabase = createClient(url || "", key || "");
-  }
-  return _supabase;
-}
-
-// 导出 getter 函数和代理对象
-export function getSupabase() {
-  return getSupabaseClient();
-}
-
-export const supabase = new Proxy({} as SupabaseClient, {
-  get(_, prop) {
-    const client = getSupabaseClient();
-    const value = (client as any)[prop];
-    return typeof value === "function" ? value.bind(client) : value;
-  },
-});
+// 直接创建客户端（构建时使用占位符，运行时使用真实值）
+export const supabase = createClient(
+  supabaseUrl || "https://placeholder.supabase.co",
+  supabaseAnonKey || "placeholder"
+);
 
 export default function SupabaseProvider({
   children,
