@@ -40,7 +40,8 @@ export async function GET(req: NextRequest) {
         .from("conversations")
         .select("id, title, reflection, user_id, updated_at")
         .not("reflection", "is", null)
-        .order("updated_at", { ascending: false });
+        .order("updated_at", { ascending: false })
+        .limit(500);
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

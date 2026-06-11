@@ -84,21 +84,23 @@ export async function GET(req: NextRequest) {
     const srlMap = new Map<string, string>();
     (classifications || []).forEach((c: any) => srlMap.set(c.user_id, c.srl_group));
 
-    // 3. 获取消息
+    // 3. 获取消息（限制数量，避免资源耗尽）
     let msgQuery = supabaseAdmin
       .from("messages")
       .select("user_id, role, content, session_id, created_at, input_method")
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .limit(5000);
 
     if (userId) msgQuery = msgQuery.eq("user_id", userId);
 
     const { data: messages, error: msgError } = await msgQuery;
     if (msgError) throw msgError;
 
-    // 4. 获取交互事件（用于补充 notes）
+    // 4. 获取交互事件（用于补充 notes，限制数量）
     let evtQuery = supabaseAdmin
       .from("interaction_events")
-      .select("user_id, session_id, event_type, metadata, created_at");
+      .select("user_id, session_id, event_type, metadata, created_at")
+      .limit(5000);
 
     if (userId) evtQuery = evtQuery.eq("user_id", userId);
 

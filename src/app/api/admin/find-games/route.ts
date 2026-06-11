@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
     const { data: projects } = await supabaseAdmin
       .from("projects")
       .select("id, user_id, game_title, html_code, is_published, created_at, users:user_id(name, student_id, grade, class_num)")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(200);
 
     results.projects = (projects || []).map((p: any) => ({
       source: "projects",
