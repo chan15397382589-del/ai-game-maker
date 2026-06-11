@@ -8,7 +8,7 @@ const ARK_API_KEY = process.env.ARK_API_KEY || "ark-6b0ae210-3166-4c75-bead-e044
 // MIMO 客户端
 const mimo = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL || "https://token-plan-sgp.xiaomimimo.com/anthropic",
-  apiKey: process.env.ANTHROPIC_AUTH_TOKEN!,
+  apiKey: process.env.ANTHROPIC_AUTH_TOKEN || "placeholder",
 });
 
 // 用 MIMO 分析图片生成 HTML/CSS 代码

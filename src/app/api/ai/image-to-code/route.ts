@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 
 const mimo = new Anthropic({
-  apiKey: process.env.ANTHROPIC_AUTH_TOKEN!,
+  apiKey: process.env.ANTHROPIC_AUTH_TOKEN || "placeholder",
   baseURL: "https://token-plan-sgp.xiaomimimo.com/anthropic",
 });
 

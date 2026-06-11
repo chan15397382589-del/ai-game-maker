@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 // 小米 MIMO 模型（Anthropic 兼容接口）
 const anthropic = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL || "https://token-plan-sgp.xiaomimimo.com/anthropic",
-  apiKey: process.env.ANTHROPIC_AUTH_TOKEN!,
+  apiKey: process.env.ANTHROPIC_AUTH_TOKEN || "placeholder",
 });
 
 // Supabase 服务端客户端单例（用于消息保存等后端操作）
