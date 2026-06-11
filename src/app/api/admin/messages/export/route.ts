@@ -21,11 +21,12 @@ export async function GET(req: NextRequest) {
     const studentMap = new Map<string, any>();
     (students || []).forEach((s: any) => studentMap.set(s.id, s));
 
-    // 获取消息
+    // 获取消息（限制数量，避免资源耗尽）
     let query = supabaseAdmin
       .from("messages")
       .select("user_id, role, content, session_id, created_at")
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .limit(5000); // 限制最多5000条消息
 
     if (userId) {
       query = query.eq("user_id", userId);
