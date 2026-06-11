@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
-import { createClient } from "@supabase/supabase-js";
+import { getDB } from "@/lib/supabase-admin";
 
-function getDB() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 // GET — 获取学生完整信息：个人信息、对话列表、游戏快照
 export async function GET(
@@ -69,7 +63,8 @@ export async function GET(
       .from("messages")
       .select("*")
       .eq("user_id", userId)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .limit(2000);
 
     return NextResponse.json({
       student,

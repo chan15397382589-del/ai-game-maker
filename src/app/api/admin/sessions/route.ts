@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
-import { createClient } from "@supabase/supabase-js";
+import { getDB } from "@/lib/supabase-admin";
 
 const SESSION_GAP_MINUTES = 30;
 
-function getDB() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 export async function GET(req: NextRequest) {
   try {

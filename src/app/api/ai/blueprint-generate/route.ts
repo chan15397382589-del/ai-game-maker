@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { getSupabaseAdmin } from "@/lib/deepseek";
 
 const mimo = new Anthropic({
   apiKey: process.env.ANTHROPIC_AUTH_TOKEN || "placeholder",
@@ -15,6 +16,12 @@ async function imageUrlToBase64(url: string): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
+    // 验证用户身份
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
+    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
+    const { data: { user }, error: authError } = await getSupabaseAdmin().auth.getUser(token);
+    if (authError || !user) return NextResponse.json({ error: "认证失败" }, { status: 401 });
+
     const { imageUrl, gameName, rules } = await req.json();
     if (!imageUrl) return NextResponse.json({ error: "请提供图片" }, { status: 400 });
 

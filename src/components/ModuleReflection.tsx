@@ -30,11 +30,24 @@ export default function ModuleReflection({ userId }: Props) {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) return;
+
+      // 先获取用户最新的对话
+      const convsRes = await fetch("/api/student/sessions", { headers: { Authorization: `Bearer ${token}` } });
+      if (!convsRes.ok) throw new Error("获取对话列表失败");
+      const convs = await convsRes.json();
+      if (!convs || convs.length === 0) {
+        alert("请先创建一个对话再保存反思");
+        setSaving(false);
+        return;
+      }
+
+      // 保存反思到最新对话
+      const latestConvId = convs[0].id;
       const res = await fetch("/api/student/sessions", {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          id: "reflection",
+          id: latestConvId,
           reflection: JSON.stringify({ card1: card1.trim(), card2: card2.trim(), card3: card3.trim() }),
         }),
       });

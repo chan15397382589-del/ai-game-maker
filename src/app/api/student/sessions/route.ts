@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
       .from("conversations")
       .select("id, title, html_code, created_at, updated_at")
       .eq("user_id", user.id)
-      .order("updated_at", { ascending: false });
+      .order("updated_at", { ascending: false })
+      .limit(50);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

@@ -122,7 +122,7 @@ export default function ModuleCreate({ userId }: Props) {
       const token = session?.access_token; if (!token) return;
       const res = await fetch("/api/student/sessions", { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setConversations(await res.json() || []);
-    } catch {} finally { setLoadingHistory(false); }
+    } catch (err) { console.error("加载对话列表失败:", err); } finally { setLoadingHistory(false); }
   };
 
   useEffect(() => { fetchConversations(); }, []);

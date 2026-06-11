@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
-import { createClient } from "@supabase/supabase-js";
+import { getDB } from "@/lib/supabase-admin";
 
-function getDB() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 // 获取学生的聊天记录（教师审计用）
 export async function GET(req: NextRequest) {
@@ -23,7 +17,8 @@ export async function GET(req: NextRequest) {
     let query = db
       .from("messages")
       .select("*")
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .limit(2000);
 
     if (userId) {
       query = query.eq("user_id", userId);

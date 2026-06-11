@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { getSupabaseAdmin } from "@/lib/deepseek";
 
 // 豆包文生图 API (火山引擎 Ark)
 const ARK_API_URL = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
-const ARK_API_KEY = process.env.ARK_API_KEY || "ark-6b0ae210-3166-4c75-bead-e044323d2b0e-88a0a";
+const ARK_API_KEY = process.env.ARK_API_KEY || "";
 
 // MIMO 客户端
 const mimo = new Anthropic({
@@ -106,6 +107,12 @@ async function refinePrompt(userPrompt: string): Promise<string> {
 
 export async function POST(req: NextRequest) {
   try {
+    // 验证用户身份
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
+    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
+    const { data: { user }, error: authError } = await getSupabaseAdmin().auth.getUser(token);
+    if (authError || !user) return NextResponse.json({ error: "认证失败" }, { status: 401 });
+
     const { prompt } = await req.json();
 
     if (!prompt) {

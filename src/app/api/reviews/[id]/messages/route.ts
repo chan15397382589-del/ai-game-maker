@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getDB } from "@/lib/supabase-admin";
 
-function getDB() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 // GET — 获取共享作品对应的 AI 聊天记录（只读，不暴露 user_id）
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

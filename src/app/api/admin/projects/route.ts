@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
-import { createClient } from "@supabase/supabase-js";
+import { getDB } from "@/lib/supabase-admin";
 
-function getDB() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 // ==================== GET: 所有作品（含未发布），支持按年级/班级筛选 ====================
 export async function GET(req: NextRequest) {

@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
       .select("id, role, content, created_at, session_id")
       .eq("user_id", user.id)
       .eq("session_id", sessionId)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .limit(1000);
 
     if (error) {
       console.error("[student/messages] 查询失败:", error);

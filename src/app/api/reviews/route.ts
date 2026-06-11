@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getDB } from "@/lib/supabase-admin";
 
-function getDB() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-}
 
 // GET — 获取分享列表（支持按年级/班级筛选），或获取统计信息
 export async function GET(req: NextRequest) {
@@ -64,7 +58,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const { data: items, error } = await query;
+    const { data: items, error } = await query.limit(100);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
