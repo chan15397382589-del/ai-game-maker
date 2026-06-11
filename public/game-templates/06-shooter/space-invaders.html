@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太空侵略者</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#000}
+canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// 太空侵略者 - 方向键移动 空格射击
+var canvas=document.getElementById('c');
+var ctx=canvas.getContext('2d');
+var W,H;
+
+function resize(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  if(player)player.y=H-60;
+  draw();
+}
+window.addEventListener('resize',resize);
+
+// 状态
+var state='start'; // start / game / end
+var score=0,lives=3,level=1;
+
+// 玩家
+var player={x:0,y:0,w:40,h:20,speed:5};
+
+// 子弹
+var playerBullet=null; // 同时只能一发
+var enemyBullets=[];
+
+// 外星人
+var aliens=[];
+var alienDir=1;
+var alienSpeed=0.5;
+var alienMoveTimer=0;
+var alienMoveInterval=60;
+
+// 掩体
+var shelters=[];
+
+// 星星
+var stars=[];
+
+// 按键
+var keys={};
+
+function initStars(){
+  stars=[];
+  for(var i=0;i<100;i++){
+    stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+0.5,a:Math.random()*0.8+0.2});
+  }
+}
+
+function initAliens(){
+  aliens=[];
+  var aw=30,ah=24,gx=10,gy=10;
+  var tw=11*(aw+gx)-gx;
+  var sx=(W-tw)/2,sy=50;
+  for(var r=0;r<5;r++)for(var c=0;c<11;c++){
+    aliens.push({x:sx+c*(aw+gx),y:sy+r*(ah+gy),w:aw,h:ah,row:r,alive:true});
+  }
+}
+
+function initShelters(){
+  shelters=[];
+  var sw=60,sh=30,gap=(W-4*sw)/5,y=H-140;
+  for(var i=0;i<4;i++){
+    var x=gap+i*(sw+gap),blocks=[],bs=5;
+    for(var bx=0;bx<sw;bx+=bs)for(var by=0;by<sh;by+=bs){
+      var cx=bx+bs/2-sw/2,cy=by+bs/2;
+      if(cy>sh*0.6&&Math.abs(cx)<sw*0.3)continue;
+      blocks.push({x:x+bx,y:y+by,w:bs,h:bs,alive:true});
+    }
+    shelters.push({blocks:blocks});
+  }
+}
+
+function initGame(){
+  score=0;lives=3;level=1;
+  playerBullet=null;enemyBullets=[];
+  alienDir=1;alienSpeed=0.5;alienMoveTimer=0;alienMoveInterval=60;
+  player.x=W/2-player.w/2;player.y=H-60;
+  initAliens();initShelters();initStars();
+}
+
+// 绘制外星人（不同行不同像素造型）
+function drawAlien(a){
+  if(!a.alive)return;
+  var cx=a.x+a.w/2,cy=a.y+a.h/2,s=a.w/6;
+  ctx.fillStyle=a.row===0?'#ff6b6b':(a.row<=2?'#feca57':'#48dbfb');
+  if(a.row===0){
+    ctx.fillRect(cx-s*2,cy-s,s*4,s*2);
+    ctx.fillRect(cx-s*3,cy,s*6,s);
+    ctx.fillRect(cx-s,cy+s,s*2,s);
+  }else if(a.row<=2){
+    ctx.fillRect(cx-s*2,cy-s*2,s,s);
+    ctx.fillRect(cx+s,cy-s*2,s,s);
+    ctx.fillRect(cx-s*3,cy-s,s*6,s*2);
+    ctx.fillRect(cx-s*2,cy+s,s*4,s);
+    ctx.fillRect(cx-s*3,cy,s,s);
+    ctx.fillRect(cx+s*2,cy,s,s);
+  }else{
+    ctx.fillRect(cx-s,cy-s*2,s*2,s);
+    ctx.fillRect(cx-s*2,cy-s,s*4,s*2);
+    ctx.fillRect(cx-s*3,cy,s*2,s);
+    ctx.fillRect(cx+s,cy,s*2,s);
+    ctx.fillRect(cx-s*2,cy+s,s,s);
+    ctx.fillRect(cx+s,cy+s,s,s);
+  }
+}
+
+function overlap(a,b){
+  return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+}
+
+// ===== 更新 =====
+function update(){
+  if(state!=='game')return;
+  // 玩家移动
+  if(keys['ArrowLeft']||keys['a']){player.x-=player.speed;if(player.x<0)player.x=0;}
+  if(keys['ArrowRight']||keys['d']){player.x+=player.speed;if(player.x+player.w>W)player.x=player.w>W?0:W-player.w;}
+  // 玩家子弹
+  if(playerBullet){playerBullet.y-=8;if(playerBullet.y<-10)playerBullet=null;}
+  // 敌方子弹
+  for(var i=enemyBullets.length-1;i>=0;i--){enemyBullets[i].y+=4;if(enemyBullets[i].y>H+10)enemyBullets.splice(i,1);}
+  // 外星人移动
+  alienMoveTimer++;
+  if(alienMoveTimer>=alienMoveInterval){
+    alienMoveTimer=0;
+    var alive=[];
+    for(var i=0;i<aliens.length;i++)if(aliens[i].alive)alive.push(aliens[i]);
+    if(!alive.length)return;
+    var minX=1e9,maxX=0;
+    for(var i=0;i<alive.length;i++){if(alive[i].x<minX)minX=alive[i].x;if(alive[i].x+alive[i].w>maxX)maxX=alive[i].x+alive[i].w;}
+    var drop=false;
+    if(alienDir===1&&maxX+20>=W)drop=true;
+    if(alienDir===-1&&minX-20<=0)drop=true;
+    if(drop){
+      alienDir*=-1;
+      for(var i=0;i<alive.length;i++)alive[i].y+=20;
+      alienMoveInterval=Math.max(10,alienMoveInterval-3);
+    }else{
+      for(var i=0;i<alive.length;i++)alive[i].x+=alienDir*20;
+    }
+    // 敌方射击
+    if(Math.random()<0.3&&alive.length>0){
+      var s=alive[Math.floor(Math.random()*alive.length)];
+      enemyBullets.push({x:s.x+s.w/2-2,y:s.y+s.h,w:4,h:10});
+    }
+    // 外星人到达底部
+    var bottom=0;
+    for(var i=0;i<alive.length;i++)if(alive[i].y+alive[i].h>bottom)bottom=alive[i].y+alive[i].h;
+    if(bottom>=player.y)endGame();
+  }
+  // 碰撞：玩家子弹 vs 外星人
+  if(playerBullet){
+    var pb={x:playerBullet.x-2,y:playerBullet.y-5,w:4,h:10};
+    for(var i=0;i<aliens.length;i++){
+      if(!aliens[i].alive)continue;
+      if(overlap(pb,aliens[i])){
+        aliens[i].alive=false;playerBullet=null;
+        score+=[40,20,20,10,10][aliens[i].row];break;
+      }
+    }
+  }
+  // 碰撞：玩家子弹 vs 掩体
+  if(playerBullet){
+    var pb={x:playerBullet.x-2,y:playerBullet.y-5,w:4,h:10};
+    for(var si=0;si<shelters.length;si++){
+      for(var bi=0;bi<shelters[si].blocks.length;bi++){
+        var b=shelters[si].blocks[bi];
+        if(!b.alive)continue;
+        if(overlap(pb,b)){b.alive=false;playerBullet=null;break;}
+      }
+      if(!playerBullet)break;
+    }
+  }
+  // 碰撞：敌方子弹 vs 玩家
+  for(var i=enemyBullets.length-1;i>=0;i--){
+    if(overlap(enemyBullets[i],{x:player.x,y:player.y,w:player.w,h:player.h})){
+      enemyBullets.splice(i,1);lives--;
+      if(lives<=0)endGame();break;
+    }
+  }
+  // 碰撞：敌方子弹 vs 掩体
+  for(var i=enemyBullets.length-1;i>=0;i--){
+    var hit=false;
+    for(var si=0;si<shelters.length;si++){
+      for(var bi=0;bi<shelters[si].blocks.length;bi++){
+        var b=shelters[si].blocks[bi];
+        if(!b.alive)continue;
+        if(overlap(enemyBullets[i],b)){b.alive=true?b.alive=false:0;hit=true;break;}
+      }
+      if(hit)break;
+    }
+    if(hit)enemyBullets.splice(i,1);
+  }
+  // 消灭所有外星人
+  var allDead=true;
+  for(var i=0;i<aliens.length;i++)if(aliens[i].alive){allDead=false;break;}
+  if(allDead){
+    level++;alienSpeed+=0.2;alienMoveInterval=60;
+    initAliens();initShelters();playerBullet=null;enemyBullets=[];
+  }
+}
+
+function endGame(){
+  state='end';
+  try{parent.postMessage({type:"game_event",eventType:"game_end",data:{score:score}},"*");}catch(e){}
+}
+
+// ===== 绘制 =====
+function rrect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+function drawStars(){
+  for(var i=0;i<stars.length;i++){
+    ctx.globalAlpha=stars[i].a;
+    ctx.fillStyle='#fff';
+    ctx.fillRect(stars[i].x,stars[i].y,stars[i].s,stars[i].s);
+  }
+  ctx.globalAlpha=1;
+}
+
+var startBtn={},endBtn={};
+
+function drawStart(){
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);drawStars();
+  ctx.fillStyle='#48dbfb';
+  ctx.font='bold '+Math.min(W*0.07,50)+'px "Microsoft YaHei",Arial';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('太空侵略者',W/2,H*0.28);
+  ctx.fillStyle='#aaa';ctx.font=Math.min(W*0.03,20)+'px "Microsoft YaHei",Arial';
+  ctx.fillText('方向键移动，空格发射子弹',W/2,H*0.38);
+  ctx.fillText('消灭所有外星人！',W/2,H*0.43);
+  var bw=200,bh=50,bx=W/2-bw/2,by=H*0.55;
+  ctx.fillStyle='#2ecc71';rrect(bx,by,bw,bh,12);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='bold 22px "Microsoft YaHei",Arial';
+  ctx.fillText('开始游戏',W/2,by+bh/2);
+  startBtn={x:bx,y:by,w:bw,h:bh};
+}
+
+function drawGame(){
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);drawStars();
+  ctx.fillStyle='#fff';ctx.font='bold 18px "Microsoft YaHei",Arial';
+  ctx.textAlign='left';ctx.fillText('分数: '+score,20,30);
+  ctx.textAlign='right';
+  var hearts='';for(var i=0;i<lives;i++)hearts+='♥ ';
+  ctx.fillText(hearts,W-20,30);
+  ctx.textAlign='center';ctx.fillText('关卡: '+level,W/2,30);
+  // 玩家炮台
+  ctx.fillStyle='#2ecc71';
+  ctx.fillRect(player.x,player.y+5,player.w,player.h-5);
+  ctx.fillRect(player.x+player.w/2-3,player.y-5,6,12);
+  ctx.fillRect(player.x-3,player.y+player.h-3,player.w+6,5);
+  // 玩家子弹
+  if(playerBullet){ctx.fillStyle='#fff';ctx.fillRect(playerBullet.x-2,playerBullet.y-5,4,10);}
+  // 敌方子弹
+  ctx.fillStyle='#ff6b6b';
+  for(var i=0;i<enemyBullets.length;i++)ctx.fillRect(enemyBullets[i].x,enemyBullets[i].y,enemyBullets[i].w,enemyBullets[i].h);
+  // 外星人
+  for(var i=0;i<aliens.length;i++)drawAlien(aliens[i]);
+  // 掩体
+  ctx.fillStyle='#2ecc71';
+  for(var si=0;si<shelters.length;si++){
+    var blocks=shelters[si].blocks;
+    for(var bi=0;bi<blocks.length;bi++){
+      if(blocks[bi].alive)ctx.fillRect(blocks[bi].x,blocks[bi].y,blocks[bi].w,blocks[bi].h);
+    }
+  }
+}
+
+function drawEnd(){
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);drawStars();
+  ctx.fillStyle='#ff6b6b';
+  ctx.font='bold '+Math.min(W*0.07,48)+'px "Microsoft YaHei",Arial';
+  ctx.textAlign='center';ctx.fillText('游戏结束',W/2,H*0.3);
+  ctx.fillStyle='#feca57';ctx.font='bold 32px "Microsoft YaHei",Arial';
+  ctx.fillText('最终分数: '+score,W/2,H*0.42);
+  ctx.fillStyle='#aaa';ctx.font='20px "Microsoft YaHei",Arial';
+  ctx.fillText('到达关卡: '+level,W/2,H*0.5);
+  var bw=200,bh=50,bx=W/2-bw/2,by=H*0.6;
+  ctx.fillStyle='#2ecc71';rrect(bx,by,bw,bh,12);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='bold 22px "Microsoft YaHei",Arial';
+  ctx.fillText('再来一局',W/2,by+bh/2);
+  endBtn={x:bx,y:by,w:bw,h:bh};
+}
+
+function draw(){
+  if(state==='start')drawStart();
+  else if(state==='game')drawGame();
+  else if(state==='end')drawEnd();
+}
+
+// 输入
+document.addEventListener('keydown',function(e){keys[e.key]=true;
+  if(state==='game'&&e.key===' '){e.preventDefault();if(!playerBullet)playerBullet={x:player.x+player.w/2,y:player.y};}
+});
+document.addEventListener('keyup',function(e){keys[e.key]=false;});
+
+function handleClick(mx,my){
+  if(state==='start'){
+    var b=startBtn;
+    if(b&&mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){
+      state='game';initGame();
+      try{parent.postMessage({type:"game_event",eventType:"game_start",data:{gameType:"太空侵略者"}},"*");}catch(e){}
+    }
+  }else if(state==='end'){
+    var b=endBtn;
+    if(b&&mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){
+      state='game';initGame();
+      try{parent.postMessage({type:"game_event",eventType:"game_start",data:{gameType:"太空侵略者"}},"*");}catch(e){}
+    }
+  }
+}
+canvas.addEventListener('click',function(e){handleClick(e.clientX,e.clientY);});
+canvas.addEventListener('touchstart',function(e){e.preventDefault();var t=e.touches[0];handleClick(t.clientX,t.clientY);});
+
+function loop(){update();draw();requestAnimationFrame(loop);}
+resize();requestAnimationFrame(loop);
+</script>
+</body>
+</html>

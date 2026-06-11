@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>宝石迷阵</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { overflow:hidden; background:#1a0533; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+// ===== 宝石迷阵 - 8x8 消除游戏 =====
+
+const canvas = document.getElementById('gc');
+const ctx = canvas.getContext('2d');
+
+// 自适应全屏
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ===== 游戏配置 =====
+const ROWS = 8, COLS = 8, NUM_COLORS = 6;
+// 6 种宝石颜色名称
+const COLOR_NAMES = ['红','蓝','绿','黄','紫','橙'];
+// 每种宝石的 [底色, 高光色]
+const COLORS = [
+    ['#ff3366','#ff99bb'], // 红
+    ['#3399ff','#99ccff'], // 蓝
+    ['#33cc66','#99ffbb'], // 绿
+    ['#ffcc33','#ffee99'], // 黄
+    ['#cc66ff','#dd99ff'], // 紫
+    ['#ff8833','#ffcc99']  // 橙
+];
+
+// 游戏状态枚举
+const STATE_MENU = 0, STATE_PLAYING = 1, STATE_OVER = 2;
+let gameState = STATE_MENU;
+
+let grid = [];        // grid[r][c] = 颜色索引 0~5
+let score = 0;
+let selected = null;  // {r, c} 当前选中的宝石
+
+// 动画相关
+let swapAnim = null;   // 交换动画: {r1,c1,r2,c2,dir,t,dur,onDone}
+let revertAnim = null; // 退回动画: {r1,c1,r2,c2,dir,t,dur,onDone}
+let clearingGems = []; // 消除动画数组: [{r,c,t}]
+let fallingGems = [];  // 下落动画数组: [{r,c,fromY,toY,t}]
+let comboChain = 0;    // 连锁次数
+
+// ===== 工具函数 =====
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// easeOutBounce 缓动
+function easeOutBounce(t) {
+    if (t < 1/2.75) return 7.5625*t*t;
+    if (t < 2/2.75) { t-=1.5/2.75; return 7.5625*t*t+0.75; }
+    if (t < 2.5/2.75) { t-=2.25/2.75; return 7.5625*t*t+0.9375; }
+    t-=2.625/2.75; return 7.5625*t*t+0.984375;
+}
+
+// easeOutQuad 缓动
+function easeOutQuad(t) { return 1 - (1-t)*(1-t); }
+
+// ===== 计算布局 =====
+function getLayout() {
+    let sz = Math.min(canvas.width * 0.85, canvas.height * 0.75) / COLS;
+    sz = Math.floor(Math.min(sz, 80));
+    let bw = sz * COLS, bh = sz * ROWS;
+    let ox = Math.floor((canvas.width - bw) / 2);
+    let oy = Math.floor((canvas.height - bh) / 2) + 30;
+    return { sz, ox, oy, bw, bh };
+}
+
+// ===== 初始化/重置网格 =====
+function initGrid() {
+    grid = [];
+    for (let r = 0; r < ROWS; r++) {
+        grid[r] = [];
+        for (let c = 0; c < COLS; c++) {
+            let color;
+            do {
+                color = Math.floor(Math.random() * NUM_COLORS);
+            } while (
+                // 避免一开始就形成匹配
+                (c >= 2 && grid[r][c-1] === color && grid[r][c-2] === color) ||
+                (r >= 2 && grid[r-1][c] === color && grid[r-2][c] === color)
+            );
+            grid[r][c] = color;
+        }
+    }
+    score = 0;
+    selected = null;
+    swapAnim = null;
+    revertAnim = null;
+    clearingGems = [];
+    fallingGems = [];
+    comboChain = 0;
+}
+
+// ===== 检测匹配 =====
+// 返回匹配组数组，每组是 [{r,c},...] 的坐标列表
+function findMatches() {
+    let matched = new Set();
+
+    // 水平方向
+    for (let r = 0; r < ROWS; r++) {
+        let run = 0;
+        for (let c = 0; c <= COLS; c++) {
+            if (c < COLS && grid[r][c] >= 0 && c > 0 && grid[r][c] === grid[r][c-1]) {
+                run++;
+            } else {
+                if (run >= 3) {
+                    for (let k = c - run; k < c; k++) {
+                        matched.add(r * COLS + k);
+                    }
+                }
+                run = 1;
+            }
+        }
+    }
+
+    // 垂直方向
+    for (let c = 0; c < COLS; c++) {
+        let run = 0;
+        for (let r = 0; r <= ROWS; r++) {
+            if (r < ROWS && grid[r][c] >= 0 && r > 0 && grid[r][c] === grid[r-1][c]) {
+                run++;
+            } else {
+                if (run >= 3) {
+                    for (let k = r - run; k < r; k++) {
+                        matched.add(k * COLS + c);
+                    }
+                }
+                run = 1;
+            }
+        }
+    }
+
+    return matched;
+}
+
+// 分组匹配（用于计分：区分 3/4/5 连）
+function findMatchGroups() {
+    let groups = [];
+    let visited = new Set();
+
+    // 水平方向分组
+    for (let r = 0; r < ROWS; r++) {
+        let c = 0;
+        while (c < COLS) {
+            let color = grid[r][c];
+            if (color < 0) { c++; continue; }
+            let run = 1;
+            while (c + run < COLS && grid[r][c + run] === color) run++;
+            if (run >= 3) {
+                let group = [];
+                for (let k = 0; k < run; k++) {
+                    group.push({r, c: c + k});
+                }
+                groups.push(group);
+            }
+            c += run;
+        }
+    }
+
+    // 垂直方向分组
+    for (let c = 0; c < COLS; c++) {
+        let r = 0;
+        while (r < ROWS) {
+            let color = grid[r][c];
+            if (color < 0) { r++; continue; }
+            let run = 1;
+            while (r + run < ROWS && grid[r + run][c] === color) run++;
+            if (run >= 3) {
+                let group = [];
+                for (let k = 0; k < run; k++) {
+                    group.push({r: r + k, c});
+                }
+                groups.push(group);
+            }
+            r += run;
+        }
+    }
+
+    return groups;
+}
+
+// 检查是否有可行的移动
+function hasValidMoves() {
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            // 尝试右交换
+            if (c < COLS - 1) {
+                swap(r, c, r, c + 1);
+                if (findMatches().size > 0) { swap(r, c, r, c + 1); return true; }
+                swap(r, c, r, c + 1);
+            }
+            // 尝试下交换
+            if (r < ROWS - 1) {
+                swap(r, c, r + 1, c);
+                if (findMatches().size > 0) { swap(r, c, r + 1, c); return true; }
+                swap(r, c, r + 1, c);
+            }
+        }
+    }
+    return false;
+}
+
+// 简单交换（不做动画）
+function swap(r1, c1, r2, c2) {
+    let tmp = grid[r1][c1];
+    grid[r1][c1] = grid[r2][c2];
+    grid[r2][c2] = tmp;
+}
+
+// ===== 动画处理 =====
+
+// 开始交换动画
+function startSwapAnim(r1, c1, r2, c2, isRevert, onDone) {
+    let anim = {
+        r1, c1, r2, c2,
+        t: 0,
+        dur: isRevert ? 250 : 200,
+        isRevert,
+        onDone
+    };
+    if (isRevert) revertAnim = anim;
+    else swapAnim = anim;
+}
+
+// 消除动画启动
+function startClearAnimation(matchedSet) {
+    comboChain++;
+    // 计分：按分组
+    let groups = findMatchGroups();
+    let earned = 0;
+    for (let g of groups) {
+        let n = g.length;
+        if (n === 3) earned += 50;
+        else if (n === 4) earned += 100;
+        else if (n >= 5) earned += 200;
+    }
+    // 连锁加成
+    if (comboChain > 1) earned *= 2;
+    score += earned;
+
+    // 标记消除中的宝石
+    clearingGems = [];
+    for (let idx of matchedSet) {
+        let r = Math.floor(idx / COLS), c = idx % COLS;
+        clearingGems.push({ r, c, t: 0 });
+    }
+
+    // 消除动画完成后处理下落
+    setTimeout(() => {
+        for (let idx of matchedSet) {
+            let r = Math.floor(idx / COLS), c = idx % COLS;
+            grid[r][c] = -1;
+        }
+        clearingGems = [];
+        applyGravity();
+    }, 400);
+}
+
+// 下落 + 填充
+function applyGravity() {
+    fallingGems = [];
+
+    // 每列处理下落
+    for (let c = 0; c < COLS; c++) {
+        let emptyCount = 0;
+        // 从底部向上扫描
+        for (let r = ROWS - 1; r >= 0; r--) {
+            if (grid[r][c] === -1) {
+                emptyCount++;
+            } else if (emptyCount > 0) {
+                // 这个宝石要下落 emptyCount 格
+                let fromR = r;
+                let toR = r + emptyCount;
+                grid[toR][c] = grid[fromR][c];
+                grid[fromR][c] = -1;
+                let layout = getLayout();
+                fallingGems.push({
+                    r: toR, c,
+                    fromY: layout.oy + fromR * layout.sz,
+                    toY: layout.oy + toR * layout.sz,
+                    t: 0
+                });
+            }
+        }
+        // 顶部空位填入新宝石
+        for (let i = 0; i < emptyCount; i++) {
+            let r = emptyCount - 1 - i;
+            grid[r][c] = Math.floor(Math.random() * NUM_COLORS);
+            let layout = getLayout();
+            fallingGems.push({
+                r, c,
+                fromY: layout.oy - (emptyCount - r) * layout.sz,
+                toY: layout.oy + r * layout.sz,
+                t: 0
+            });
+        }
+    }
+
+    // 下落动画完成后检测新匹配
+    setTimeout(() => {
+        fallingGems = [];
+        let newMatches = findMatches();
+        if (newMatches.size > 0) {
+            startClearAnimation(newMatches);
+        } else {
+            // 没有更多匹配，连锁结束
+            comboChain = 0;
+            // 检查是否还有可行移动
+            if (!hasValidMoves()) {
+                // 重新洗牌
+                shuffleGrid();
+            }
+        }
+    }, 450);
+}
+
+// 洗牌
+function shuffleGrid() {
+    let all = [];
+    for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
+            all.push(grid[r][c]);
+    // Fisher-Yates 洗牌
+    for (let i = all.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [all[i], all[j]] = [all[j], all[i]];
+    }
+    let idx = 0;
+    for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
+            grid[r][c] = all[idx++];
+    // 确保洗牌后没有初始匹配
+    let m = findMatches();
+    if (m.size > 0) initGrid();
+}
+
+// ===== 输入处理 =====
+function getCellAt(px, py) {
+    let { sz, ox, oy } = getLayout();
+    let c = Math.floor((px - ox) / sz);
+    let r = Math.floor((py - oy) / sz);
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) return { r, c };
+    return null;
+}
+
+function handleClick(px, py) {
+    if (gameState !== STATE_PLAYING) return;
+    if (swapAnim || revertAnim || clearingGems.length > 0 || fallingGems.length > 0) return;
+
+    let cell = getCellAt(px, py);
+    if (!cell) { selected = null; return; }
+
+    if (!selected) {
+        selected = cell;
+        return;
+    }
+
+    let dr = Math.abs(cell.r - selected.r);
+    let dc = Math.abs(cell.c - selected.c);
+    if ((dr === 1 && dc === 0) || (dr === 0 && dc === 1)) {
+        // 尝试交换
+        let r1 = selected.r, c1 = selected.c, r2 = cell.r, c2 = cell.c;
+        selected = null;
+        swap(r1, c1, r2, c2);
+        let matches = findMatches();
+        if (matches.size > 0) {
+            // 有效交换
+            comboChain = 0;
+            startSwapAnim(r1, c1, r2, c2, false, () => {
+                swapAnim = null;
+                startClearAnimation(matches);
+            });
+        } else {
+            // 无效交换，先播放动画再退回
+            swap(r1, c1, r2, c2); // 先换回来
+            startSwapAnim(r1, c1, r2, c2, false, () => {
+                swapAnim = null;
+                startSwapAnim(r1, c1, r2, c2, true, () => {
+                    revertAnim = null;
+                });
+            });
+        }
+    } else if (cell.r === selected.r && cell.c === selected.c) {
+        selected = null; // 取消选中
+    } else {
+        selected = cell; // 重新选中
+    }
+}
+
+// 键盘支持：方向键移动选中，空格确认
+let cursorR = 0, cursorC = 0;
+document.addEventListener('keydown', (e) => {
+    if (gameState === STATE_MENU) {
+        if (e.key === 'Enter' || e.key === ' ') startGame();
+        return;
+    }
+    if (gameState === STATE_OVER) {
+        if (e.key === 'Enter' || e.key === ' ') startGame();
+        return;
+    }
+    if (gameState !== STATE_PLAYING) return;
+    if (swapAnim || revertAnim || clearingGems.length > 0 || fallingGems.length > 0) return;
+
+    if (e.key === 'ArrowUp' && cursorR > 0) cursorR--;
+    else if (e.key === 'ArrowDown' && cursorR < ROWS - 1) cursorR++;
+    else if (e.key === 'ArrowLeft' && cursorC > 0) cursorC--;
+    else if (e.key === 'ArrowRight' && cursorC < COLS - 1) cursorC++;
+    else if (e.key === ' ' || e.key === 'Enter') {
+        handleClick(
+            getLayout().ox + cursorC * getLayout().sz + getLayout().sz / 2,
+            getLayout().oy + cursorR * getLayout().sz + getLayout().sz / 2
+        );
+        e.preventDefault();
+    }
+});
+
+// 鼠标/触控
+canvas.addEventListener('click', (e) => handleClick(e.clientX, e.clientY));
+canvas.addEventListener('touchend', (e) => {
+    let t = e.changedTouches[0];
+    handleClick(t.clientX, t.clientY);
+    e.preventDefault();
+});
+
+// ===== 绘制函数 =====
+
+// 绘制单颗宝石
+function drawGem(x, y, sz, colorIdx, alpha, scale, highlight) {
+    if (colorIdx < 0 || colorIdx >= NUM_COLORS) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x + sz/2, y + sz/2);
+    ctx.scale(scale, scale);
+
+    let radius = sz * 0.38;
+    let [base, light] = COLORS[colorIdx];
+
+    // 高亮选中边框
+    if (highlight) {
+        ctx.beginPath();
+        ctx.arc(0, 0, radius + 4, 0, Math.PI*2);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.shadowColor = '#fff';
+        ctx.shadowBlur = 15;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+    }
+
+    // 宝石主体 - 径向渐变
+    let grad = ctx.createRadialGradient(-radius*0.3, -radius*0.3, radius*0.1, 0, 0, radius);
+    grad.addColorStop(0, light);
+    grad.addColorStop(0.7, base);
+    grad.addColorStop(1, '#00000044');
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI*2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // 高光点
+    ctx.beginPath();
+    ctx.arc(-radius*0.25, -radius*0.25, radius*0.18, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fill();
+
+    ctx.restore();
+}
+
+// 绘制背景
+function drawBackground() {
+    let grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#0d0221');
+    grad.addColorStop(0.5, '#1a0533');
+    grad.addColorStop(1, '#2d1b69');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// 绘制游戏网格
+function drawGrid() {
+    let { sz, ox, oy, bw, bh } = getLayout();
+
+    // 网格背景
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            let x = ox + c * sz, y = oy + r * sz;
+            ctx.fillStyle = (r + c) % 2 === 0 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.15)';
+            ctx.fillRect(x, y, sz, sz);
+            ctx.strokeRect(x, y, sz, sz);
+        }
+    }
+
+    // 正在消除的宝石（闪烁）
+    let clearingSet = new Set(clearingGems.map(g => g.r * COLS + g.c));
+
+    // 绘制所有宝石
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (grid[r][c] < 0) continue;
+
+            let x = ox + c * sz, y = oy + r * sz;
+            let alpha = 1, scale = 1;
+
+            // 交换动画
+            if (swapAnim && !swapAnim.isRevert) {
+                let a = swapAnim;
+                let progress = Math.min(swapAnim.t / swapAnim.dur, 1);
+                let ep = easeOutQuad(progress);
+                if (r === a.r1 && c === a.c1) {
+                    let dr = a.r2 - a.r1, dc = a.c2 - a.c1;
+                    x = ox + (c + dc * ep) * sz;
+                    y = oy + (r + dr * ep) * sz;
+                } else if (r === a.r2 && c === a.c2) {
+                    let dr = a.r1 - a.r2, dc = a.c1 - a.c2;
+                    x = ox + (c + dc * ep) * sz;
+                    y = oy + (r + dr * ep) * sz;
+                }
+            }
+
+            // 退回动画
+            if (revertAnim) {
+                let a = revertAnim;
+                let progress = Math.min(revertAnim.t / revertAnim.dur, 1);
+                let ep = easeOutQuad(progress);
+                if (r === a.r1 && c === a.c1) {
+                    let dr = a.r2 - a.r1, dc = a.c2 - a.c1;
+                    x = ox + (c + dc * (1 - ep)) * sz;
+                    y = oy + (r + dr * (1 - ep)) * sz;
+                } else if (r === a.r2 && c === a.c2) {
+                    let dr = a.r1 - a.r2, dc = a.c1 - a.c2;
+                    x = ox + (c + dc * (1 - ep)) * sz;
+                    y = oy + (r + dr * (1 - ep)) * sz;
+                }
+            }
+
+            // 消除动画
+            let key = r * COLS + c;
+            if (clearingSet.has(key)) {
+                let cg = clearingGems.find(g => g.r === r && g.c === c);
+                if (cg) {
+                    let p = Math.min(cg.t / 400, 1);
+                    alpha = 1 - p;
+                    scale = 1 - p * 0.7;
+                    // 闪烁效果
+                    if (p < 0.3) alpha = 0.5 + 0.5 * Math.sin(p * 30);
+                }
+            }
+
+            // 下落动画
+            let fg = fallingGems.find(g => g.r === r && g.c === c);
+            if (fg) {
+                let p = Math.min(fg.t / 400, 1);
+                let ep = easeOutBounce(p);
+                y = lerp(fg.fromY, fg.toY, ep);
+            }
+
+            let isSel = selected && selected.r === r && selected.c === c;
+            drawGem(x, y, sz, grid[r][c], alpha, scale, isSel);
+        }
+    }
+
+    // 键盘光标
+    if (gameState === STATE_PLAYING && !swapAnim && !revertAnim) {
+        let cx = ox + cursorC * sz, cy = oy + cursorR * sz;
+        ctx.strokeStyle = '#ffffff88';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(cx + 2, cy + 2, sz - 4, sz - 4);
+        ctx.setLineDash([]);
+    }
+}
+
+// 绘制 UI
+function drawUI() {
+    // 标题
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 28px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('宝石迷阵', canvas.width / 2, 35);
+
+    // 得分
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillStyle = '#ffdd57';
+    ctx.fillText('得分: ' + score, canvas.width / 2, 65);
+}
+
+// ===== 游戏状态绘制 =====
+function drawMenu() {
+    drawBackground();
+
+    ctx.textAlign = 'center';
+
+    // 标题
+    ctx.fillStyle = '#ff66aa';
+    ctx.font = 'bold 52px sans-serif';
+    ctx.shadowColor = '#ff66aa';
+    ctx.shadowBlur = 20;
+    ctx.fillText('宝石迷阵', canvas.width / 2, canvas.height * 0.28);
+    ctx.shadowBlur = 0;
+
+    // 副标题
+    ctx.fillStyle = '#ccc';
+    ctx.font = '20px sans-serif';
+    ctx.fillText('交换相邻宝石，三个及以上同色连线消除', canvas.width / 2, canvas.height * 0.36);
+    ctx.fillText('3 个 50 分 ｜ 4 个 100 分 ｜ 5 个 200 分', canvas.width / 2, canvas.height * 0.41);
+
+    // 预览宝石
+    let previewY = canvas.height * 0.50;
+    for (let i = 0; i < NUM_COLORS; i++) {
+        let px = canvas.width / 2 - 150 + i * 60;
+        drawGem(px, previewY, 50, i, 1, 1, false);
+    }
+
+    // 开始按钮
+    let bx = canvas.width / 2 - 120, by = canvas.height * 0.68, bw = 240, bh = 56;
+    let grad = ctx.createLinearGradient(bx, by, bx, by + bh);
+    grad.addColorStop(0, '#ff66aa');
+    grad.addColorStop(1, '#cc33ff');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillText('开始游戏', canvas.width / 2, by + 37);
+
+    ctx.fillStyle = '#888';
+    ctx.font = '16px sans-serif';
+    ctx.fillText('按 Enter 或点击开始 ｜ 方向键 + 空格操作', canvas.width / 2, canvas.height * 0.82);
+}
+
+function drawOver() {
+    // 半透明遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffdd57';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.fillText('游戏结束', canvas.width / 2, canvas.height * 0.35);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 36px sans-serif';
+    ctx.fillText('最终得分: ' + score, canvas.width / 2, canvas.height * 0.46);
+
+    // 再来一局按钮
+    let bx = canvas.width / 2 - 120, by = canvas.height * 0.56, bw = 240, bh = 56;
+    let grad = ctx.createLinearGradient(bx, by, bx, by + bh);
+    grad.addColorStop(0, '#ff66aa');
+    grad.addColorStop(1, '#cc33ff');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillText('再来一局', canvas.width / 2, by + 37);
+}
+
+// ===== 游戏流程 =====
+function startGame() {
+    initGrid();
+    gameState = STATE_PLAYING;
+    cursorR = 0; cursorC = 0;
+    window.postMessage({
+        type: "game_event",
+        eventType: "game_start",
+        data: { gameType: "宝石迷阵" }
+    }, "*");
+}
+
+function endGame() {
+    gameState = STATE_OVER;
+    window.postMessage({
+        type: "game_event",
+        eventType: "game_end",
+        data: { score }
+    }, "*");
+}
+
+// 宝石迷阵没有步数限制，可以一直玩到没有可行移动
+// 这里添加一个简单的计时器作为游戏结束条件（可选）
+let gameTime = 0;
+const GAME_DURATION = 120; // 120 秒
+
+// ===== 主循环 =====
+let lastTime = 0;
+function gameLoop(timestamp) {
+    let dt = lastTime ? Math.min(timestamp - lastTime, 50) : 16;
+    lastTime = timestamp;
+
+    resize();
+
+    // 更新动画
+    if (swapAnim) swapAnim.t += dt;
+    if (revertAnim) revertAnim.t += dt;
+    for (let g of clearingGems) g.t += dt;
+    for (let g of fallingGems) g.t += dt;
+
+    // 动画完成回调
+    if (swapAnim && swapAnim.t >= swapAnim.dur && swapAnim.onDone) {
+        swapAnim.onDone();
+    }
+    if (revertAnim && revertAnim.t >= revertAnim.dur && revertAnim.onDone) {
+        revertAnim.onDone();
+    }
+
+    // 游戏时间更新
+    if (gameState === STATE_PLAYING) {
+        gameTime += dt / 1000;
+        if (gameTime >= GAME_DURATION) endGame();
+    }
+
+    // 绘制
+    if (gameState === STATE_MENU) {
+        drawMenu();
+    } else if (gameState === STATE_PLAYING) {
+        drawBackground();
+        drawGrid();
+        drawUI();
+        // 时间显示
+        let remain = Math.max(0, Math.ceil(GAME_DURATION - gameTime));
+        ctx.fillStyle = remain <= 10 ? '#ff4444' : '#aaa';
+        ctx.font = '18px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('剩余时间: ' + remain + 's', canvas.width - 20, 30);
+    } else if (gameState === STATE_OVER) {
+        drawBackground();
+        drawGrid();
+        drawUI();
+        drawOver();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// 启动
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

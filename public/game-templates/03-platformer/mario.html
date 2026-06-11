@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>超级玛丽简化版</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ==================== 初始化画布 ====================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+});
+
+// ==================== 游戏状态 ====================
+const TILE = 40; // 格子大小
+const GRAVITY = 0.6;
+const JUMP_FORCE = -12;
+const MOVE_SPEED = 4;
+const SCROLL_LINE = canvas.width * 0.4; // 卷轴触发位置
+
+let gameState = 'start'; // start, playing, gameover, win
+let score = 0;
+let lives = 3;
+let cameraX = 0;
+let gameTime = 0;
+
+// ==================== 输入管理 ====================
+const keys = {};
+window.addEventListener('keydown', (e) => {
+    keys[e.code] = true;
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        e.preventDefault();
+    }
+});
+window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+// 鼠标/触控支持
+let mouseX = 0, mouseY = 0;
+let mouseClicked = false;
+canvas.addEventListener('mousedown', (e) => { mouseX = e.clientX; mouseY = e.clientY; mouseClicked = true; });
+canvas.addEventListener('mouseup', () => { mouseClicked = false; });
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    mouseX = t.clientX; mouseY = t.clientY; mouseClicked = true;
+});
+canvas.addEventListener('touchend', (e) => { e.preventDefault(); mouseClicked = false; });
+
+// ==================== 关卡设计 ====================
+// 地图元素：0=空气, 1=地面, 2=砖块, 3=问号砖块(出金币), 4=管道左, 5=管道右, 6=管道顶左, 7=管道顶右, 8=旗杆, 9=终点地面
+const MAP_COLS = 120;
+const MAP_ROWS = Math.ceil(canvas.height / TILE);
+const GROUND_ROW = MAP_ROWS - 2; // 地面行
+const SKY_ROWS = GROUND_ROW;
+
+function buildMap() {
+    const map = [];
+    for (let r = 0; r < MAP_ROWS; r++) {
+        map[r] = [];
+        for (let c = 0; c < MAP_COLS; c++) {
+            // 默认空气
+            map[r][c] = 0;
+        }
+    }
+
+    // 地面：大部分是地面
+    for (let c = 0; c < MAP_COLS; c++) {
+        // 留一些坑
+        if (c >= 28 && c <= 30) continue; // 第一个坑
+        if (c >= 55 && c <= 57) continue; // 第二个坑
+        map[GROUND_ROW][c] = 1;
+        map[GROUND_ROW + 1][c] = 1;
+    }
+
+    // 问号砖块
+    const questionBlocks = [
+        [GROUND_ROW - 5, 10], [GROUND_ROW - 5, 12], [GROUND_ROW - 5, 14],
+        [GROUND_ROW - 9, 40], [GROUND_ROW - 9, 42],
+        [GROUND_ROW - 5, 65], [GROUND_ROW - 5, 67],
+        [GROUND_ROW - 9, 80],
+    ];
+    questionBlocks.forEach(([r, c]) => {
+        if (r >= 0 && c < MAP_COLS) map[r][c] = 3;
+    });
+
+    // 普通砖块
+    const brickBlocks = [
+        [GROUND_ROW - 5, 11], [GROUND_ROW - 5, 13],
+        [GROUND_ROW - 9, 41],
+        [GROUND_ROW - 5, 66],
+        [GROUND_ROW - 5, 15], [GROUND_ROW - 9, 81], [GROUND_ROW - 9, 82],
+    ];
+    brickBlocks.forEach(([r, c]) => {
+        if (r >= 0 && c < MAP_COLS) map[r][c] = 2;
+    });
+
+    // 管道 (用2格宽，3-4格高的矩形)
+    const pipes = [
+        { col: 20, height: 3 },
+        { col: 35, height: 4 },
+        { col: 50, height: 3 },
+        { col: 70, height: 5 },
+        { col: 90, height: 4 },
+    ];
+    pipes.forEach(p => {
+        const topR = GROUND_ROW - p.height;
+        for (let r = topR; r < GROUND_ROW; r++) {
+            if (r === topR) {
+                map[r][p.col] = 6;
+                map[r][p.col + 1] = 7;
+            } else {
+                map[r][p.col] = 4;
+                map[r][p.col + 1] = 5;
+            }
+        }
+    });
+
+    // 额外平台
+    const platforms = [
+        { col: 45, row: GROUND_ROW - 6, len: 3 },
+        { col: 75, row: GROUND_ROW - 7, len: 4 },
+        { col: 95, row: GROUND_ROW - 5, len: 3 },
+    ];
+    platforms.forEach(p => {
+        for (let i = 0; i < p.len; i++) {
+            if (p.col + i < MAP_COLS) map[p.row][p.col + i] = 2;
+        }
+    });
+
+    // 旗杆（终点）
+    const flagCol = MAP_COLS - 5;
+    for (let r = GROUND_ROW - 10; r < GROUND_ROW; r++) {
+        map[r][flagCol] = 8;
+    }
+
+    // 终点地面标记
+    for (let c = flagCol; c < MAP_COLS; c++) {
+        map[GROUND_ROW][c] = 9;
+    }
+
+    return map;
+}
+
+let gameMap = buildMap();
+
+// ==================== 角色 ====================
+let player = {
+    x: 3 * TILE,
+    y: (GROUND_ROW - 2) * TILE,
+    w: TILE * 0.8,
+    h: TILE * 1.6,
+    vx: 0,
+    vy: 0,
+    onGround: false,
+    facing: 1, // 1=右, -1=左
+    jumpPressed: false,
+};
+
+// ==================== 金币和粒子 ====================
+let coins = []; // 飞出的金币动画
+let particles = []; // 粒子效果
+let coinCount = 0;
+
+// ==================== 敌人 ====================
+function createEnemy(x, y, leftBound, rightBound) {
+    return { x, y, w: TILE * 0.8, h: TILE * 0.8, vx: 1.5, alive: true, leftBound, rightBound };
+}
+let enemies = [
+    createEnemy(15 * TILE, (GROUND_ROW - 2) * TILE, 13 * TILE, 18 * TILE),
+    createEnemy(32 * TILE, (GROUND_ROW - 2) * TILE, 30 * TILE, 37 * TILE),
+    createEnemy(48 * TILE, (GROUND_ROW - 2) * TILE, 46 * TILE, 52 * TILE),
+    createEnemy(62 * TILE, (GROUND_ROW - 2) * TILE, 60 * TILE, 66 * TILE),
+    createEnemy(78 * TILE, (GROUND_ROW - 2) * TILE, 76 * TILE, 82 * TILE),
+    createEnemy(88 * TILE, (GROUND_ROW - 2) * TILE, 86 * TILE, 92 * TILE),
+    createEnemy(100 * TILE, (GROUND_ROW - 2) * TILE, 98 * TILE, 104 * TILE),
+];
+
+// ==================== 按钮区域 ====================
+function getButtonRect(text, cx, cy, w, h) {
+    return { x: cx - w / 2, y: cy - h / 2, w, h };
+}
+
+const startBtn = { x: 0, y: 0, w: 260, h: 70 };
+const restartBtn = { x: 0, y: 0, w: 260, h: 70 };
+
+function isInsideBtn(btn, mx, my) {
+    return mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h;
+}
+
+// ==================== 碰撞检测 ====================
+function getTileAt(px, py) {
+    const col = Math.floor(px / TILE);
+    const row = Math.floor(py / TILE);
+    if (row < 0 || row >= MAP_ROWS || col < 0 || col >= MAP_COLS) return 0;
+    return gameMap[row][col];
+}
+
+function isSolid(tile) {
+    return tile === 1 || tile === 2 || tile === 3 || tile === 4 || tile === 5 || tile === 6 || tile === 7 || tile === 9;
+}
+
+function rectOverlap(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+// ==================== 重置游戏 ====================
+function resetGame() {
+    score = 0;
+    lives = 3;
+    coinCount = 0;
+    cameraX = 0;
+    gameTime = 0;
+    gameMap = buildMap();
+    player.x = 3 * TILE;
+    player.y = (GROUND_ROW - 2) * TILE;
+    player.vx = 0;
+    player.vy = 0;
+    player.onGround = false;
+    coins = [];
+    particles = [];
+    enemies = [
+        createEnemy(15 * TILE, (GROUND_ROW - 2) * TILE, 13 * TILE, 18 * TILE),
+        createEnemy(32 * TILE, (GROUND_ROW - 2) * TILE, 30 * TILE, 37 * TILE),
+        createEnemy(48 * TILE, (GROUND_ROW - 2) * TILE, 46 * TILE, 52 * TILE),
+        createEnemy(62 * TILE, (GROUND_ROW - 2) * TILE, 60 * TILE, 66 * TILE),
+        createEnemy(78 * TILE, (GROUND_ROW - 2) * TILE, 76 * TILE, 82 * TILE),
+        createEnemy(88 * TILE, (GROUND_ROW - 2) * TILE, 86 * TILE, 92 * TILE),
+        createEnemy(100 * TILE, (GROUND_ROW - 2) * TILE, 98 * TILE, 104 * TILE),
+    ];
+}
+
+// ==================== 物理更新 ====================
+function updatePlayer() {
+    // 水平移动
+    player.vx = 0;
+    if (keys['ArrowLeft'] || keys['KeyA']) { player.vx = -MOVE_SPEED; player.facing = -1; }
+    if (keys['ArrowRight'] || keys['KeyD']) { player.vx = MOVE_SPEED; player.facing = 1; }
+
+    // 跳跃
+    const jumpKey = keys['Space'] || keys['ArrowUp'] || keys['KeyW'];
+    if (jumpKey && player.onGround && !player.jumpPressed) {
+        player.vy = JUMP_FORCE;
+        player.onGround = false;
+        player.jumpPressed = true;
+    }
+    if (!jumpKey) player.jumpPressed = false;
+
+    // 重力
+    player.vy += GRAVITY;
+    if (player.vy > 15) player.vy = 15;
+
+    // 水平碰撞
+    player.x += player.vx;
+    // 检查左右碰撞
+    const checkPointsX = [
+        { x: player.x, y: player.y + 2 },
+        { x: player.x, y: player.y + player.h / 2 },
+        { x: player.x, y: player.y + player.h - 2 },
+        { x: player.x + player.w, y: player.y + 2 },
+        { x: player.x + player.w, y: player.y + player.h / 2 },
+        { x: player.x + player.w, y: player.y + player.h - 2 },
+    ];
+    for (let i = 0; i < 3; i++) {
+        const t = getTileAt(checkPointsX[i].x, checkPointsX[i].y);
+        if (isSolid(t)) {
+            player.x = Math.floor(checkPointsX[i].x / TILE + 1) * TILE;
+            player.vx = 0;
+        }
+    }
+    for (let i = 3; i < 6; i++) {
+        const t = getTileAt(checkPointsX[i].x, checkPointsX[i].y);
+        if (isSolid(t)) {
+            player.x = Math.floor(checkPointsX[i].x / TILE) * TILE - player.w;
+            player.vx = 0;
+        }
+    }
+
+    // 垂直碰撞
+    player.y += player.vy;
+    player.onGround = false;
+
+    // 脚部检测（落地）
+    const footY = player.y + player.h;
+    const leftFootX = player.x + 2;
+    const rightFootX = player.x + player.w - 2;
+    const footTileL = getTileAt(leftFootX, footY);
+    const footTileR = getTileAt(rightFootX, footY);
+    if (player.vy >= 0 && (isSolid(footTileL) || isSolid(footTileR))) {
+        player.y = Math.floor(footY / TILE) * TILE - player.h;
+        player.vy = 0;
+        player.onGround = true;
+    }
+
+    // 头部检测（撞砖块）
+    const headY = player.y;
+    const leftHeadX = player.x + 2;
+    const rightHeadX = player.x + player.w - 2;
+    const headTileL = getTileAt(leftHeadX, headY);
+    const headTileR = getTileAt(rightHeadX, headY);
+    if (player.vy < 0) {
+        if (isSolid(headTileL) || isSolid(headTileR)) {
+            player.y = Math.floor(headY / TILE + 1) * TILE;
+            player.vy = 0;
+            // 检查是否是问号砖块
+            const hitCol = Math.floor((leftHeadX + rightHeadX) / 2 / TILE);
+            const hitRow = Math.floor(headY / TILE);
+            if (hitRow >= 0 && hitRow < MAP_ROWS && hitCol >= 0 && hitCol < MAP_COLS) {
+                if (gameMap[hitRow][hitCol] === 3) {
+                    gameMap[hitRow][hitCol] = 2; // 变成普通砖块
+                    score += 10;
+                    coinCount++;
+                    // 金币飞出动画
+                    coins.push({
+                        x: hitCol * TILE + TILE / 2,
+                        y: hitRow * TILE,
+                        vy: -8,
+                        life: 30,
+                    });
+                    // 粒子
+                    for (let p = 0; p < 5; p++) {
+                        particles.push({
+                            x: hitCol * TILE + TILE / 2,
+                            y: hitRow * TILE,
+                            vx: (Math.random() - 0.5) * 4,
+                            vy: -Math.random() * 5,
+                            life: 20,
+                            color: '#FFD700',
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 不让走出地图左边界
+    if (player.x < 0) player.x = 0;
+
+    // 掉落死亡
+    if (player.y > canvas.height + 100) {
+        loseLife();
+    }
+
+    // 检查旗杆
+    const flagCol = MAP_COLS - 5;
+    const playerCol = Math.floor((player.x + player.w / 2) / TILE);
+    if (playerCol >= flagCol) {
+        gameState = 'win';
+        window.postMessage({
+            type: "game_event",
+            eventType: "game_end",
+            data: { score: score }
+        }, "*");
+    }
+
+    // 卷轴跟随
+    if (player.x - cameraX > SCROLL_LINE) {
+        cameraX = player.x - SCROLL_LINE;
+    }
+    if (player.x - cameraX < canvas.width * 0.2) {
+        cameraX = Math.max(0, player.x - canvas.width * 0.2);
+    }
+    // 限制相机不超出地图
+    const maxCam = MAP_COLS * TILE - canvas.width;
+    if (cameraX > maxCam) cameraX = maxCam;
+    if (cameraX < 0) cameraX = 0;
+}
+
+function loseLife() {
+    lives--;
+    if (lives <= 0) {
+        gameState = 'gameover';
+        window.postMessage({
+            type: "game_event",
+            eventType: "game_end",
+            data: { score: score }
+        }, "*");
+    } else {
+        // 重生
+        player.x = Math.max(3 * TILE, cameraX + 3 * TILE);
+        player.y = (GROUND_ROW - 3) * TILE;
+        player.vx = 0;
+        player.vy = 0;
+    }
+}
+
+function updateEnemies() {
+    enemies.forEach(enemy => {
+        if (!enemy.alive) return;
+        enemy.x += enemy.vx;
+        if (enemy.x <= enemy.leftBound || enemy.x + enemy.w >= enemy.rightBound) {
+            enemy.vx *= -1;
+        }
+    });
+}
+
+function checkEnemyCollision() {
+    enemies.forEach(enemy => {
+        if (!enemy.alive) return;
+        const pRect = { x: player.x, y: player.y, w: player.w, h: player.h };
+        const eRect = { x: enemy.x, y: enemy.y, w: enemy.w, h: enemy.h };
+        if (!rectOverlap(pRect, eRect)) return;
+
+        // 判断是踩头还是侧面
+        const playerBottom = player.y + player.h;
+        const enemyTop = enemy.y;
+        if (player.vy > 0 && playerBottom - enemyTop < enemy.h * 0.5) {
+            // 踩头
+            enemy.alive = false;
+            player.vy = JUMP_FORCE * 0.6;
+            score += 50;
+            // 粒子
+            for (let p = 0; p < 8; p++) {
+                particles.push({
+                    x: enemy.x + enemy.w / 2,
+                    y: enemy.y + enemy.h / 2,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: -Math.random() * 6,
+                    life: 25,
+                    color: '#8B4513',
+                });
+            }
+        } else {
+            // 侧面碰撞 - 扣命
+            loseLife();
+        }
+    });
+}
+
+function updateCoins() {
+    coins = coins.filter(c => {
+        c.y += c.vy;
+        c.vy += 0.3;
+        c.life--;
+        return c.life > 0;
+    });
+}
+
+function updateParticles() {
+    particles = particles.filter(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.2;
+        p.life--;
+        return p.life > 0;
+    });
+}
+
+// ==================== 绘制函数 ====================
+function drawSky() {
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#5C94FC');
+    grad.addColorStop(0.7, '#87CEEB');
+    grad.addColorStop(1, '#B0E0E6');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 云朵
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    const cloudOffset = -cameraX * 0.3; // 视差
+    for (let i = 0; i < 8; i++) {
+        const cx = (i * 350 + 100 + cloudOffset) % (canvas.width + 200) - 100;
+        const cy = 40 + (i % 3) * 50;
+        drawCloud(cx, cy, 50 + (i % 3) * 20);
+    }
+}
+
+function drawCloud(x, y, size) {
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.4, y - size * 0.2, size * 0.4, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.8, y, size * 0.45, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.4, y + size * 0.15, size * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawMap() {
+    const startCol = Math.max(0, Math.floor(cameraX / TILE));
+    const endCol = Math.min(MAP_COLS, Math.ceil((cameraX + canvas.width) / TILE) + 1);
+
+    for (let r = 0; r < MAP_ROWS; r++) {
+        for (let c = startCol; c < endCol; c++) {
+            const tile = gameMap[r][c];
+            const x = c * TILE - cameraX;
+            const y = r * TILE;
+
+            switch (tile) {
+                case 1: // 地面
+                    ctx.fillStyle = '#8B4513';
+                    ctx.fillRect(x, y, TILE, TILE);
+                    ctx.fillStyle = '#A0522D';
+                    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+                    // 地面顶部绿色草地
+                    if (r > 0 && gameMap[r - 1][c] === 0) {
+                        ctx.fillStyle = '#4CAF50';
+                        ctx.fillRect(x, y, TILE, 6);
+                        ctx.fillStyle = '#66BB6A';
+                        ctx.fillRect(x, y, TILE, 3);
+                    }
+                    break;
+                case 2: // 砖块
+                    ctx.fillStyle = '#CD853F';
+                    ctx.fillRect(x, y, TILE, TILE);
+                    ctx.strokeStyle = '#8B6914';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2);
+                    // 砖块纹理
+                    ctx.strokeStyle = '#8B6914';
+                    ctx.beginPath();
+                    ctx.moveTo(x + TILE / 2, y);
+                    ctx.lineTo(x + TILE / 2, y + TILE);
+                    ctx.moveTo(x, y + TILE / 2);
+                    ctx.lineTo(x + TILE, y + TILE / 2);
+                    ctx.stroke();
+                    break;
+                case 3: // 问号砖块
+                    ctx.fillStyle = '#FFD700';
+                    ctx.fillRect(x, y, TILE, TILE);
+                    ctx.strokeStyle = '#DAA520';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x + 1, y + 1, TILE - 2, TILE - 2);
+                    // 问号
+                    ctx.fillStyle = '#B8860B';
+                    ctx.font = `bold ${TILE * 0.6}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('?', x + TILE / 2, y + TILE / 2);
+                    break;
+                case 4: // 管道体左
+                    ctx.fillStyle = '#228B22';
+                    ctx.fillRect(x, y, TILE, TILE);
+                    ctx.fillStyle = '#1B6B1B';
+                    ctx.fillRect(x, y, 4, TILE);
+                    ctx.fillStyle = '#2EA02E';
+                    ctx.fillRect(x + TILE - 6, y, 6, TILE);
+                    break;
+                case 5: // 管道体右
+                    ctx.fillStyle = '#228B22';
+                    ctx.fillRect(x, y, TILE, TILE);
+                    ctx.fillStyle = '#2EA02E';
+                    ctx.fillRect(x, y, 6, TILE);
+                    ctx.fillStyle = '#1B6B1B';
+                    ctx.fillRect(x + TILE - 4, y, 4, TILE);
+                    break;
+                case 6: // 管道顶左
+                    ctx.fillStyle = '#228B22';
+                    ctx.fillRect(x - 4, y, TILE + 4, TILE);
+                    ctx.fillStyle = '#1B6B1B';
+                    ctx.fillRect(x - 4, y, 4, TILE);
+                    ctx.fillStyle = '#2EA02E';
+                    ctx.fillRect(x + TILE - 6, y, 6, TILE);
+                    // 顶部高光
+                    ctx.fillStyle = '#3CB043';
+                    ctx.fillRect(x - 4, y, TILE + 4, 4);
+                    break;
+                case 7: // 管道顶右
+                    ctx.fillStyle = '#228B22';
+                    ctx.fillRect(x, y, TILE + 4, TILE);
+                    ctx.fillStyle = '#2EA02E';
+                    ctx.fillRect(x, y, 6, TILE);
+                    ctx.fillStyle = '#1B6B1B';
+                    ctx.fillRect(x + TILE, y, 4, TILE);
+                    // 顶部高光
+                    ctx.fillStyle = '#3CB043';
+                    ctx.fillRect(x, y, TILE + 4, 4);
+                    break;
+                case 8: // 旗杆
+                    ctx.fillStyle = '#888';
+                    ctx.fillRect(x + TILE / 2 - 3, y, 6, TILE);
+                    // 旗杆顶部球
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.arc(x + TILE / 2, y + 5, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+                case 9: // 终点地面
+                    ctx.fillStyle = '#FF6347';
+                    ctx.fillRect(x, y, TILE, TILE);
+                    ctx.fillStyle = '#FF7F50';
+                    ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
+                    if (r > 0 && gameMap[r - 1][c] === 0) {
+                        ctx.fillStyle = '#4CAF50';
+                        ctx.fillRect(x, y, TILE, 6);
+                    }
+                    break;
+            }
+        }
+    }
+
+    // 画旗帜（在旗杆顶端）
+    const flagCol = MAP_COLS - 5;
+    const flagX = flagCol * TILE - cameraX;
+    const flagTopY = (GROUND_ROW - 10) * TILE;
+    if (flagX > -TILE && flagX < canvas.width + TILE) {
+        ctx.fillStyle = '#FF0000';
+        ctx.beginPath();
+        ctx.moveTo(flagX + TILE / 2 + 3, flagTopY + 8);
+        ctx.lineTo(flagX + TILE / 2 + 35, flagTopY + 20);
+        ctx.lineTo(flagX + TILE / 2 + 3, flagTopY + 32);
+        ctx.closePath();
+        ctx.fill();
+    }
+}
+
+function drawPlayer() {
+    const x = player.x - cameraX;
+    const y = player.y;
+    const w = player.w;
+    const h = player.h;
+    const f = player.facing;
+
+    // 身体（红色）
+    ctx.fillStyle = '#FF0000';
+    ctx.fillRect(x + 2, y + h * 0.3, w - 4, h * 0.45);
+
+    // 帽子（红色，带帽檐）
+    ctx.fillStyle = '#FF0000';
+    ctx.fillRect(x - 2, y, w + 4, h * 0.25);
+    ctx.fillStyle = '#CC0000';
+    // 帽檐
+    if (f > 0) {
+        ctx.fillRect(x + w * 0.3, y + h * 0.2, w * 0.8, h * 0.08);
+    } else {
+        ctx.fillRect(x - w * 0.5, y + h * 0.2, w * 0.8, h * 0.08);
+    }
+
+    // 脸部
+    ctx.fillStyle = '#FFD1A4';
+    ctx.fillRect(x + 4, y + h * 0.08, w - 8, h * 0.25);
+
+    // 眼睛
+    ctx.fillStyle = '#000';
+    const eyeX = f > 0 ? x + w * 0.6 : x + w * 0.25;
+    ctx.fillRect(eyeX, y + h * 0.12, 4, 5);
+
+    // 腿部
+    ctx.fillStyle = '#0000AA';
+    ctx.fillRect(x + 4, y + h * 0.75, w / 2 - 6, h * 0.25);
+    ctx.fillRect(x + w / 2 + 2, y + h * 0.75, w / 2 - 6, h * 0.25);
+
+    // 鞋子
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(x + 2, y + h * 0.92, w / 2 - 4, h * 0.08);
+    ctx.fillRect(x + w / 2 + 2, y + h * 0.92, w / 2 - 4, h * 0.08);
+}
+
+function drawEnemies() {
+    enemies.forEach(enemy => {
+        if (!enemy.alive) return;
+        const x = enemy.x - cameraX;
+        const y = enemy.y;
+        const w = enemy.w;
+        const h = enemy.h;
+
+        // 蘑菇怪身体（棕色圆形）
+        ctx.fillStyle = '#8B4513';
+        ctx.beginPath();
+        ctx.ellipse(x + w / 2, y + h * 0.4, w / 2, h * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 蘑菇帽顶
+        ctx.fillStyle = '#A0522D';
+        ctx.beginPath();
+        ctx.ellipse(x + w / 2, y + h * 0.25, w / 2 + 3, h * 0.3, 0, Math.PI, Math.PI * 2);
+        ctx.fill();
+
+        // 眼睛
+        ctx.fillStyle = '#FFF';
+        ctx.beginPath();
+        ctx.arc(x + w * 0.35, y + h * 0.35, 5, 0, Math.PI * 2);
+        ctx.arc(x + w * 0.65, y + h * 0.35, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(x + w * 0.37, y + h * 0.37, 2.5, 0, Math.PI * 2);
+        ctx.arc(x + w * 0.67, y + h * 0.37, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 脚
+        ctx.fillStyle = '#654321';
+        ctx.fillRect(x + 4, y + h * 0.75, w * 0.3, h * 0.25);
+        ctx.fillRect(x + w * 0.6, y + h * 0.75, w * 0.3, h * 0.25);
+    });
+}
+
+function drawCoins() {
+    coins.forEach(c => {
+        const x = c.x - cameraX;
+        ctx.fillStyle = '#FFD700';
+        ctx.beginPath();
+        ctx.arc(x, c.y, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#DAA520';
+        ctx.font = 'bold 12px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('$', x, c.y);
+    });
+}
+
+function drawParticles() {
+    particles.forEach(p => {
+        const x = p.x - cameraX;
+        ctx.globalAlpha = p.life / 25;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(x - 2, p.y - 2, 4, 4);
+    });
+    ctx.globalAlpha = 1;
+}
+
+function drawHUD() {
+    // 分数
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(`分数: ${score}`, 20, 20);
+    ctx.fillText(`分数: ${score}`, 20, 20);
+
+    // 生命
+    ctx.strokeText(`生命: ${'❤️'.repeat(lives)}`, 20, 58);
+    ctx.fillText(`生命: ${'❤️'.repeat(lives)}`, 20, 58);
+
+    // 金币
+    ctx.strokeText(`金币: ${coinCount}`, 20, 96);
+    ctx.fillText(`金币: ${coinCount}`, 20, 96);
+}
+
+// ==================== 界面绘制 ====================
+function drawStartScreen() {
+    drawSky();
+
+    // 标题
+    ctx.fillStyle = '#FFD700';
+    ctx.strokeStyle = '#B8860B';
+    ctx.lineWidth = 4;
+    ctx.font = 'bold 64px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeText('超级玛丽简化版', canvas.width / 2, canvas.height * 0.25);
+    ctx.fillText('超级玛丽简化版', canvas.width / 2, canvas.height * 0.25);
+
+    // 操作说明
+    ctx.fillStyle = '#FFF';
+    ctx.font = '24px Arial';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    const instructions = [
+        '← → 方向键移动',
+        '空格 / ↑ 跳跃',
+        '踩蘑菇怪头顶得分 +50',
+        '顶问号砖块出金币 +10',
+        '到达旗杆过关！',
+    ];
+    instructions.forEach((text, i) => {
+        ctx.strokeText(text, canvas.width / 2, canvas.height * 0.38 + i * 36);
+        ctx.fillText(text, canvas.width / 2, canvas.height * 0.38 + i * 36);
+    });
+
+    // 开始按钮
+    const bw = 260, bh = 70;
+    const bx = canvas.width / 2 - bw / 2;
+    const by = canvas.height * 0.72;
+    startBtn.x = bx; startBtn.y = by; startBtn.w = bw; startBtn.h = bh;
+
+    ctx.fillStyle = '#4CAF50';
+    roundRect(bx, by, bw, bh, 15);
+    ctx.fill();
+    ctx.strokeStyle = '#2E7D32';
+    ctx.lineWidth = 3;
+    roundRect(bx, by, bw, bh, 15);
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 32px Arial';
+    ctx.fillText('开始游戏', canvas.width / 2, by + bh / 2);
+}
+
+function drawGameOverScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#FF4444';
+    ctx.strokeStyle = '#8B0000';
+    ctx.lineWidth = 4;
+    ctx.font = 'bold 64px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeText('游戏结束', canvas.width / 2, canvas.height * 0.3);
+    ctx.fillText('游戏结束', canvas.width / 2, canvas.height * 0.3);
+
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 40px Arial';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(`最终得分: ${score}`, canvas.width / 2, canvas.height * 0.45);
+    ctx.fillText(`最终得分: ${score}`, canvas.width / 2, canvas.height * 0.45);
+
+    // 再来一局按钮
+    const bw = 260, bh = 70;
+    const bx = canvas.width / 2 - bw / 2;
+    const by = canvas.height * 0.6;
+    restartBtn.x = bx; restartBtn.y = by; restartBtn.w = bw; restartBtn.h = bh;
+
+    ctx.fillStyle = '#FF6B35';
+    roundRect(bx, by, bw, bh, 15);
+    ctx.fill();
+    ctx.strokeStyle = '#CC4400';
+    ctx.lineWidth = 3;
+    roundRect(bx, by, bw, bh, 15);
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 32px Arial';
+    ctx.fillText('再来一局', canvas.width / 2, by + bh / 2);
+}
+
+function drawWinScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = '#4CAF50';
+    ctx.strokeStyle = '#1B5E20';
+    ctx.lineWidth = 4;
+    ctx.font = 'bold 64px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.strokeText('恭喜过关！', canvas.width / 2, canvas.height * 0.3);
+    ctx.fillText('恭喜过关！', canvas.width / 2, canvas.height * 0.3);
+
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 40px Arial';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(`得分: ${score}`, canvas.width / 2, canvas.height * 0.45);
+    ctx.fillText(`得分: ${score}`, canvas.width / 2, canvas.height * 0.45);
+
+    const bw = 260, bh = 70;
+    const bx = canvas.width / 2 - bw / 2;
+    const by = canvas.height * 0.6;
+    restartBtn.x = bx; restartBtn.y = by; restartBtn.w = bw; restartBtn.h = bh;
+
+    ctx.fillStyle = '#4CAF50';
+    roundRect(bx, by, bw, bh, 15);
+    ctx.fill();
+    ctx.strokeStyle = '#2E7D32';
+    ctx.lineWidth = 3;
+    roundRect(bx, by, bw, bh, 15);
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 32px Arial';
+    ctx.fillText('再来一局', canvas.width / 2, by + bh / 2);
+}
+
+function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+// ==================== 主循环 ====================
+function update() {
+    if (gameState !== 'playing') return;
+    gameTime++;
+    updatePlayer();
+    updateEnemies();
+    checkEnemyCollision();
+    updateCoins();
+    updateParticles();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (gameState === 'start') {
+        drawStartScreen();
+        return;
+    }
+
+    drawSky();
+    drawMap();
+    drawEnemies();
+    drawCoins();
+    drawParticles();
+    drawPlayer();
+    drawHUD();
+
+    if (gameState === 'gameover') drawGameOverScreen();
+    if (gameState === 'win') drawWinScreen();
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// ==================== 点击事件 ====================
+canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (gameState === 'start') {
+        if (isInsideBtn(startBtn, mx, my)) {
+            gameState = 'playing';
+            resetGame();
+            window.postMessage({
+                type: "game_event",
+                eventType: "game_start",
+                data: { gameType: "超级玛丽简化版" }
+            }, "*");
+        }
+    } else if (gameState === 'gameover' || gameState === 'win') {
+        if (isInsideBtn(restartBtn, mx, my)) {
+            gameState = 'playing';
+            resetGame();
+            window.postMessage({
+                type: "game_event",
+                eventType: "game_start",
+                data: { gameType: "超级玛丽简化版" }
+            }, "*");
+        }
+    }
+});
+
+// ==================== 启动 ====================
+gameLoop();
+</script>
+</body>
+</html>

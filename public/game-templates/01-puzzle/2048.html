@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2048</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #1a1a2e; font-family: 'Microsoft YaHei', sans-serif; }
+canvas { display: block; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ============================================================
+// 2048 游戏
+// 4x4棋盘，上下左右滑动合并，触屏+键盘支持，滑动动画
+// ============================================================
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// 全屏适配
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// 游戏常量
+const GRID_SIZE = 4;
+const TILE_COLORS = {
+    2:    { bg: '#EEE4DA', fg: '#776E65' },
+    4:    { bg: '#EDE0C8', fg: '#776E65' },
+    8:    { bg: '#F2B179', fg: '#F9F6F2' },
+    16:   { bg: '#F59563', fg: '#F9F6F2' },
+    32:   { bg: '#F67C5F', fg: '#F9F6F2' },
+    64:   { bg: '#F65E3B', fg: '#F9F6F2' },
+    128:  { bg: '#EDCF72', fg: '#F9F6F2' },
+    256:  { bg: '#EDCC61', fg: '#F9F6F2' },
+    512:  { bg: '#EDC850', fg: '#F9F6F2' },
+    1024: { bg: '#EDC53F', fg: '#F9F6F2' },
+    2048: { bg: '#FFD700', fg: '#F9F6F2' }
+};
+
+// 游戏状态
+let grid = [];
+let score = 0;
+let bestScore = 0;
+let won = false;         // 是否已合成2048
+let keepPlaying = false; // 是否选择继续
+let gameOver = false;
+
+// 动画相关
+let animTiles = [];      // 动画中的瓦片
+let animating = false;
+let animDuration = 150;  // 动画持续时间(ms)
+let animStartTime = 0;
+
+// 游戏状态枚举
+const STATE = { MENU: 0, PLAYING: 1, WON: 2, GAMEOVER: 3 };
+let gameState = STATE.MENU;
+
+// ============================================================
+// 核心游戏逻辑
+// ============================================================
+
+// 初始化空网格
+function emptyGrid() {
+    const g = [];
+    for (let r = 0; r < GRID_SIZE; r++) {
+        g.push(new Array(GRID_SIZE).fill(0));
+    }
+    return g;
+}
+
+// 获取所有空位
+function getEmptyCells() {
+    const cells = [];
+    for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+            if (grid[r][c] === 0) cells.push({ r, c });
+        }
+    }
+    return cells;
+}
+
+// 在空位随机生成一个数字（90%生成2，10%生成4）
+function addRandomTile() {
+    const empty = getEmptyCells();
+    if (empty.length === 0) return null;
+    const cell = empty[Math.floor(Math.random() * empty.length)];
+    const value = Math.random() < 0.9 ? 2 : 4;
+    grid[cell.r][cell.c] = value;
+    return { r: cell.r, c: cell.c, value: value, type: 'appear' };
+}
+
+// 移动并合并一行（核心逻辑）
+// 返回 { row: 新行, score: 本次得分, moves: 移动信息 }
+function slideRow(row) {
+    // 1. 去除零
+    let filtered = row.filter(v => v !== 0);
+    let scoreAdd = 0;
+    let moves = [];
+
+    // 2. 合并相同数字
+    for (let i = 0; i < filtered.length - 1; i++) {
+        if (filtered[i] === filtered[i + 1]) {
+            filtered[i] *= 2;
+            scoreAdd += filtered[i];
+            filtered[i + 1] = 0;
+            moves.push({ from: i + 1, to: i, merged: true, value: filtered[i] });
+        }
+    }
+
+    // 3. 再次去除零
+    let result = filtered.filter(v => v !== 0);
+    // 4. 补零
+    while (result.length < GRID_SIZE) {
+        result.push(0);
+    }
+
+    return { row: result, score: scoreAdd };
+}
+
+// 执行整个网格的移动
+// direction: 'left', 'right', 'up', 'down'
+function move(direction) {
+    if (animating) return false;
+
+    let moved = false;
+    let totalScore = 0;
+    let oldGrid = grid.map(r => [...r]);
+
+    if (direction === 'left') {
+        for (let r = 0; r < GRID_SIZE; r++) {
+            let result = slideRow(grid[r]);
+            if (grid[r].some((v, i) => v !== result.row[i])) moved = true;
+            grid[r] = result.row;
+            totalScore += result.score;
+        }
+    } else if (direction === 'right') {
+        for (let r = 0; r < GRID_SIZE; r++) {
+            let reversed = [...grid[r]].reverse();
+            let result = slideRow(reversed);
+            let newRow = result.row.reverse();
+            if (grid[r].some((v, i) => v !== newRow[i])) moved = true;
+            grid[r] = newRow;
+            totalScore += result.score;
+        }
+    } else if (direction === 'up') {
+        for (let c = 0; c < GRID_SIZE; c++) {
+            let col = [];
+            for (let r = 0; r < GRID_SIZE; r++) col.push(grid[r][c]);
+            let result = slideRow(col);
+            if (col.some((v, i) => v !== result.row[i])) moved = true;
+            for (let r = 0; r < GRID_SIZE; r++) grid[r][c] = result.row[r];
+            totalScore += result.score;
+        }
+    } else if (direction === 'down') {
+        for (let c = 0; c < GRID_SIZE; c++) {
+            let col = [];
+            for (let r = 0; r < GRID_SIZE; r++) col.push(grid[r][c]);
+            col.reverse();
+            let result = slideRow(col);
+            let newRow = result.row.reverse();
+            if (col.some((v, i) => v !== newRow[i])) moved = true;
+            for (let r = 0; r < GRID_SIZE; r++) grid[r][c] = newRow[r];
+            totalScore += result.score;
+        }
+    }
+
+    if (moved) {
+        score += totalScore;
+        if (score > bestScore) bestScore = score;
+
+        // 生成新瓦片动画
+        let newTile = addRandomTile();
+        if (newTile) {
+            animTiles = [newTile];
+            animating = true;
+            animStartTime = performance.now();
+        }
+
+        // 检查是否合成2048
+        if (!won && !keepPlaying) {
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    if (grid[r][c] === 2048) {
+                        won = true;
+                        gameState = STATE.WON;
+                    }
+                }
+            }
+        }
+
+        // 检查游戏结束
+        if (!canMove()) {
+            gameOver = true;
+            gameState = STATE.GAMEOVER;
+            postMessage({ type: "game_event", eventType: "game_end", data: { score: score } }, "*");
+        }
+    }
+
+    return moved;
+}
+
+// 检测是否还能移动
+function canMove() {
+    // 有空位就能移动
+    if (getEmptyCells().length > 0) return true;
+    // 检查相邻是否有相同数字
+    for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+            const val = grid[r][c];
+            if (c < GRID_SIZE - 1 && grid[r][c + 1] === val) return true;
+            if (r < GRID_SIZE - 1 && grid[r + 1][c] === val) return true;
+        }
+    }
+    return false;
+}
+
+// 重新开始游戏
+function resetGame() {
+    grid = emptyGrid();
+    score = 0;
+    won = false;
+    keepPlaying = false;
+    gameOver = false;
+    animTiles = [];
+    animating = false;
+    gameState = STATE.PLAYING;
+
+    // 初始生成两个瓦片
+    addRandomTile();
+    addRandomTile();
+
+    postMessage({ type: "game_event", eventType: "game_start", data: { gameType: "2048" } }, "*");
+}
+
+// ============================================================
+// 绘制相关
+// ============================================================
+
+// 获取布局参数
+function getLayout() {
+    const w = canvas.width;
+    const h = canvas.height;
+    const gridSize = Math.min(w - 40, h - 160, 460);
+    const tileGap = Math.floor(gridSize * 0.025);
+    const tileSize = Math.floor((gridSize - tileGap * (GRID_SIZE + 1)) / GRID_SIZE);
+    const boardX = Math.floor((w - gridSize) / 2);
+    const boardY = Math.floor((h - gridSize) / 2) + 30;
+    return { gridSize, tileGap, tileSize, boardX, boardY, w, h };
+}
+
+// 绘制渐变背景
+function drawBackground() {
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#1a1a2e');
+    grad.addColorStop(0.5, '#16213e');
+    grad.addColorStop(1, '#1a1a2e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// 获取瓦片颜色
+function getTileColor(value) {
+    if (TILE_COLORS[value]) return TILE_COLORS[value];
+    // 超过2048用彩虹渐变
+    if (value > 2048) return { bg: '#FFD700', fg: '#F9F6F2' };
+    return { bg: '#CDC1B4', fg: '#776E65' };
+}
+
+// 绘制单个瓦片
+function drawTile(x, y, size, value, scale) {
+    if (value === 0) return;
+    const colors = getTileColor(value);
+    const s = scale || 1;
+    const offset = (size * (1 - s)) / 2;
+    const tx = x + offset;
+    const ty = y + offset;
+    const ts = size * s;
+
+    // 圆角矩形背景
+    ctx.fillStyle = colors.bg;
+    ctx.beginPath();
+    ctx.roundRect(tx, ty, ts, ts, 8);
+    ctx.fill();
+
+    // 2048特殊彩虹效果
+    if (value === 2048) {
+        const time = Date.now() / 1000;
+        const hue = (time * 60) % 360;
+        ctx.fillStyle = `hsla(${hue}, 100%, 70%, 0.3)`;
+        ctx.beginPath();
+        ctx.roundRect(tx, ty, ts, ts, 8);
+        ctx.fill();
+    }
+
+    // 数字文字
+    if (value > 0) {
+        ctx.fillStyle = colors.fg;
+        let fontSize;
+        if (value < 100) fontSize = Math.floor(ts * 0.5);
+        else if (value < 1000) fontSize = Math.floor(ts * 0.4);
+        else if (value < 10000) fontSize = Math.floor(ts * 0.32);
+        else fontSize = Math.floor(ts * 0.25);
+        ctx.font = `bold ${fontSize}px "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(value.toString(), tx + ts / 2, ty + ts / 2);
+    }
+}
+
+// 绘制棋盘
+function drawBoard() {
+    const layout = getLayout();
+    const { gridSize, tileGap, tileSize, boardX, boardY } = layout;
+
+    // 标题
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 40px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('2048', canvas.width / 2, boardY - 60);
+
+    // 得分
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 22px "Microsoft YaHei", sans-serif';
+    ctx.fillText('得分: ' + score + '    最高: ' + bestScore, canvas.width / 2, boardY - 28);
+
+    // 棋盘背景
+    ctx.fillStyle = '#BBADA0';
+    ctx.beginPath();
+    ctx.roundRect(boardX - 4, boardY - 4, gridSize + 8, gridSize + 8, 12);
+    ctx.fill();
+
+    // 空格子背景
+    ctx.fillStyle = '#CDC1B4';
+    for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+            const x = boardX + tileGap + c * (tileSize + tileGap);
+            const y = boardY + tileGap + r * (tileSize + tileGap);
+            ctx.beginPath();
+            ctx.roundRect(x, y, tileSize, tileSize, 6);
+            ctx.fill();
+        }
+    }
+
+    // 计算动画进度
+    let animProgress = 1;
+    if (animating) {
+        animProgress = Math.min(1, (performance.now() - animStartTime) / animDuration);
+        if (animProgress >= 1) {
+            animating = false;
+            animTiles = [];
+        }
+    }
+
+    // 绘制数字瓦片
+    for (let r = 0; r < GRID_SIZE; r++) {
+        for (let c = 0; c < GRID_SIZE; c++) {
+            if (grid[r][c] === 0) continue;
+            const x = boardX + tileGap + c * (tileSize + tileGap);
+            const y = boardY + tileGap + r * (tileSize + tileGap);
+
+            // 检查是否是新出现的瓦片
+            let isNew = false;
+            for (let at of animTiles) {
+                if (at.r === r && at.c === c && at.type === 'appear') {
+                    isNew = true;
+                    // 缓动动画：从0.3缩放到1
+                    const ease = 1 - Math.pow(1 - animProgress, 3);
+                    const scale = 0.3 + 0.7 * ease;
+                    drawTile(x, y, tileSize, grid[r][c], scale);
+                    break;
+                }
+            }
+            if (!isNew) {
+                drawTile(x, y, tileSize, grid[r][c], 1);
+            }
+        }
+    }
+}
+
+// 绘制菜单界面
+function drawMenu() {
+    drawBackground();
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    // 标题
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 64px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('2048', cx, cy - 100);
+
+    // 说明
+    ctx.fillStyle = '#BBADA0';
+    ctx.font = '20px "Microsoft YaHei", sans-serif';
+    ctx.fillText('合并数字，挑战2048！', cx, cy - 50);
+
+    // 开始按钮
+    const btnW = 260, btnH = 60;
+    const btnX = cx - btnW / 2, btnY = cy + 10;
+    const grad = ctx.createLinearGradient(btnX, btnY, btnX + btnW, btnY + btnH);
+    grad.addColorStop(0, '#EDC850');
+    grad.addColorStop(1, '#EDCF72');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 12);
+    ctx.fill();
+    ctx.fillStyle = '#F9F6F2';
+    ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
+    ctx.fillText('开始游戏', cx, btnY + 40);
+
+    // 操作提示
+    ctx.fillStyle = '#776E65';
+    ctx.font = '16px "Microsoft YaHei", sans-serif';
+    ctx.fillText('方向键 / 触屏滑动控制', cx, cy + 110);
+}
+
+// 绘制胜利界面
+function drawWon() {
+    drawBoard();
+
+    // 半透明遮罩
+    ctx.fillStyle = 'rgba(237, 197, 63, 0.5)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    ctx.fillStyle = '#F9F6F2';
+    ctx.font = 'bold 52px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('恭喜达成 2048!', cx, cy - 60);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
+    ctx.fillText('得分: ' + score, cx, cy - 10);
+
+    // 继续游戏按钮
+    const btn1W = 200, btn1H = 50;
+    const btn1X = cx - btn1W - 10, btn1Y = cy + 30;
+    ctx.fillStyle = '#EDC850';
+    ctx.beginPath();
+    ctx.roundRect(btn1X, btn1Y, btn1W, btn1H, 10);
+    ctx.fill();
+    ctx.fillStyle = '#F9F6F2';
+    ctx.font = 'bold 22px "Microsoft YaHei", sans-serif';
+    ctx.fillText('继续挑战', cx - btn1W / 2 - 10, btn1Y + 33);
+
+    // 再来一局按钮
+    const btn2X = cx + 10, btn2Y = cy + 30;
+    ctx.fillStyle = '#8F7A66';
+    ctx.beginPath();
+    ctx.roundRect(btn2X, btn2Y, btn1W, btn1H, 10);
+    ctx.fill();
+    ctx.fillStyle = '#F9F6F2';
+    ctx.fillText('再来一局', cx + btn1W / 2 + 10, btn2Y + 33);
+}
+
+// 绘制游戏结束界面
+function drawGameOverScreen() {
+    drawBoard();
+
+    // 半透明遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    ctx.fillStyle = '#FF4444';
+    ctx.font = 'bold 48px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('游戏结束', cx, cy - 60);
+
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 30px "Microsoft YaHei", sans-serif';
+    ctx.fillText('得分: ' + score, cx, cy - 10);
+
+    // 再来一局按钮
+    const btnW = 260, btnH = 60;
+    const btnX = cx - btnW / 2, btnY = cy + 30;
+    const grad = ctx.createLinearGradient(btnX, btnY, btnX + btnW, btnY + btnH);
+    grad.addColorStop(0, '#8F7A66');
+    grad.addColorStop(1, '#BBADA0');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 12);
+    ctx.fill();
+    ctx.fillStyle = '#F9F6F2';
+    ctx.font = 'bold 26px "Microsoft YaHei", sans-serif';
+    ctx.fillText('再来一局', cx, btnY + 40);
+}
+
+// 主绘制函数
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (gameState === STATE.MENU) {
+        drawMenu();
+    } else if (gameState === STATE.WON) {
+        drawWon();
+    } else if (gameState === STATE.GAMEOVER) {
+        drawGameOverScreen();
+    } else {
+        drawBackground();
+        drawBoard();
+    }
+}
+
+// 游戏主循环
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// 输入处理
+// ============================================================
+
+// 键盘输入
+document.addEventListener('keydown', (e) => {
+    if (gameState === STATE.MENU) {
+        resetGame();
+        return;
+    }
+
+    if (gameState === STATE.WON) {
+        // 胜利界面按键不做响应，用点击
+        return;
+    }
+
+    if (gameState === STATE.GAMEOVER) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            resetGame();
+        }
+        return;
+    }
+
+    if (gameState !== STATE.PLAYING) return;
+
+    let moved = false;
+    switch (e.key) {
+        case 'ArrowLeft':
+            moved = move('left');
+            break;
+        case 'ArrowRight':
+            moved = move('right');
+            break;
+        case 'ArrowUp':
+            moved = move('up');
+            break;
+        case 'ArrowDown':
+            moved = move('down');
+            break;
+    }
+    if (moved) e.preventDefault();
+});
+
+// 触屏滑动
+let touchStartX = 0;
+let touchStartY = 0;
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+
+    if (gameState === STATE.MENU) {
+        resetGame();
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    if (gameState !== STATE.PLAYING) return;
+
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - touchStartX;
+    const dy = touch.clientY - touchStartY;
+    const minSwipe = 30;
+
+    if (Math.abs(dx) < minSwipe && Math.abs(dy) < minSwipe) return;
+
+    if (Math.abs(dx) > Math.abs(dy)) {
+        move(dx > 0 ? 'right' : 'left');
+    } else {
+        move(dy > 0 ? 'down' : 'up');
+    }
+}, { passive: false });
+
+// 鼠标点击
+canvas.addEventListener('click', (e) => {
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    if (gameState === STATE.MENU) {
+        const btnW = 260, btnH = 60;
+        const btnX = cx - btnW / 2, btnY = cy + 10;
+        if (e.clientX >= btnX && e.clientX <= btnX + btnW &&
+            e.clientY >= btnY && e.clientY <= btnY + btnH) {
+            resetGame();
+        }
+    }
+
+    if (gameState === STATE.WON) {
+        const btn1W = 200, btn1H = 50;
+        // 继续挑战按钮
+        const btn1X = cx - btn1W - 10, btn1Y = cy + 30;
+        if (e.clientX >= btn1X && e.clientX <= btn1X + btn1W &&
+            e.clientY >= btn1Y && e.clientY <= btn1Y + btn1H) {
+            keepPlaying = true;
+            gameState = STATE.PLAYING;
+        }
+        // 再来一局按钮
+        const btn2X = cx + 10, btn2Y = cy + 30;
+        if (e.clientX >= btn2X && e.clientX <= btn2X + btn1W &&
+            e.clientY >= btn2Y && e.clientY <= btn2Y + btn1H) {
+            resetGame();
+        }
+    }
+
+    if (gameState === STATE.GAMEOVER) {
+        const btnW = 260, btnH = 60;
+        const btnX = cx - btnW / 2, btnY = cy + 30;
+        if (e.clientX >= btnX && e.clientX <= btnX + btnW &&
+            e.clientY >= btnY && e.clientY <= btnY + btnH) {
+            resetGame();
+        }
+    }
+});
+
+// 启动游戏
+gameLoop();
+</script>
+</body>
+</html>

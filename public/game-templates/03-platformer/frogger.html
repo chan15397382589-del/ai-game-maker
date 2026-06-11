@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>青蛙过河</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ==================== 青蛙过河 (Frogger) ====================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// 全屏适配
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ==================== 游戏常量 ====================
+const CELL = 40;           // 格子大小
+const FROG_SIZE = 36;      // 青蛙大小
+const COLS_COUNT = 5;      // 终点数量
+const TIMER_MAX = 60;      // 计时秒数
+
+// 车道配置：行号(从底部安全区算起)、速度、方向(1=右,-1=左)、颜色、车辆数量、车辆宽度
+const ROAD_LANES = [
+    { row: 2, speed: 2.0, dir: 1,  color: '#E74C3C', count: 3, w: 70 },
+    { row: 3, speed: 3.0, dir: -1, color: '#F39C12', count: 2, w: 90 },
+    { row: 4, speed: 1.5, dir: 1,  color: '#3498DB', count: 4, w: 60 },
+    { row: 5, speed: 2.5, dir: -1, color: '#9B59B6', count: 3, w: 80 },
+];
+
+// 河道配置：行号(从底部安全区算起)
+const RIVER_LANES = [
+    { row: 7,  speed: 1.2, dir: 1,  count: 3, w: 120 },
+    { row: 8,  speed: 2.0, dir: -1, count: 2, w: 160 },
+    { row: 9,  speed: 1.5, dir: 1,  count: 3, w: 100 },
+    { row: 10, speed: 2.5, dir: -1, count: 2, w: 140 },
+];
+
+// ==================== 游戏状态 ====================
+let state = 'start';  // start / playing / gameover / win
+let score = 0;
+let lives = 3;
+let timer = TIMER_MAX;
+let frogX, frogY;
+let frogOnLogSpeed = 0;
+let safeCount = 0;  // 到达终点次数
+
+// 行列布局（动态计算）
+let totalRows = 14;
+let gridTop = 0;
+
+// 车辆和木头实体
+let cars = [];
+let logs = [];
+
+// 终点区域
+let goals = [];
+
+// ==================== 布局计算 ====================
+function calcLayout() {
+    // 根据屏幕高度计算总行数和顶部偏移，确保所有行都能放下
+    totalRows = Math.max(14, Math.floor(canvas.height / CELL));
+    gridTop = Math.floor((canvas.height - totalRows * CELL) / 2);
+    if (gridTop < 0) gridTop = 0;
+}
+
+function rowY(row) {
+    // row 0 = 最底部一行, row 从底部往上数
+    return gridTop + (totalRows - 1 - row) * CELL + CELL / 2;
+}
+
+// ==================== 初始化 ====================
+function initEntities() {
+    calcLayout();
+    cars = [];
+    logs = [];
+
+    // 初始化车辆（道路区域：row 1~5，row 1是底部安全区上方第一行）
+    ROAD_LANES.forEach(lane => {
+        const y = rowY(lane.row);
+        const spacing = canvas.width / lane.count;
+        for (let i = 0; i < lane.count; i++) {
+            cars.push({
+                x: i * spacing + Math.random() * 60,
+                y: y,
+                w: lane.w,
+                h: CELL - 8,
+                speed: lane.speed * lane.dir,
+                color: lane.color,
+            });
+        }
+    });
+
+    // 初始化木头（河道区域：row 7~10）
+    RIVER_LANES.forEach(lane => {
+        const y = rowY(lane.row);
+        const spacing = canvas.width / lane.count;
+        for (let i = 0; i < lane.count; i++) {
+            logs.push({
+                x: i * spacing + Math.random() * 80,
+                y: y,
+                w: lane.w,
+                h: CELL - 6,
+                speed: lane.speed * lane.dir,
+            });
+        }
+    });
+
+    // 终点区域（最上方一行，row 12）
+    goals = [];
+    const goalY = rowY(12);
+    const goalW = CELL * 2;
+    const totalGoalsW = COLS_COUNT * goalW;
+    const startX = (canvas.width - totalGoalsW) / 2 + goalW / 2;
+    for (let i = 0; i < COLS_COUNT; i++) {
+        goals.push({
+            x: startX + i * goalW,
+            y: goalY,
+            w: goalW - 8,
+            h: CELL - 4,
+            reached: false,
+        });
+    }
+}
+
+function resetFrog() {
+    calcLayout();
+    frogX = Math.floor(canvas.width / 2 / CELL) * CELL + CELL / 2;
+    frogY = rowY(0);  // 底部安全区
+    frogOnLogSpeed = 0;
+}
+
+function startGame() {
+    score = 0;
+    lives = 3;
+    timer = TIMER_MAX;
+    safeCount = 0;
+    state = 'playing';
+    initEntities();
+    resetFrog();
+    goals.forEach(g => g.reached = false);
+    postMessage({ type: "game_event", eventType: "game_start", data: { gameType: "青蛙过河" } }, "*");
+}
+
+// ==================== 绘制函数 ====================
+function drawBackground() {
+    calcLayout();
+    const playAreaH = totalRows * CELL;
+
+    // 全屏绿色底色
+    ctx.fillStyle = '#1B5E20';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // ---- 顶部安全区 + 终点区 (row 11~13) ----
+    // 终点行上方草地
+    const topSafeTop = rowY(13) - CELL / 2;
+    ctx.fillStyle = '#2E7D32';
+    ctx.fillRect(0, gridTop, canvas.width, topSafeTop - gridTop + CELL);
+
+    // 终点安全带（row 11，中间绿色分割带）
+    ctx.fillStyle = '#388E3C';
+    const safeDivY = rowY(11) - CELL / 2;
+    ctx.fillRect(0, safeDivY, canvas.width, CELL);
+
+    // ---- 终点区域 (row 12) ----
+    const goalY = rowY(12);
+    goals.forEach(g => {
+        ctx.fillStyle = g.reached ? '#A5D6A7' : '#4CAF50';
+        ctx.fillRect(g.x - g.w / 2, g.y - g.h / 2, g.w, g.h);
+        ctx.strokeStyle = '#FDD835';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(g.x - g.w / 2, g.y - g.h / 2, g.w, g.h);
+        // 终点旗帜
+        if (!g.reached) {
+            ctx.fillStyle = '#FDD835';
+            ctx.fillRect(g.x - 2, g.y - g.h / 2 - 12, 4, 12);
+            ctx.fillStyle = '#FF5722';
+            ctx.beginPath();
+            ctx.moveTo(g.x + 2, g.y - g.h / 2 - 12);
+            ctx.lineTo(g.x + 14, g.y - g.h / 2 - 6);
+            ctx.lineTo(g.x + 2, g.y - g.h / 2);
+            ctx.fill();
+        }
+    });
+
+    // ---- 河道 (row 7~10) ----
+    const riverTop = rowY(10) - CELL / 2;
+    const riverBottom = rowY(7) + CELL / 2;
+    const riverGrad = ctx.createLinearGradient(0, riverTop, 0, riverBottom);
+    riverGrad.addColorStop(0, '#1565C0');
+    riverGrad.addColorStop(0.3, '#1976D2');
+    riverGrad.addColorStop(0.7, '#1E88E5');
+    riverGrad.addColorStop(1, '#1565C0');
+    ctx.fillStyle = riverGrad;
+    ctx.fillRect(0, riverTop, canvas.width, riverBottom - riverTop);
+
+    // 水面波纹
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    const waveOffset = (Date.now() / 600) % 40;
+    for (let y = riverTop + 8; y < riverBottom; y += 18) {
+        ctx.beginPath();
+        for (let x = -40 + waveOffset; x < canvas.width + 40; x += 40) {
+            ctx.moveTo(x, y);
+            ctx.quadraticCurveTo(x + 10, y - 3, x + 20, y);
+            ctx.quadraticCurveTo(x + 30, y + 3, x + 40, y);
+        }
+        ctx.stroke();
+    }
+
+    // ---- 中间安全带 (row 6) ----
+    const midSafeY = rowY(6) - CELL / 2;
+    ctx.fillStyle = '#388E3C';
+    ctx.fillRect(0, midSafeY, canvas.width, CELL);
+    // 草丛装饰
+    ctx.fillStyle = '#4CAF50';
+    for (let x = 10; x < canvas.width; x += 30) {
+        ctx.beginPath();
+        ctx.moveTo(x, midSafeY + CELL);
+        ctx.lineTo(x + 6, midSafeY + 8);
+        ctx.lineTo(x + 12, midSafeY + CELL);
+        ctx.fill();
+    }
+
+    // ---- 道路 (row 1~5) ----
+    const roadTop = rowY(5) - CELL / 2;
+    const roadBottom = rowY(1) + CELL / 2;
+    ctx.fillStyle = '#424242';
+    ctx.fillRect(0, roadTop, canvas.width, roadBottom - roadTop);
+
+    // 车道虚线
+    ctx.strokeStyle = '#FFD54F';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([18, 14]);
+    for (let r = 2; r <= 5; r++) {
+        const y = rowY(r) - CELL / 2;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    // 道路边界线
+    ctx.strokeStyle = '#FFF';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, roadTop);
+    ctx.lineTo(canvas.width, roadTop);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, roadBottom);
+    ctx.lineTo(canvas.width, roadBottom);
+    ctx.stroke();
+
+    // ---- 底部安全区 (row 0) ----
+    const bottomSafeY = rowY(0) - CELL / 2;
+    ctx.fillStyle = '#2E7D32';
+    ctx.fillRect(0, bottomSafeY, canvas.width, CELL);
+    // 草丛装饰
+    ctx.fillStyle = '#4CAF50';
+    for (let x = 0; x < canvas.width; x += 28) {
+        ctx.beginPath();
+        ctx.moveTo(x, bottomSafeY + CELL);
+        ctx.lineTo(x + 5, bottomSafeY + 10);
+        ctx.lineTo(x + 10, bottomSafeY + CELL);
+        ctx.fill();
+    }
+}
+
+function drawCars() {
+    cars.forEach(car => {
+        const cx = car.x;
+        const cy = car.y;
+        const hw = car.w / 2;
+        const hh = car.h / 2;
+
+        // 车身阴影
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.beginPath();
+        ctx.roundRect(cx - hw + 3, cy - hh + 3, car.w, car.h, 6);
+        ctx.fill();
+
+        // 车身
+        ctx.fillStyle = car.color;
+        ctx.beginPath();
+        ctx.roundRect(cx - hw, cy - hh, car.w, car.h, 6);
+        ctx.fill();
+
+        // 车身高光
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.fillRect(cx - hw + 4, cy - hh + 3, car.w - 8, car.h * 0.35);
+
+        // 车窗
+        ctx.fillStyle = 'rgba(200,230,255,0.6)';
+        const winW = car.w * 0.28;
+        const winH = car.h * 0.45;
+        ctx.beginPath();
+        ctx.roundRect(cx - winW / 2, cy - winH / 2, winW, winH, 3);
+        ctx.fill();
+
+        // 车灯
+        ctx.fillStyle = '#FFF9C4';
+        const dir = car.speed > 0 ? 1 : -1;
+        ctx.beginPath();
+        ctx.arc(cx + hw * dir - 4 * dir, cy - 4, 3, 0, Math.PI * 2);
+        ctx.arc(cx + hw * dir - 4 * dir, cy + 4, 3, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function drawLogs() {
+    logs.forEach(log => {
+        const cx = log.x;
+        const cy = log.y;
+        const hw = log.w / 2;
+        const hh = log.h / 2;
+
+        // 木头阴影
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.beginPath();
+        ctx.roundRect(cx - hw + 2, cy - hh + 2, log.w, log.h, 10);
+        ctx.fill();
+
+        // 木头主体
+        const logGrad = ctx.createLinearGradient(0, cy - hh, 0, cy + hh);
+        logGrad.addColorStop(0, '#A1887F');
+        logGrad.addColorStop(0.3, '#8D6E63');
+        logGrad.addColorStop(0.7, '#795548');
+        logGrad.addColorStop(1, '#6D4C41');
+        ctx.fillStyle = logGrad;
+        ctx.beginPath();
+        ctx.roundRect(cx - hw, cy - hh, log.w, log.h, 10);
+        ctx.fill();
+
+        // 木纹
+        ctx.strokeStyle = 'rgba(93,64,55,0.4)';
+        ctx.lineWidth = 1;
+        for (let i = -hw + 18; i < hw; i += 22) {
+            ctx.beginPath();
+            ctx.moveTo(cx + i, cy - hh + 5);
+            ctx.bezierCurveTo(cx + i - 3, cy - 4, cx + i + 3, cy + 4, cx + i, cy + hh - 5);
+            ctx.stroke();
+        }
+
+        // 木头高光
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.fillRect(cx - hw + 6, cy - hh + 3, log.w - 12, log.h * 0.3);
+
+        // 木头两端截面
+        ctx.fillStyle = '#5D4037';
+        ctx.beginPath();
+        ctx.arc(cx - hw + 4, cy, hh - 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + hw - 4, cy, hh - 2, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
+
+function drawFrog() {
+    const x = frogX;
+    const y = frogY;
+    const r = FROG_SIZE / 2;
+
+    ctx.save();
+
+    // 身体阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath();
+    ctx.ellipse(x + 2, y + 3, r, r * 0.85, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 后腿
+    ctx.strokeStyle = '#2E7D32';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.6, y + r * 0.5);
+    ctx.quadraticCurveTo(x - r - 8, y + r + 4, x - r - 10, y + r + 12);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + r * 0.6, y + r * 0.5);
+    ctx.quadraticCurveTo(x + r + 8, y + r + 4, x + r + 10, y + r + 12);
+    ctx.stroke();
+
+    // 脚蹼
+    ctx.fillStyle = '#2E7D32';
+    ctx.beginPath();
+    ctx.ellipse(x - r - 10, y + r + 14, 6, 3, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + r + 10, y + r + 14, 6, 3, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 身体（绿色椭圆）
+    ctx.fillStyle = '#4CAF50';
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * 0.85, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 身体深色边缘
+    ctx.strokeStyle = '#2E7D32';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 肚子
+    ctx.fillStyle = '#A5D6A7';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 5, r * 0.45, r * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 前腿
+    ctx.strokeStyle = '#2E7D32';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - r + 4, y + 6);
+    ctx.lineTo(x - r - 6, y + 12);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + r - 4, y + 6);
+    ctx.lineTo(x + r + 6, y + 12);
+    ctx.stroke();
+
+    // 大眼睛突起（绿色底）
+    const eyeOX = r * 0.42;
+    const eyeOY = -r * 0.55;
+    ctx.fillStyle = '#4CAF50';
+    ctx.beginPath();
+    ctx.arc(x - eyeOX, y + eyeOY, r * 0.38, 0, Math.PI * 2);
+    ctx.arc(x + eyeOX, y + eyeOY, r * 0.38, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 眼白
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(x - eyeOX, y + eyeOY, r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + eyeOX, y + eyeOY, r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 眼珠
+    ctx.fillStyle = '#111';
+    const pupilR = r * 0.16;
+    ctx.beginPath();
+    ctx.arc(x - eyeOX + 2, y + eyeOY + 1, pupilR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + eyeOX + 2, y + eyeOY + 1, pupilR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 眼睛高光
+    ctx.fillStyle = '#FFF';
+    ctx.beginPath();
+    ctx.arc(x - eyeOX + 3, y + eyeOY - 2, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + eyeOX + 3, y + eyeOY - 2, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 嘴巴
+    ctx.strokeStyle = '#1B5E20';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y + 2, r * 0.3, 0.2, Math.PI - 0.2);
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+function drawHUD() {
+    // 顶部半透明底栏
+    const barH = 46;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, canvas.width, barH);
+    // 底边亮线
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fillRect(0, barH, canvas.width, 2);
+
+    ctx.textBaseline = 'middle';
+    const cy = barH / 2;
+
+    // 生命（红心）
+    ctx.font = 'bold 18px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    let heartsStr = '';
+    for (let i = 0; i < lives; i++) heartsStr += '❤ ';
+    ctx.fillStyle = '#E74C3C';
+    ctx.fillText(heartsStr.trim(), 12, cy);
+
+    // 分数
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#FFD54F';
+    ctx.font = 'bold 22px Arial, sans-serif';
+    ctx.fillText('得分: ' + score, canvas.width / 2, cy);
+
+    // 计时
+    ctx.textAlign = 'right';
+    const timeColor = timer <= 10 ? '#FF5252' : '#FFF';
+    ctx.fillStyle = timeColor;
+    ctx.font = 'bold 18px Arial, sans-serif';
+    const sec = Math.ceil(timer);
+    ctx.fillText('⏱ ' + sec + 's', canvas.width - 12, cy);
+
+    // 过关进度
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#81C784';
+    ctx.font = '15px Arial, sans-serif';
+    ctx.fillText('过关: ' + safeCount + '/' + COLS_COUNT, 120, cy);
+}
+
+function drawStartScreen() {
+    // 渐变背景
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#1B5E20');
+    grad.addColorStop(0.4, '#2E7D32');
+    grad.addColorStop(1, '#388E3C');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    // 装饰大青蛙
+    const fy = cy - 80;
+    ctx.fillStyle = '#4CAF50';
+    ctx.beginPath();
+    ctx.ellipse(cx, fy, 55, 48, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#2E7D32';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // 眼睛
+    ctx.fillStyle = '#FFF';
+    ctx.beginPath();
+    ctx.arc(cx - 18, fy - 22, 16, 0, Math.PI * 2);
+    ctx.arc(cx + 18, fy - 22, 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#111';
+    ctx.beginPath();
+    ctx.arc(cx - 14, fy - 21, 8, 0, Math.PI * 2);
+    ctx.arc(cx + 22, fy - 21, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#FFF';
+    ctx.beginPath();
+    ctx.arc(cx - 12, fy - 24, 3, 0, Math.PI * 2);
+    ctx.arc(cx + 24, fy - 24, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 嘴巴
+    ctx.strokeStyle = '#1B5E20';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, fy - 4, 18, 0.2, Math.PI - 0.2);
+    ctx.stroke();
+
+    // 标题
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 50px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    ctx.shadowBlur = 8;
+    ctx.fillText('青蛙过河', cx, cy + 60);
+    ctx.shadowBlur = 0;
+
+    ctx.font = '20px Arial, sans-serif';
+    ctx.fillStyle = '#C8E6C9';
+    ctx.fillText('帮助小青蛙安全过河到达终点！', cx, cy + 105);
+
+    // 开始按钮
+    const btnW = 220, btnH = 52;
+    const btnX = cx - btnW / 2, btnY = cy + 135;
+    ctx.fillStyle = '#FFD54F';
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 14);
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 24px Arial, sans-serif';
+    ctx.fillText('点击开始游戏', cx, btnY + btnH / 2);
+
+    // 说明
+    ctx.fillStyle = '#A5D6A7';
+    ctx.font = '14px Arial, sans-serif';
+    ctx.fillText('方向键/WASD移动 | 躲避汽车 | 踩木头过河', cx, cy + 220);
+    ctx.fillText('安全到达终点 +100分 | 60秒限时 | 3条命', cx, cy + 242);
+}
+
+function drawGameOverScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    // 面板
+    ctx.fillStyle = 'rgba(30,30,30,0.9)';
+    ctx.beginPath();
+    ctx.roundRect(cx - 180, cy - 130, 360, 280, 16);
+    ctx.fill();
+    ctx.strokeStyle = '#E74C3C';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.fillStyle = '#E74C3C';
+    ctx.font = 'bold 48px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('游戏结束', cx, cy - 75);
+
+    ctx.fillStyle = '#FFF';
+    ctx.font = '26px Arial, sans-serif';
+    ctx.fillText('最终得分: ' + score, cx, cy - 20);
+
+    ctx.fillStyle = '#FFD54F';
+    ctx.font = '20px Arial, sans-serif';
+    ctx.fillText('过关: ' + safeCount + ' 次', cx, cy + 20);
+
+    // 再来一局按钮
+    const btnW = 200, btnH = 50;
+    const btnX = cx - btnW / 2, btnY = cy + 55;
+    ctx.fillStyle = '#4CAF50';
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 12);
+    ctx.fill();
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 24px Arial, sans-serif';
+    ctx.fillText('再来一局', cx, btnY + btnH / 2);
+}
+
+function drawWinScreen() {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+
+    // 面板
+    ctx.fillStyle = 'rgba(30,30,30,0.9)';
+    ctx.beginPath();
+    ctx.roundRect(cx - 180, cy - 140, 360, 300, 16);
+    ctx.fill();
+    ctx.strokeStyle = '#FFD54F';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFD54F';
+    ctx.font = 'bold 48px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('恭喜通关！', cx, cy - 80);
+
+    ctx.fillStyle = '#FFF';
+    ctx.font = '30px Arial, sans-serif';
+    ctx.fillText('得分: ' + score, cx, cy - 25);
+
+    ctx.fillStyle = '#81C784';
+    ctx.font = '18px Arial, sans-serif';
+    const bonus = Math.floor(timer * 5);
+    ctx.fillText('时间奖励: +' + bonus + ' 分（已计入总分）', cx, cy + 15);
+
+    // 再来一局按钮
+    const btnW = 200, btnH = 50;
+    const btnX = cx - btnW / 2, btnY = cy + 55;
+    ctx.fillStyle = '#4CAF50';
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 12);
+    ctx.fill();
+    ctx.fillStyle = '#FFF';
+    ctx.font = 'bold 24px Arial, sans-serif';
+    ctx.fillText('再来一局', cx, btnY + btnH / 2);
+}
+
+// ==================== 游戏逻辑 ====================
+function moveEntities() {
+    // 移动车辆
+    cars.forEach(car => {
+        car.x += car.speed;
+        if (car.speed > 0 && car.x - car.w / 2 > canvas.width) {
+            car.x = -car.w / 2;
+        } else if (car.speed < 0 && car.x + car.w / 2 < 0) {
+            car.x = canvas.width + car.w / 2;
+        }
+    });
+
+    // 移动木头
+    logs.forEach(log => {
+        log.x += log.speed;
+        if (log.speed > 0 && log.x - log.w / 2 > canvas.width) {
+            log.x = -log.w / 2;
+        } else if (log.speed < 0 && log.x + log.w / 2 < 0) {
+            log.x = canvas.width + log.w / 2;
+        }
+    });
+}
+
+function checkCollisions() {
+    calcLayout();
+    const fr = FROG_SIZE / 2;
+
+    // 确定青蛙所在的行
+    const frogRow = Math.round((frogY - gridTop - CELL / 2) / CELL);
+    const invRow = totalRows - 1 - frogRow; // 从底部算起的行号
+
+    // 在道路上（row 1~5）：检查车辆碰撞
+    if (invRow >= 1 && invRow <= 5) {
+        for (let car of cars) {
+            if (rectOverlap(frogX - fr, frogY - fr, FROG_SIZE, FROG_SIZE,
+                car.x - car.w / 2, car.y - car.h / 2, car.w, car.h)) {
+                frogDeath();
+                return;
+            }
+        }
+    }
+
+    // 在河道上（row 7~10）：必须在木头上
+    if (invRow >= 7 && invRow <= 10) {
+        frogOnLogSpeed = 0;
+        let onLog = false;
+        for (let log of logs) {
+            if (rectOverlap(frogX - fr, frogY - fr, FROG_SIZE, FROG_SIZE,
+                log.x - log.w / 2, log.y - log.h / 2, log.w, log.h)) {
+                onLog = true;
+                frogOnLogSpeed = log.speed;
+                break;
+            }
+        }
+        if (!onLog) {
+            frogDeath();
+            return;
+        }
+    } else {
+        frogOnLogSpeed = 0;
+    }
+
+    // 检查是否到达终点（row 12）
+    if (invRow === 12) {
+        for (let goal of goals) {
+            if (!goal.reached && rectOverlap(frogX - fr, frogY - fr, FROG_SIZE, FROG_SIZE,
+                goal.x - goal.w / 2, goal.y - goal.h / 2, goal.w, goal.h)) {
+                goal.reached = true;
+                score += 100;
+                safeCount++;
+                resetFrog();
+
+                if (safeCount >= COLS_COUNT) {
+                    score += Math.floor(timer * 5);
+                    state = 'win';
+                    postMessage({ type: "game_event", eventType: "game_end", data: { score } }, "*");
+                }
+                return;
+            }
+        }
+    }
+}
+
+function rectOverlap(x1, y1, w1, h1, x2, y2, w2, h2) {
+    return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+}
+
+function frogDeath() {
+    lives--;
+    if (lives <= 0) {
+        state = 'gameover';
+        postMessage({ type: "game_event", eventType: "game_end", data: { score } }, "*");
+    } else {
+        resetFrog();
+    }
+}
+
+function moveFrog(dx, dy) {
+    const newX = frogX + dx * CELL;
+    const newY = frogY + dy * CELL;
+
+    // 边界检查
+    if (newX < FROG_SIZE / 2 || newX > canvas.width - FROG_SIZE / 2) return;
+    if (newY < gridTop + FROG_SIZE / 2) return;
+    if (newY > gridTop + (totalRows - 1) * CELL + CELL / 2 + FROG_SIZE / 2) return;
+
+    frogX = newX;
+    frogY = newY;
+}
+
+// ==================== 输入处理 ====================
+document.addEventListener('keydown', (e) => {
+    if (state === 'start') {
+        startGame();
+        return;
+    }
+    if (state === 'gameover' || state === 'win') {
+        startGame();
+        return;
+    }
+
+    switch (e.key) {
+        case 'ArrowUp':    case 'w': case 'W': moveFrog(0, -1); e.preventDefault(); break;
+        case 'ArrowDown':  case 's': case 'S': moveFrog(0, 1);  e.preventDefault(); break;
+        case 'ArrowLeft':  case 'a': case 'A': moveFrog(-1, 0); e.preventDefault(); break;
+        case 'ArrowRight': case 'd': case 'D': moveFrog(1, 0);  e.preventDefault(); break;
+    }
+});
+
+// 鼠标/触控
+function handleClick(px, py) {
+    if (state === 'start' || state === 'gameover' || state === 'win') {
+        startGame();
+        return;
+    }
+
+    // 游戏中：点击青蛙周围方向移动
+    const dx = px - frogX;
+    const dy = py - frogY;
+    if (Math.abs(dx) > Math.abs(dy)) {
+        moveFrog(dx > 0 ? 1 : -1, 0);
+    } else {
+        moveFrog(0, dy > 0 ? 1 : -1);
+    }
+}
+
+canvas.addEventListener('click', (e) => {
+    handleClick(e.clientX, e.clientY);
+});
+
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    handleClick(t.clientX, t.clientY);
+}, { passive: false });
+
+// ==================== 主循环 ====================
+let lastTime = 0;
+
+function gameLoop(timestamp) {
+    const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+    lastTime = timestamp;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (state === 'start') {
+        drawStartScreen();
+    } else if (state === 'playing') {
+        timer -= dt;
+        if (timer <= 0) {
+            timer = 0;
+            state = 'gameover';
+            postMessage({ type: "game_event", eventType: "game_end", data: { score } }, "*");
+        }
+
+        moveEntities();
+        frogX += frogOnLogSpeed;
+
+        // 边界修正
+        if (frogX < FROG_SIZE / 2) frogX = FROG_SIZE / 2;
+        if (frogX > canvas.width - FROG_SIZE / 2) frogX = canvas.width - FROG_SIZE / 2;
+
+        checkCollisions();
+
+        drawBackground();
+        drawLogs();
+        drawCars();
+        drawFrog();
+        drawHUD();
+    } else if (state === 'gameover') {
+        drawBackground();
+        drawLogs();
+        drawCars();
+        drawFrog();
+        drawGameOverScreen();
+    } else if (state === 'win') {
+        drawBackground();
+        drawLogs();
+        drawCars();
+        drawFrog();
+        drawWinScreen();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// 启动
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

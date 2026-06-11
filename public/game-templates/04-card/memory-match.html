@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记忆翻牌</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#0a1628}
+canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// 记忆翻牌游戏 - 4x4共16张牌（8对）
+const canvas=document.getElementById('c');
+const ctx=canvas.getContext('2d');
+let W,H;
+
+function resize(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  if(state==='game') calcLayout();
+  draw();
+}
+window.addEventListener('resize',resize);
+resize();
+
+// 游戏状态：start / game / end
+let state='start';
+
+// 8种Canvas绘制的彩色图案
+const PATTERNS=[
+  {name:'红心',color:'#ff4757',draw:function(cx,cy,s){
+    ctx.beginPath();var r=s*0.32;
+    ctx.moveTo(cx,cy+r*0.6);
+    ctx.bezierCurveTo(cx,cy-r*0.1,cx-r,cy-r*0.1,cx-r,cy+r*0.3);
+    ctx.bezierCurveTo(cx-r,cy+r*0.9,cx,cy+r*1.2,cx,cy+r*1.4);
+    ctx.bezierCurveTo(cx,cy+r*1.2,cx+r,cy+r*0.9,cx+r,cy+r*0.3);
+    ctx.bezierCurveTo(cx+r,cy-r*0.1,cx,cy-r*0.1,cx,cy+r*0.6);
+    ctx.closePath();ctx.fill();
+  }},
+  {name:'蓝星',color:'#3498db',draw:function(cx,cy,s){
+    var r=s*0.32;ctx.beginPath();
+    for(var i=0;i<5;i++){
+      var a=-Math.PI/2+i*2*Math.PI/5;
+      ctx.lineTo(cx+Math.cos(a)*r,cy+Math.sin(a)*r);
+      a+=Math.PI/5;
+      ctx.lineTo(cx+Math.cos(a)*r*0.4,cy+Math.sin(a)*r*0.4);
+    }
+    ctx.closePath();ctx.fill();
+  }},
+  {name:'绿圆',color:'#2ecc71',draw:function(cx,cy,s){
+    ctx.beginPath();ctx.arc(cx,cy,s*0.28,0,Math.PI*2);ctx.fill();
+  }},
+  {name:'紫菱',color:'#9b59b6',draw:function(cx,cy,s){
+    var r=s*0.3;ctx.beginPath();
+    ctx.moveTo(cx,cy-r);ctx.lineTo(cx+r*0.7,cy);
+    ctx.lineTo(cx,cy+r);ctx.lineTo(cx-r*0.7,cy);
+    ctx.closePath();ctx.fill();
+  }},
+  {name:'橙三角',color:'#f39c12',draw:function(cx,cy,s){
+    var r=s*0.32;ctx.beginPath();
+    ctx.moveTo(cx,cy-r);ctx.lineTo(cx+r,cy+r*0.7);ctx.lineTo(cx-r,cy+r*0.7);
+    ctx.closePath();ctx.fill();
+  }},
+  {name:'黄月',color:'#f1c40f',draw:function(cx,cy,s){
+    var r=s*0.28;ctx.beginPath();
+    ctx.arc(cx,cy,r,0.3,Math.PI*2-0.3);
+    ctx.arc(cx+r*0.3,cy,r*0.75,Math.PI*2-0.8,0.8,true);
+    ctx.closePath();ctx.fill();
+  }},
+  {name:'青方',color:'#1abc9c',draw:function(cx,cy,s){
+    var r=s*0.22;ctx.fillRect(cx-r,cy-r,r*2,r*2);
+  }},
+  {name:'粉花',color:'#e84393',draw:function(cx,cy,s){
+    var r=s*0.12;
+    for(var i=0;i<5;i++){
+      var a=i*2*Math.PI/5-Math.PI/2;
+      ctx.beginPath();
+      ctx.arc(cx+Math.cos(a)*r*1.8,cy+Math.sin(a)*r*1.8,r,0,Math.PI*2);
+      ctx.fill();
+    }
+    ctx.fillStyle='#fdcb6e';ctx.beginPath();
+    ctx.arc(cx,cy,r*0.9,0,Math.PI*2);ctx.fill();
+  }}
+];
+
+// 牌数据
+var cards=[];
+var flipped=[];       // 当前翻开的索引
+var matchedSet=new Set(); // 已配对
+var moves=0;
+var matchCount=0;
+var canFlip=true;
+
+// 动画
+var flipAnim={}; // idx -> {t:0~1, phase:'flip'|'unflip'}
+
+// 布局
+var cardW,cardH,offX,offY,gap;
+
+function calcLayout(){
+  gap=12;
+  var maxW=W-40,maxH=H-120;
+  cardW=Math.min(110,(maxW-gap*3)/4);
+  cardH=Math.min(140,(maxH-gap*3)/4);
+  if(cardH<cardW*1.15) cardH=cardW*1.15;
+  var tw=cardW*4+gap*3, th=cardH*4+gap*3;
+  offX=(W-tw)/2;
+  offY=(H-th)/2+30;
+}
+
+function initGame(){
+  cards=[];flipped=[];matchedSet=new Set();moves=0;matchCount=0;canFlip=true;flipAnim={};
+  calcLayout();
+  // 生成8对并洗牌
+  var pairs=[];
+  for(var i=0;i<8;i++) pairs.push(i,i);
+  for(var i=pairs.length-1;i>0;i--){
+    var j=Math.floor(Math.random()*(i+1));
+    var t=pairs[i];pairs[i]=pairs[j];pairs[j]=t;
+  }
+  for(var i=0;i<16;i++){
+    var r=Math.floor(i/4), c=i%4;
+    cards.push({
+      patternIdx:pairs[i],
+      x:offX+c*(cardW+gap), y:offY+r*(cardH+gap),
+      w:cardW, h:cardH, faceUp:false
+    });
+  }
+}
+
+// 绘制单张牌
+function drawCard(idx){
+  var card=cards[idx];
+  var anim=flipAnim[idx];
+  var scaleX=1;
+  if(anim){
+    scaleX=Math.abs(Math.cos(anim.t*Math.PI));
+    if(anim.t>=1){
+      if(anim.phase==='flip'){card.faceUp=true;delete flipAnim[idx];}
+      else{card.faceUp=false;delete flipAnim[idx];}
+    }
+  }
+  var x=card.x,y=card.y,w=card.w,h=card.h;
+  ctx.save();
+  ctx.translate(x+w/2,y+h/2);
+  ctx.scale(scaleX,1);
+  ctx.translate(-w/2,-h/2);
+  // 圆角矩形
+  var r=10;
+  ctx.beginPath();
+  ctx.moveTo(r,0);ctx.lineTo(w-r,0);ctx.quadraticCurveTo(w,0,w,r);
+  ctx.lineTo(w,h-r);ctx.quadraticCurveTo(w,h,w-r,h);
+  ctx.lineTo(r,h);ctx.quadraticCurveTo(0,h,0,h-r);
+  ctx.lineTo(0,r);ctx.quadraticCurveTo(0,0,r,0);
+  ctx.closePath();
+  var showFace=card.faceUp;
+  if(showFace){
+    ctx.fillStyle='#ffffff';ctx.fill();
+    ctx.strokeStyle=matchedSet.has(idx)?'#2ecc71':'#3498db';
+    ctx.lineWidth=matchedSet.has(idx)?3:2;ctx.stroke();
+    ctx.fillStyle=PATTERNS[card.patternIdx].color;
+    PATTERNS[card.patternIdx].draw(w/2,h/2,Math.min(w,h));
+  }else{
+    var grd=ctx.createLinearGradient(0,0,w,h);
+    grd.addColorStop(0,'#1a3a5c');grd.addColorStop(1,'#0d2137');
+    ctx.fillStyle=grd;ctx.fill();
+    ctx.strokeStyle='#2980b9';ctx.lineWidth=2;ctx.stroke();
+    ctx.strokeStyle='#3498db44';ctx.lineWidth=1;
+    ctx.strokeRect(6,6,w-12,h-12);
+    ctx.fillStyle='#ecf0f1';
+    ctx.font='bold '+Math.min(w,h)*0.4+'px Arial';
+    ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('?',w/2,h/2);
+  }
+  ctx.restore();
+}
+
+// 绘制圆角矩形辅助
+function rrect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+// 绘制开始画面
+var startBtn={};
+function drawStart(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#0a1628');g.addColorStop(1,'#1a3a5c');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#ecf0f1';
+  ctx.font='bold '+Math.min(W*0.08,56)+'px "Microsoft YaHei",Arial';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('记忆翻牌',W/2,H*0.3);
+  ctx.fillStyle='#7fb3d8';
+  ctx.font=Math.min(W*0.035,22)+'px "Microsoft YaHei",Arial';
+  ctx.fillText('翻开所有配对的牌，挑战你的记忆力！',W/2,H*0.4);
+  var bw=220,bh=56,bx=W/2-bw/2,by=H*0.55;
+  ctx.fillStyle='#3498db';rrect(bx,by,bw,bh,28);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='bold 22px "Microsoft YaHei",Arial';
+  ctx.fillText('开始游戏',W/2,by+bh/2);
+  startBtn={x:bx,y:by,w:bw,h:bh};
+}
+
+// 绘制游戏中
+function drawGame(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#0a1628');g.addColorStop(1,'#1a3a5c');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#ecf0f1';
+  ctx.font='bold '+Math.min(W*0.03,22)+'px "Microsoft YaHei",Arial';
+  ctx.textAlign='center';
+  ctx.fillText('步数: '+moves+'    配对: '+matchCount+'/8',W/2,30);
+  for(var i=0;i<cards.length;i++) drawCard(i);
+}
+
+// 绘制结束画面
+var endBtn={};
+function drawEnd(){
+  var g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#0a1628');g.addColorStop(1,'#1a3a5c');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#f1c40f';
+  ctx.font='bold '+Math.min(W*0.08,56)+'px "Microsoft YaHei",Arial';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('恭喜通关！',W/2,H*0.25);
+  ctx.fillStyle='#ecf0f1';
+  ctx.font=Math.min(W*0.04,28)+'px "Microsoft YaHei",Arial';
+  ctx.fillText('总步数: '+moves,W/2,H*0.4);
+  var rating=moves<=12?'完美记忆！':moves<=18?'记忆力超强！':moves<=25?'表现不错！':'继续加油！';
+  ctx.fillStyle='#7fb3d8';
+  ctx.font=Math.min(W*0.035,24)+'px "Microsoft YaHei",Arial';
+  ctx.fillText(rating,W/2,H*0.48);
+  var bw=220,bh=56,bx=W/2-bw/2,by=H*0.6;
+  ctx.fillStyle='#3498db';rrect(bx,by,bw,bh,28);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='bold 22px "Microsoft YaHei",Arial';
+  ctx.fillText('再来一局',W/2,by+bh/2);
+  endBtn={x:bx,y:by,w:bw,h:bh};
+}
+
+function draw(){
+  if(state==='start') drawStart();
+  else if(state==='game') drawGame();
+  else if(state==='end') drawEnd();
+}
+
+// 点击牌
+function getCardAt(mx,my){
+  for(var i=0;i<cards.length;i++){
+    var c=cards[i];
+    if(mx>=c.x&&mx<=c.x+c.w&&my>=c.y&&my<=c.y+c.h) return i;
+  }
+  return -1;
+}
+
+function flipCard(idx){
+  if(!canFlip)return;
+  if(matchedSet.has(idx))return;
+  if(flipped.indexOf(idx)>=0)return;
+  if(flipped.length>=2)return;
+  flipAnim[idx]={t:0,phase:'flip'};
+  flipped.push(idx);
+  if(flipped.length===2){
+    moves++;
+    canFlip=false;
+    var a=flipped[0],b=flipped[1];
+    if(cards[a].patternIdx===cards[b].patternIdx){
+      setTimeout(function(){
+        matchedSet.add(a);matchedSet.add(b);
+        matchCount++;flipped=[];canFlip=true;
+        if(matchCount===8){
+          setTimeout(function(){
+            state='end';drawEnd();
+            try{parent.postMessage({type:"game_event",eventType:"game_end",data:{score:moves}},"*");}catch(e){}
+          },500);
+        }
+      },600);
+    }else{
+      setTimeout(function(){
+        flipAnim[a]={t:0,phase:'unflip'};
+        flipAnim[b]={t:0,phase:'unflip'};
+        setTimeout(function(){flipped=[];canFlip=true;},400);
+      },1000);
+    }
+  }
+}
+
+// 输入
+function handleClick(mx,my){
+  if(state==='start'){
+    var b=startBtn;
+    if(b&&mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){
+      state='game';initGame();draw();
+      try{parent.postMessage({type:"game_event",eventType:"game_start",data:{gameType:"记忆翻牌"}},"*");}catch(e){}
+    }
+  }else if(state==='game'){
+    var idx=getCardAt(mx,my);
+    if(idx>=0) flipCard(idx);
+  }else if(state==='end'){
+    var b=endBtn;
+    if(b&&mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){
+      state='game';initGame();draw();
+      try{parent.postMessage({type:"game_event",eventType:"game_start",data:{gameType:"记忆翻牌"}},"*");}catch(e){}
+    }
+  }
+}
+
+canvas.addEventListener('click',function(e){handleClick(e.clientX,e.clientY);});
+canvas.addEventListener('touchstart',function(e){
+  e.preventDefault();
+  var t=e.touches[0];handleClick(t.clientX,t.clientY);
+});
+
+// 动画循环
+var lastT=0;
+function loop(ts){
+  var dt=(ts-lastT)/1000;lastT=ts;
+  if(dt>0.1)dt=0.1;
+  var dirty=false;
+  for(var k in flipAnim){
+    flipAnim[k].t+=dt*3;
+    if(flipAnim[k].t>1)flipAnim[k].t=1;
+    dirty=true;
+  }
+  if(dirty&&state==='game') drawGame();
+  requestAnimationFrame(loop);
+}
+draw();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

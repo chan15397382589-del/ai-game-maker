@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>太空跑酷</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a2e; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+(function() {
+    "use strict";
+
+    // ========== 画布初始化 ==========
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    // ========== 游戏常量 ==========
+    const LANES = 3;
+    const STAR_COLOR = "#ffd700";
+    const OBSTACLE_COLOR = "#8b4513";
+
+    // ========== 游戏状态 ==========
+    const STATE = { MENU: 0, PLAYING: 1, OVER: 2 };
+    let gameState = STATE.MENU;
+    let score = 0;
+    let distance = 0;
+    let speed = 4;
+    let speedTimer = 0;
+
+    // ========== 角色 ==========
+    let player = {
+        lane: 1,
+        targetLane: 1,
+        x: 0,
+        y: 0,
+        baseY: 0,
+        vy: 0,
+        jumping: false,
+        width: 0,
+        height: 0,
+        runFrame: 0,
+        frameTimer: 0
+    };
+
+    // ========== 场景元素 ==========
+    let stars = [];
+    let platforms = [];
+    let obstacles = [];
+    let collectibles = [];
+
+    // ========== 输入 ==========
+    let keys = {};
+
+    document.addEventListener("keydown", function(e) {
+        keys[e.code] = true;
+
+        if (gameState === STATE.MENU) {
+            if (e.code === "Space" || e.code === "Enter") {
+                startGame();
+                e.preventDefault();
+            }
+            return;
+        }
+        if (gameState === STATE.OVER) {
+            if (e.code === "Space" || e.code === "Enter") {
+                startGame();
+                e.preventDefault();
+            }
+            return;
+        }
+        if (gameState === STATE.PLAYING) {
+            if (e.code === "ArrowLeft" || e.code === "KeyA") {
+                moveLane(-1);
+            }
+            if (e.code === "ArrowRight" || e.code === "KeyD") {
+                moveLane(1);
+            }
+            if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") {
+                jump();
+                e.preventDefault();
+            }
+        }
+    });
+
+    document.addEventListener("keyup", function(e) {
+        keys[e.code] = false;
+    });
+
+    // 触控：左半屏左移，右半屏右移，上半屏跳跃
+    canvas.addEventListener("touchstart", function(e) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const tx = touch.clientX;
+        const ty = touch.clientY;
+
+        if (gameState === STATE.MENU) {
+            startGame();
+            return;
+        }
+        if (gameState === STATE.OVER) {
+            startGame();
+            return;
+        }
+        if (gameState === STATE.PLAYING) {
+            if (ty < canvas.height * 0.4) {
+                jump();
+            } else if (tx < canvas.width / 2) {
+                moveLane(-1);
+            } else {
+                moveLane(1);
+            }
+        }
+    }, { passive: false });
+
+    function moveLane(dir) {
+        const newLane = player.targetLane + dir;
+        if (newLane >= 0 && newLane < LANES) {
+            player.targetLane = newLane;
+        }
+    }
+
+    function jump() {
+        if (!player.jumping) {
+            player.vy = -14;
+            player.jumping = true;
+        }
+    }
+
+    // ========== 初始化 ==========
+    function initStars() {
+        stars = [];
+        for (let i = 0; i < 100; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 2 + 0.5,
+                speed: Math.random() * 1.5 + 0.3,
+                brightness: Math.random() * 0.5 + 0.5
+            });
+        }
+    }
+
+    function getLaneX(lane) {
+        const margin = canvas.width * 0.15;
+        const usableWidth = canvas.width - margin * 2;
+        const laneWidth = usableWidth / LANES;
+        return margin + laneWidth * lane + laneWidth / 2;
+    }
+
+    function getGroundY() {
+        return canvas.height * 0.75;
+    }
+
+    function startGame() {
+        window.postMessage({
+            type: "game_event",
+            eventType: "game_start",
+            data: { gameType: "太空跑酷" }
+        }, "*");
+
+        score = 0;
+        distance = 0;
+        speed = 4;
+        speedTimer = 0;
+
+        player.lane = 1;
+        player.targetLane = 1;
+        player.x = getLaneX(1);
+        player.baseY = getGroundY();
+        player.y = player.baseY;
+        player.vy = 0;
+        player.jumping = false;
+        player.width = Math.min(canvas.width * 0.06, 40);
+        player.height = player.width * 1.2;
+        player.runFrame = 0;
+        player.frameTimer = 0;
+
+        obstacles = [];
+        collectibles = [];
+        platforms = [];
+
+        initStars();
+
+        // 初始化平台
+        for (let i = 0; i < 8; i++) {
+            platforms.push({
+                x: i * (canvas.width / 4),
+                width: canvas.width / 4 + 2,
+                hasGap: false,
+                gapLane: -1
+            });
+        }
+
+        // 初始化一些障碍物和星星
+        for (let i = 0; i < 3; i++) {
+            spawnObstacle(canvas.width + i * 400);
+            if (Math.random() < 0.5) {
+                spawnStar(canvas.width + i * 300 + 150);
+            }
+        }
+
+        gameState = STATE.PLAYING;
+    }
+
+    function spawnObstacle(x) {
+        const lane = Math.floor(Math.random() * LANES);
+        const size = Math.min(canvas.width * 0.05, 35);
+        obstacles.push({
+            x: x,
+            lane: lane,
+            y: getGroundY() - size,
+            size: size,
+            rotation: Math.random() * Math.PI * 2,
+            rotSpeed: (Math.random() - 0.5) * 0.05,
+            type: Math.random() < 0.5 ? "meteor" : "debris"
+        });
+    }
+
+    function spawnStar(x) {
+        const lane = Math.floor(Math.random() * LANES);
+        const floatY = getGroundY() - Math.min(canvas.width * 0.08, 60) - Math.random() * 40;
+        collectibles.push({
+            x: x,
+            lane: lane,
+            y: floatY,
+            size: Math.min(canvas.width * 0.025, 18),
+            collected: false,
+            anim: Math.random() * Math.PI * 2
+        });
+    }
+
+    function spawnGapPlatform(x) {
+        const gapLane = Math.floor(Math.random() * LANES);
+        platforms.push({
+            x: x,
+            width: canvas.width / 4 + 2,
+            hasGap: true,
+            gapLane: gapLane,
+            gapWidth: Math.min(canvas.width * 0.12, 80)
+        });
+    }
+
+    // ========== 游戏结束 ==========
+    function gameOver() {
+        gameState = STATE.OVER;
+        window.postMessage({
+            type: "game_event",
+            eventType: "game_end",
+            data: { score: score }
+        }, "*");
+    }
+
+    // ========== 绘制：太空背景 ==========
+    function drawBackground() {
+        const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        grad.addColorStop(0, "#0a0a2e");
+        grad.addColorStop(0.5, "#141452");
+        grad.addColorStop(1, "#1a1a4e");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (let i = 0; i < stars.length; i++) {
+            const s = stars[i];
+            const alpha = s.brightness * (0.5 + 0.5 * Math.sin(Date.now() * 0.001 + i));
+            ctx.fillStyle = "rgba(255,255,255," + alpha.toFixed(2) + ")";
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // ========== 绘制：宇航员 ==========
+    function drawAstronaut(x, y, w, h) {
+        const bodyR = w * 0.45;
+
+        // 身体白色圆形
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(x, y - h * 0.1, bodyR, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 蓝色面罩
+        ctx.fillStyle = "#4a9eff";
+        ctx.beginPath();
+        ctx.arc(x, y - h * 0.25, bodyR * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 面罩高光
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.beginPath();
+        ctx.arc(x - bodyR * 0.15, y - h * 0.3, bodyR * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 背包
+        ctx.fillStyle = "#cccccc";
+        roundRect(ctx, x - bodyR * 0.9, y - h * 0.25, bodyR * 0.4, bodyR * 0.7, 3);
+        ctx.fill();
+
+        // 小手
+        const armAngle = player.jumping ? -0.5 : Math.sin(player.runFrame) * 0.4;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+
+        ctx.beginPath();
+        ctx.moveTo(x - bodyR * 0.7, y - h * 0.05);
+        ctx.lineTo(x - bodyR * 1.2, y - h * 0.05 + Math.sin(armAngle) * 8);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(x + bodyR * 0.7, y - h * 0.05);
+        ctx.lineTo(x + bodyR * 1.2, y - h * 0.05 - Math.sin(armAngle) * 8);
+        ctx.stroke();
+
+        // 小脚
+        const legOffset = player.jumping ? 5 : Math.sin(player.runFrame) * 5;
+        ctx.fillStyle = "#dddddd";
+
+        ctx.beginPath();
+        ctx.arc(x - bodyR * 0.35, y + h * 0.25 + legOffset, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(x + bodyR * 0.35, y + h * 0.25 - legOffset, 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ========== 绘制：五角星 ==========
+    function drawStar5(cx, cy, size, rotation) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rotation || 0);
+        ctx.fillStyle = STAR_COLOR;
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+            const angle = (i * 4 * Math.PI / 5) - Math.PI / 2;
+            const px = Math.cos(angle) * size;
+            const py = Math.sin(angle) * size;
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // ========== 绘制：障碍物 ==========
+    function drawObstacle(ob) {
+        ctx.save();
+        ctx.translate(ob.x + ob.size / 2, ob.y + ob.size / 2);
+        ctx.rotate(ob.rotation);
+
+        if (ob.type === "meteor") {
+            ctx.fillStyle = OBSTACLE_COLOR;
+            ctx.beginPath();
+            const r = ob.size / 2;
+            for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2;
+                const dist = r * (0.7 + Math.random() * 0.3);
+                const px = Math.cos(angle) * dist;
+                const py = Math.sin(angle) * dist;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = "rgba(0,0,0,0.3)";
+            ctx.beginPath();
+            ctx.arc(-r * 0.2, -r * 0.1, r * 0.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(r * 0.15, r * 0.2, r * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+        } else {
+            ctx.fillStyle = "#666688";
+            ctx.fillRect(-ob.size / 2, -ob.size / 2, ob.size, ob.size);
+            ctx.strokeStyle = "#8888aa";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-ob.size / 3, -ob.size / 3, ob.size * 0.66, ob.size * 0.66);
+        }
+
+        ctx.restore();
+    }
+
+    // ========== 绘制：平台 ==========
+    function drawPlatforms() {
+        const groundY = getGroundY();
+        const ph = 20;
+
+        for (let i = 0; i < platforms.length; i++) {
+            const p = platforms[i];
+
+            if (p.hasGap) {
+                const gapX = getLaneX(p.gapLane) - p.gapWidth / 2;
+
+                if (p.x < gapX) {
+                    ctx.fillStyle = "#2a2a5e";
+                    ctx.fillRect(p.x, groundY, gapX - p.x, ph);
+                    ctx.fillStyle = "#4a4a8e";
+                    ctx.fillRect(p.x, groundY, gapX - p.x, 3);
+                }
+
+                const rightStart = gapX + p.gapWidth;
+                const rightEnd = p.x + p.width;
+                if (rightStart < rightEnd) {
+                    ctx.fillStyle = "#2a2a5e";
+                    ctx.fillRect(rightStart, groundY, rightEnd - rightStart, ph);
+                    ctx.fillStyle = "#4a4a8e";
+                    ctx.fillRect(rightStart, groundY, rightEnd - rightStart, 3);
+                }
+            } else {
+                ctx.fillStyle = "#2a2a5e";
+                ctx.fillRect(p.x, groundY, p.width, ph);
+                ctx.fillStyle = "#4a4a8e";
+                ctx.fillRect(p.x, groundY, p.width, 3);
+            }
+        }
+    }
+
+    // ========== 绘制：HUD ==========
+    function drawHUD() {
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.font = "bold " + Math.min(canvas.width * 0.05, 32) + "px Arial, sans-serif";
+        ctx.fillText("得分: " + score, 20, 20);
+
+        ctx.font = Math.min(canvas.width * 0.03, 18) + "px Arial, sans-serif";
+        ctx.fillStyle = "#aaaacc";
+        ctx.fillText("速度: " + speed.toFixed(1), 20, 60);
+    }
+
+    // ========== 辅助函数 ==========
+    function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    // ========== 菜单绘制 ==========
+    function drawMenu() {
+        drawBackground();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "bold " + Math.min(canvas.width * 0.08, 56) + "px Arial, sans-serif";
+        ctx.fillText("太空跑酷", canvas.width / 2, canvas.height / 2 - 120);
+
+        ctx.font = Math.min(canvas.width * 0.035, 20) + "px Arial, sans-serif";
+        ctx.fillStyle = "#8888bb";
+        ctx.fillText("左右方向键切换跑道，空格键跳跃", canvas.width / 2, canvas.height / 2 - 60);
+
+        drawAstronaut(canvas.width / 2, canvas.height / 2 + 10, 40, 48);
+
+        drawStartButton(canvas.width / 2, canvas.height / 2 + 100, 240, 60, "按空格开始");
+    }
+
+    function drawStartButton(cx, cy, w, h, text) {
+        ctx.fillStyle = "rgba(74,158,255,0.15)";
+        roundRect(ctx, cx - w/2, cy - h/2, w, h, 12);
+        ctx.fill();
+
+        ctx.strokeStyle = "#4a9eff";
+        ctx.lineWidth = 2;
+        roundRect(ctx, cx - w/2, cy - h/2, w, h, 12);
+        ctx.stroke();
+
+        ctx.fillStyle = "#4a9eff";
+        ctx.font = "bold " + Math.min(24, h * 0.4) + "px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, cx, cy);
+    }
+
+    function drawGameOver() {
+        ctx.fillStyle = "rgba(10,10,46,0.8)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        ctx.font = "bold " + Math.min(canvas.width * 0.08, 56) + "px Arial, sans-serif";
+        ctx.fillText("游戏结束", canvas.width / 2, canvas.height / 2 - 100);
+
+        ctx.fillStyle = STAR_COLOR;
+        ctx.font = "bold " + Math.min(canvas.width * 0.14, 90) + "px Arial, sans-serif";
+        ctx.fillText(score, canvas.width / 2, canvas.height / 2 - 20);
+
+        ctx.fillStyle = "#8888bb";
+        ctx.font = Math.min(canvas.width * 0.04, 22) + "px Arial, sans-serif";
+        ctx.fillText("分", canvas.width / 2, canvas.height / 2 + 35);
+
+        drawStartButton(canvas.width / 2, canvas.height / 2 + 100, 240, 60, "再来一局");
+    }
+
+    // ========== 更新逻辑 ==========
+    function update() {
+        if (gameState !== STATE.PLAYING) return;
+
+        speedTimer++;
+        if (speedTimer > 300) {
+            speed += 0.2;
+            speedTimer = 0;
+        }
+
+        distance += speed;
+        score = Math.floor(distance / 10);
+
+        for (let i = 0; i < stars.length; i++) {
+            stars[i].x -= stars[i].speed * (speed / 4);
+            if (stars[i].x < -5) {
+                stars[i].x = canvas.width + 5;
+                stars[i].y = Math.random() * canvas.height;
+            }
+        }
+
+        player.frameTimer++;
+        if (player.frameTimer > 4) {
+            player.frameTimer = 0;
+            player.runFrame += 0.5;
+        }
+
+        const targetX = getLaneX(player.targetLane);
+        player.x += (targetX - player.x) * 0.15;
+        player.lane = player.targetLane;
+
+        if (player.jumping) {
+            player.vy += 0.7;
+            player.y += player.vy;
+            if (player.y >= player.baseY) {
+                player.y = player.baseY;
+                player.vy = 0;
+                player.jumping = false;
+            }
+        }
+
+        // 平台移动
+        for (let i = platforms.length - 1; i >= 0; i--) {
+            platforms[i].x -= speed;
+            if (platforms[i].x + platforms[i].width < -10) {
+                platforms.splice(i, 1);
+            }
+        }
+
+        let maxX = 0;
+        for (let i = 0; i < platforms.length; i++) {
+            if (platforms[i].x + platforms[i].width > maxX) {
+                maxX = platforms[i].x + platforms[i].width;
+            }
+        }
+        while (maxX < canvas.width + 200) {
+            const pw = canvas.width / 4 + 2;
+            if (Math.random() < 0.25 && distance > 500) {
+                spawnGapPlatform(maxX);
+            } else {
+                platforms.push({
+                    x: maxX,
+                    width: pw,
+                    hasGap: false,
+                    gapLane: -1
+                });
+            }
+            maxX += pw;
+        }
+
+        // 障碍物移动
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            obstacles[i].x -= speed;
+            obstacles[i].rotation += obstacles[i].rotSpeed;
+            if (obstacles[i].x + obstacles[i].size < -20) {
+                obstacles.splice(i, 1);
+            }
+        }
+
+        let maxObsX = 0;
+        for (let i = 0; i < obstacles.length; i++) {
+            if (obstacles[i].x > maxObsX) maxObsX = obstacles[i].x;
+        }
+        if (maxObsX < canvas.width + 100) {
+            spawnObstacle(canvas.width + 200 + Math.random() * 200);
+        }
+
+        // 收集星星移动
+        for (let i = collectibles.length - 1; i >= 0; i--) {
+            collectibles[i].x -= speed;
+            collectibles[i].anim += 0.05;
+            if (collectibles[i].x + collectibles[i].size < -20) {
+                collectibles.splice(i, 1);
+            }
+        }
+
+        let maxStarX = 0;
+        for (let i = 0; i < collectibles.length; i++) {
+            if (collectibles[i].x > maxStarX) maxStarX = collectibles[i].x;
+        }
+        if (maxStarX < canvas.width + 100) {
+            spawnStar(canvas.width + 150 + Math.random() * 300);
+        }
+
+        // 碰撞检测：障碍物
+        const pw = player.width * 0.4;
+        const ph = player.height * 0.4;
+        for (let i = 0; i < obstacles.length; i++) {
+            const ob = obstacles[i];
+            if (ob.lane === player.targetLane) {
+                const ox = ob.x + ob.size / 2;
+                const oy = ob.y + ob.size / 2;
+                const px = player.x;
+                const py = player.y - player.height * 0.1;
+
+                const dist = Math.sqrt((ox - px) * (ox - px) + (oy - py) * (oy - py));
+                if (dist < pw + ob.size / 2) {
+                    gameOver();
+                    return;
+                }
+            }
+        }
+
+        // 碰撞检测：收集星星
+        for (let i = 0; i < collectibles.length; i++) {
+            const st = collectibles[i];
+            if (!st.collected && st.lane === player.targetLane) {
+                const dist = Math.sqrt(
+                    (st.x - player.x) * (st.x - player.x) +
+                    (st.y - player.y) * (st.y - player.y)
+                );
+                if (dist < pw + st.size) {
+                    st.collected = true;
+                    score += 10;
+                }
+            }
+        }
+
+        // 平台缺口检测
+        const groundY = getGroundY();
+        if (!player.jumping && player.y >= groundY - 5) {
+            for (let i = 0; i < platforms.length; i++) {
+                const p = platforms[i];
+                if (p.hasGap) {
+                    const gapX = getLaneX(p.gapLane) - p.gapWidth / 2;
+                    const gapEndX = gapX + p.gapWidth;
+                    if (player.x > gapX + 5 && player.x < gapEndX - 5) {
+                        player.jumping = true;
+                        player.vy = 2;
+                    }
+                }
+            }
+        }
+
+        // 掉出屏幕
+        if (player.y > canvas.height + 100) {
+            gameOver();
+            return;
+        }
+    }
+
+    // ========== 渲染 ==========
+    function render() {
+        switch (gameState) {
+            case STATE.MENU:
+                drawMenu();
+                break;
+            case STATE.PLAYING:
+                drawBackground();
+                drawPlatforms();
+
+                for (let i = 0; i < collectibles.length; i++) {
+                    const st = collectibles[i];
+                    if (!st.collected) {
+                        const bobY = st.y + Math.sin(st.anim) * 5;
+                        drawStar5(st.x, bobY, st.size, st.anim * 0.3);
+                    }
+                }
+
+                for (let i = 0; i < obstacles.length; i++) {
+                    drawObstacle(obstacles[i]);
+                }
+
+                drawAstronaut(player.x, player.y, player.width, player.height);
+                drawHUD();
+                break;
+            case STATE.OVER:
+                drawBackground();
+                drawPlatforms();
+                for (let i = 0; i < obstacles.length; i++) {
+                    drawObstacle(obstacles[i]);
+                }
+                drawAstronaut(player.x, player.y, player.width, player.height);
+                drawHUD();
+                drawGameOver();
+                break;
+        }
+    }
+
+    // ========== 主循环 ==========
+    function gameLoop() {
+        update();
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    initStars();
+    gameLoop();
+
+})();
+</script>
+</body>
+</html>

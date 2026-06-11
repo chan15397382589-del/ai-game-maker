@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>简单农场</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ==================== 简单农场 ====================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+// 游戏状态
+let gameState = 'menu'; // menu, playing
+let gold = 50;
+let gameTime = 0; // 游戏内时间（秒）
+let mouseX = 0, mouseY = 0;
+let selectedSeed = null;
+let lastTime = performance.now();
+let floatingTexts = [];
+let showHarvestHint = {};
+
+// 作物定义
+const CROPS = {
+    carrot: { name: '胡萝卜', cost: 10, sell: 15, growTime: 10, color: '#FF8C00', icon: '🥕' },
+    tomato: { name: '番茄', cost: 20, sell: 30, growTime: 20, color: '#FF4444', icon: '🍅' },
+    pumpkin: { name: '南瓜', cost: 40, sell: 60, growTime: 40, color: '#FFA500', icon: '🎃' }
+};
+
+// 农田格子 (4x4)
+const ROWS = 4;
+const COLS = 4;
+let grid = [];
+for (let r = 0; r < ROWS; r++) {
+    grid[r] = [];
+    for (let c = 0; c < COLS; c++) {
+        grid[r][c] = { crop: null, planted: 0, mature: false };
+    }
+}
+
+// 布局计算
+let cellSize = 0;
+let gridOffsetX = 0;
+let gridOffsetY = 0;
+let barY = 0;
+
+function calcLayout() {
+    const maxCellW = (canvas.width - 60) / COLS;
+    const maxCellH = (canvas.height - 180) / ROWS;
+    cellSize = Math.min(maxCellW, maxCellH, 120);
+    gridOffsetX = (canvas.width - cellSize * COLS) / 2;
+    gridOffsetY = 80;
+    barY = gridOffsetY + cellSize * ROWS + 30;
+}
+calcLayout();
+
+// 漂浮文字
+function addFloatingText(x, y, text, color) {
+    floatingTexts.push({ x, y, text, color, alpha: 1.2, vy: -2 });
+}
+
+// 种子栏种子定义
+const seedTypes = [
+    { key: 'carrot', ...CROPS.carrot },
+    { key: 'tomato', ...CROPS.tomato },
+    { key: 'pumpkin', ...CROPS.pumpkin }
+];
+
+// 菜单
+function drawMenu() {
+    // 草坪背景
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#87CEEB');
+    grad.addColorStop(0.35, '#87CEEB');
+    grad.addColorStop(0.4, '#90EE90');
+    grad.addColorStop(1, '#228B22');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 装饰花朵
+    const flowers = ['🌻', '🌷', '🌸', '🌼', '🌺'];
+    for (let i = 0; i < 8; i++) {
+        ctx.font = '30px Arial';
+        ctx.fillText(flowers[i % flowers.length], 40 + i * (canvas.width - 80) / 7, canvas.height * 0.9);
+    }
+
+    // 标题
+    ctx.fillStyle = '#2d5a1e';
+    ctx.font = 'bold 52px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🌾 简单农场', canvas.width / 2, canvas.height * 0.22);
+
+    ctx.fillStyle = '#4a7a2e';
+    ctx.font = '24px Arial';
+    ctx.fillText('种下希望，收获果实！', canvas.width / 2, canvas.height * 0.31);
+
+    // 开始按钮
+    const btnW = 280, btnH = 70;
+    const btnX = canvas.width / 2 - btnW / 2;
+    const btnY = canvas.height * 0.48;
+    const hover = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= btnY && mouseY <= btnY + btnH;
+
+    ctx.fillStyle = hover ? '#4CAF50' : '#388E3C';
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 15);
+    ctx.fill();
+    ctx.strokeStyle = '#2E7D32';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 30px Arial';
+    ctx.fillText('开始种田', canvas.width / 2, btnY + btnH / 2);
+
+    // 说明
+    ctx.fillStyle = '#333';
+    ctx.font = '18px Arial';
+    const instructions = [
+        '🥕 胡萝卜：10秒成熟，收获+15金币',
+        '🍅 番茄：20秒成熟，收获+30金币',
+        '🎃 南瓜：40秒成熟，收获+60金币',
+        '',
+        '选择种子 → 点击空地播种 → 等待成熟 → 点击收获'
+    ];
+    for (let i = 0; i < instructions.length; i++) {
+        ctx.fillText(instructions[i], canvas.width / 2, canvas.height * 0.63 + i * 28);
+    }
+}
+
+// 绘制农田格子
+function drawGrid() {
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const x = gridOffsetX + c * cellSize;
+            const y = gridOffsetY + r * cellSize;
+            const cell = grid[r][c];
+            const hover = mouseX >= x && mouseX < x + cellSize && mouseY >= y && mouseY < y + cellSize;
+
+            // 土地
+            ctx.fillStyle = hover ? '#8B6914' : '#6B4226';
+            ctx.beginPath();
+            ctx.roundRect(x + 3, y + 3, cellSize - 6, cellSize - 6, 8);
+            ctx.fill();
+            ctx.strokeStyle = '#4A2800';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 土地纹理
+            ctx.strokeStyle = 'rgba(80,50,20,0.3)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < 3; i++) {
+                const ly = y + 20 + i * (cellSize - 40) / 2;
+                ctx.beginPath();
+                ctx.moveTo(x + 12, ly);
+                ctx.lineTo(x + cellSize - 12, ly);
+                ctx.stroke();
+            }
+
+            if (cell.crop) {
+                const crop = CROPS[cell.crop];
+                const elapsed = (gameTime - cell.planted);
+                const progress = Math.min(1, elapsed / crop.growTime);
+                const cx = x + cellSize / 2;
+                const cy = y + cellSize / 2;
+
+                if (cell.mature) {
+                    // 成熟作物
+                    drawMatureCrop(cx, cy, cell.crop, cellSize);
+                    // 收获提示
+                    if (hover) {
+                        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                        ctx.beginPath();
+                        ctx.roundRect(cx - 40, y + 2, 80, 24, 5);
+                        ctx.fill();
+                        ctx.fillStyle = '#2E7D32';
+                        ctx.font = 'bold 14px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('点击收获', cx, y + 14);
+                    }
+                } else {
+                    // 生长中
+                    drawGrowingCrop(cx, cy, cell.crop, progress, cellSize);
+
+                    // 进度条
+                    const barW = cellSize * 0.7;
+                    const barH = 8;
+                    const barX = cx - barW / 2;
+                    const barY2 = y + cellSize - 18;
+                    ctx.fillStyle = '#333';
+                    ctx.beginPath();
+                    ctx.roundRect(barX, barY2, barW, barH, 4);
+                    ctx.fill();
+                    ctx.fillStyle = '#4CAF50';
+                    ctx.beginPath();
+                    ctx.roundRect(barX, barY2, barW * progress, barH, 4);
+                    ctx.fill();
+                }
+            } else {
+                // 空地提示
+                if (hover && selectedSeed) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                    ctx.beginPath();
+                    ctx.roundRect(x + 8, y + cellSize / 2 - 12, cellSize - 16, 24, 5);
+                    ctx.fill();
+                    ctx.fillStyle = '#333';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('点击播种', x + cellSize / 2, y + cellSize / 2);
+                } else if (!selectedSeed) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                    ctx.font = '13px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('选择种子后', x + cellSize / 2, y + cellSize / 2 - 8);
+                    ctx.fillText('点击播种', x + cellSize / 2, y + cellSize / 2 + 8);
+                }
+            }
+        }
+    }
+}
+
+// 绘制生长中的作物
+function drawGrowingCrop(cx, cy, cropType, progress, size) {
+    const s = size * 0.3;
+
+    if (progress < 0.33) {
+        // 种子阶段：小点
+        ctx.fillStyle = '#8B6914';
+        ctx.beginPath();
+        ctx.arc(cx, cy + 5, 4 + progress * 15, 0, Math.PI * 2);
+        ctx.fill();
+        // 小芽
+        if (progress > 0.15) {
+            ctx.strokeStyle = '#228B22';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy + 2);
+            ctx.lineTo(cx, cy - 5 - progress * 20);
+            ctx.stroke();
+        }
+    } else if (progress < 0.66) {
+        // 幼苗阶段：小绿芽
+        const stemH = 10 + (progress - 0.33) * 40;
+        ctx.strokeStyle = '#228B22';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + 10);
+        ctx.lineTo(cx, cy + 10 - stemH);
+        ctx.stroke();
+        // 叶子
+        ctx.fillStyle = '#32CD32';
+        ctx.beginPath();
+        ctx.ellipse(cx - 8, cy + 10 - stemH * 0.6, 8, 4, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(cx + 8, cy + 10 - stemH * 0.4, 7, 4, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        // 顶部小果实
+        const crop = CROPS[cropType];
+        ctx.fillStyle = crop.color;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy + 10 - stemH, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    } else {
+        // 接近成熟：更大果实
+        const crop = CROPS[cropType];
+        const stemH = 30;
+        ctx.strokeStyle = '#228B22';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + 10);
+        ctx.lineTo(cx, cy + 10 - stemH);
+        ctx.stroke();
+        ctx.fillStyle = '#32CD32';
+        ctx.beginPath();
+        ctx.ellipse(cx - 8, cy + 10 - stemH * 0.5, 8, 4, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(cx + 8, cy + 10 - stemH * 0.7, 7, 4, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        // 果实
+        const fruitSize = 6 + (progress - 0.66) * 25;
+        ctx.fillStyle = crop.color;
+        ctx.beginPath();
+        if (cropType === 'carrot') {
+            // 胡萝卜：橙色三角
+            ctx.moveTo(cx, cy + 10 - stemH - fruitSize);
+            ctx.lineTo(cx - fruitSize * 0.6, cy + 10 - stemH + fruitSize * 0.5);
+            ctx.lineTo(cx + fruitSize * 0.6, cy + 10 - stemH + fruitSize * 0.5);
+            ctx.closePath();
+        } else if (cropType === 'tomato') {
+            // 番茄：红色圆
+            ctx.arc(cx, cy + 10 - stemH, fruitSize, 0, Math.PI * 2);
+        } else {
+            // 南瓜：橙色椭圆
+            ctx.ellipse(cx, cy + 10 - stemH, fruitSize * 1.2, fruitSize * 0.9, 0, 0, Math.PI * 2);
+        }
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+}
+
+// 绘制成熟作物
+function drawMatureCrop(cx, cy, cropType, size) {
+    const s = size * 0.3;
+    const crop = CROPS[cropType];
+
+    // 茎
+    ctx.strokeStyle = '#228B22';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + s * 0.8);
+    ctx.lineTo(cx, cy - s * 0.3);
+    ctx.stroke();
+
+    // 叶子
+    ctx.fillStyle = '#32CD32';
+    ctx.beginPath();
+    ctx.ellipse(cx - 12, cy, 10, 5, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx + 12, cy - 5, 10, 5, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 果实
+    ctx.fillStyle = crop.color;
+    ctx.beginPath();
+    if (cropType === 'carrot') {
+        // 胡萝卜：橙色三角
+        ctx.moveTo(cx, cy - s * 0.5 - 15);
+        ctx.lineTo(cx - 12, cy - s * 0.5 + 10);
+        ctx.lineTo(cx + 12, cy - s * 0.5 + 10);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#CC7000';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    } else if (cropType === 'tomato') {
+        // 番茄：红色圆
+        ctx.arc(cx, cy - s * 0.3 - 5, 14, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#CC0000';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // 高光
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.beginPath();
+        ctx.arc(cx - 4, cy - s * 0.3 - 9, 5, 0, Math.PI * 2);
+        ctx.fill();
+    } else {
+        // 南瓜：橙色椭圆
+        ctx.ellipse(cx, cy - s * 0.2, 18, 14, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#CC7700';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        // 纹理
+        ctx.strokeStyle = 'rgba(180,100,0,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - s * 0.2 - 14);
+        ctx.lineTo(cx, cy - s * 0.2 + 14);
+        ctx.stroke();
+    }
+
+    // 闪烁效果
+    const blink = Math.sin(Date.now() * 0.005) * 0.15 + 0.85;
+    ctx.fillStyle = 'rgba(255,255,0,' + (blink * 0.15) + ')';
+    ctx.beginPath();
+    ctx.arc(cx, cy - 5, 25, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// 绘制底部种子栏
+function drawSeedBar() {
+    const barH = 80;
+    const barYPos = canvas.height - barH;
+    ctx.fillStyle = 'rgba(40,25,0,0.85)';
+    ctx.fillRect(0, barYPos, canvas.width, barH);
+
+    // 金币显示
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('💰 ' + gold, 20, barYPos + barH / 2);
+
+    // 种子按钮
+    const btnW = 140;
+    const startX = canvas.width / 2 - (btnW * 3 + 20) / 2;
+    for (let i = 0; i < 3; i++) {
+        const seed = seedTypes[i];
+        const bx = startX + i * (btnW + 10);
+        const by = barYPos + 10;
+        const bh = barH - 20;
+        const canAfford = gold >= seed.cost;
+        const isSelected = selectedSeed === seed.key;
+        const hover = mouseX >= bx && mouseX <= bx + btnW && mouseY >= by && mouseY <= by + bh;
+
+        let bg = isSelected ? '#4CAF50' : (canAfford ? (hover ? '#5a4a3a' : '#3a2a1a') : '#2a1a0a');
+        ctx.fillStyle = bg;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, btnW, bh, 8);
+        ctx.fill();
+        ctx.strokeStyle = canAfford ? '#8B7355' : '#444';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.globalAlpha = canAfford ? 1 : 0.5;
+
+        // 图标和文字
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '24px Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(seed.icon, bx + 25, by + bh / 2);
+
+        ctx.textAlign = 'left';
+        ctx.font = 'bold 15px Arial';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(seed.name, bx + 45, by + 18);
+
+        ctx.font = '13px Arial';
+        ctx.fillStyle = '#FFD700';
+        ctx.fillText('💰' + seed.cost, bx + 45, by + 40);
+
+        ctx.globalAlpha = 1;
+    }
+}
+
+// 绘制HUD
+function drawHUD() {
+    // 游戏时间
+    const mins = Math.floor(gameTime / 60);
+    const secs = Math.floor(gameTime % 60);
+    const timeStr = mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
+
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(canvas.width - 160, 10, 150, 40, 10);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⏰ ' + timeStr, canvas.width - 85, 30);
+
+    // 金币（右上角第二行）
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.roundRect(canvas.width - 160, 55, 150, 35, 10);
+    ctx.fill();
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 18px Arial';
+    ctx.fillText('💰 ' + gold, canvas.width - 85, 72);
+}
+
+// 绘制漂浮文字
+function drawFloatingTexts() {
+    for (const ft of floatingTexts) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, ft.alpha);
+        ctx.fillStyle = ft.color;
+        ctx.font = 'bold 22px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(ft.text, ft.x, ft.y);
+        ctx.restore();
+    }
+}
+
+// 种植
+function plantCrop(row, col) {
+    if (!selectedSeed) return;
+    const cell = grid[row][col];
+    if (cell.crop) return;
+
+    const crop = CROPS[selectedSeed];
+    if (gold < crop.cost) return;
+
+    gold -= crop.cost;
+    cell.crop = selectedSeed;
+    cell.planted = gameTime;
+    cell.mature = false;
+    addFloatingText(
+        gridOffsetX + col * cellSize + cellSize / 2,
+        gridOffsetY + row * cellSize,
+        '-' + crop.cost + '💰',
+        '#FF6347'
+    );
+}
+
+// 收获
+function harvestCrop(row, col) {
+    const cell = grid[row][col];
+    if (!cell.crop || !cell.mature) return;
+
+    const crop = CROPS[cell.crop];
+    gold += crop.sell;
+    addFloatingText(
+        gridOffsetX + col * cellSize + cellSize / 2,
+        gridOffsetY + row * cellSize,
+        '+' + crop.sell + '💰',
+        '#4CAF50'
+    );
+    cell.crop = null;
+    cell.planted = 0;
+    cell.mature = false;
+}
+
+// 点击处理
+function handleClick(x, y) {
+    if (gameState === 'menu') {
+        const btnW = 280, btnH = 70;
+        const btnX = canvas.width / 2 - btnW / 2;
+        const btnY = canvas.height * 0.48;
+        if (x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH) {
+            gameState = 'playing';
+            gold = 50;
+            gameTime = 0;
+            selectedSeed = null;
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    grid[r][c] = { crop: null, planted: 0, mature: false };
+                }
+            }
+            window.postMessage({ type: 'game_event', eventType: 'game_start', data: { gameType: '简单农场' } }, '*');
+        }
+        return;
+    }
+
+    // 点击农田
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const cx = gridOffsetX + c * cellSize;
+            const cy = gridOffsetY + r * cellSize;
+            if (x >= cx && x < cx + cellSize && y >= cy && y < cy + cellSize) {
+                const cell = grid[r][c];
+                if (cell.crop && cell.mature) {
+                    harvestCrop(r, c);
+                } else if (!cell.crop) {
+                    plantCrop(r, c);
+                }
+                return;
+            }
+        }
+    }
+
+    // 点击种子栏
+    const barH = 80;
+    const barYPos = canvas.height - barH;
+    if (y >= barYPos) {
+        const btnW = 140;
+        const startX = canvas.width / 2 - (btnW * 3 + 20) / 2;
+        for (let i = 0; i < 3; i++) {
+            const seed = seedTypes[i];
+            const bx = startX + i * (btnW + 10);
+            const by = barYPos + 10;
+            const bh = barH - 20;
+            if (x >= bx && x <= bx + btnW && y >= by && y <= by + bh) {
+                if (gold >= seed.cost) {
+                    selectedSeed = selectedSeed === seed.key ? null : seed.key;
+                }
+                return;
+            }
+        }
+    }
+}
+
+// 更新
+function update(dt) {
+    if (gameState !== 'playing') return;
+
+    gameTime += dt / 1000; // 真实秒数
+
+    // 检查作物成熟
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const cell = grid[r][c];
+            if (cell.crop && !cell.mature) {
+                const crop = CROPS[cell.crop];
+                if (gameTime - cell.planted >= crop.growTime) {
+                    cell.mature = true;
+                }
+            }
+        }
+    }
+
+    // 更新漂浮文字
+    for (let i = floatingTexts.length - 1; i >= 0; i--) {
+        const ft = floatingTexts[i];
+        ft.y += ft.vy;
+        ft.alpha -= 0.018;
+        if (ft.alpha <= 0) floatingTexts.splice(i, 1);
+    }
+}
+
+// 渲染
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (gameState === 'menu') {
+        drawMenu();
+        return;
+    }
+
+    // 草坪背景
+    const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#87CEEB');
+    grad.addColorStop(0.1, '#87CEEB');
+    grad.addColorStop(0.15, '#90EE90');
+    grad.addColorStop(1, '#2E7D32');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    drawGrid();
+    drawSeedBar();
+    drawHUD();
+    drawFloatingTexts();
+}
+
+// 事件
+canvas.addEventListener('click', e => handleClick(e.clientX, e.clientY));
+canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    handleClick(t.clientX, t.clientY);
+}, { passive: false });
+canvas.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+
+// 游戏循环
+function gameLoop(time) {
+    const dt = time - lastTime;
+    lastTime = time;
+    calcLayout();
+    update(dt);
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

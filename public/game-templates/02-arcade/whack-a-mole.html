@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>打地鼠</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #2d5a1b; font-family: 'Microsoft YaHei', sans-serif; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ============================================================
+// 打地鼠 - Whack-a-Mole
+// 3x3 洞布局，限时30秒，金色地鼠额外加分
+// ============================================================
+
+var canvas = document.getElementById('gameCanvas');
+var ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    if (state !== 'menu') {
+        initHoles();
+    }
+}
+resize();
+window.addEventListener('resize', resize);
+
+// 游戏状态: 'menu' | 'playing' | 'gameover'
+var state = 'menu';
+
+// 游戏参数
+var score = 0;
+var timeLeft = 30;
+var lastTime = 0;
+var timerAccum = 0;
+
+// 3x3 洞布局
+var GRID_ROWS = 3;
+var GRID_COLS = 3;
+var holes = []; // { x, y, radius, mole }
+// mole: { active, spawnTime, duration, isGolden, hit, hitTime }
+
+// 生成间隔控制
+var spawnTimer = 0;
+var SPAWN_INTERVAL_BASE = 800; // 毫秒
+
+// 键盘光标位置（用于键盘操作）
+var cursorRow = 1;
+var cursorCol = 1;
+
+function initHoles() {
+    var cw = canvas.width;
+    var ch = canvas.height;
+    var centerX = cw / 2;
+    var centerY = ch / 2 + ch * 0.05;
+    var spacingX = Math.min(180, cw * 0.2);
+    var spacingY = Math.min(160, ch * 0.18);
+    var holeRadius = Math.min(60, spacingX * 0.35);
+
+    holes = [];
+    for (var r = 0; r < GRID_ROWS; r++) {
+        for (var c = 0; c < GRID_COLS; c++) {
+            holes.push({
+                x: centerX + (c - 1) * spacingX,
+                y: centerY + (r - 1) * spacingY,
+                radius: holeRadius,
+                mole: null
+            });
+        }
+    }
+}
+
+// 尝试生成地鼠
+function trySpawnMole() {
+    // 找到没有地鼠的洞
+    var emptyHoles = [];
+    for (var i = 0; i < holes.length; i++) {
+        if (!holes[i].mole) emptyHoles.push(holes[i]);
+    }
+    if (emptyHoles.length === 0) return;
+
+    var hole = emptyHoles[Math.floor(Math.random() * emptyHoles.length)];
+    var isGolden = Math.random() < 0.1; // 10%概率金色地鼠
+    var duration = isGolden ? 800 : (1000 + Math.random() * 500); // 普通1-1.5秒，金色0.8秒
+
+    hole.mole = {
+        active: true,
+        spawnTime: performance.now(),
+        duration: duration,
+        isGolden: isGolden,
+        hit: false,
+        hitTime: 0
+    };
+}
+
+function startGame() {
+    score = 0;
+    timeLeft = 30;
+    timerAccum = 0;
+    spawnTimer = 0;
+    initHoles();
+    state = 'playing';
+    lastTime = performance.now();
+
+    window.parent.postMessage({
+        type: 'game_event',
+        eventType: 'game_start',
+        data: { gameType: '打地鼠' }
+    }, '*');
+}
+
+function endGame() {
+    state = 'gameover';
+    window.parent.postMessage({
+        type: 'game_event',
+        eventType: 'game_end',
+        data: { score: score }
+    }, '*');
+}
+
+// 更新游戏
+function update(timestamp) {
+    var dt = timestamp - lastTime;
+    lastTime = timestamp;
+
+    // 倒计时
+    timerAccum += dt;
+    if (timerAccum >= 1000) {
+        timerAccum -= 1000;
+        timeLeft--;
+        if (timeLeft <= 0) {
+            endGame();
+            return;
+        }
+    }
+
+    // 生成地鼠（随分数加快节奏）
+    spawnTimer += dt;
+    var spawnInterval = Math.max(400, SPAWN_INTERVAL_BASE - score * 2);
+    if (spawnTimer >= spawnInterval) {
+        spawnTimer -= spawnInterval;
+        trySpawnMole();
+    }
+
+    // 更新地鼠状态
+    for (var i = 0; i < holes.length; i++) {
+        var hole = holes[i];
+        if (!hole.mole) continue;
+        var mole = hole.mole;
+
+        if (mole.hit) {
+            // 被打中后短暂显示然后消失
+            if (timestamp - mole.hitTime > 200) {
+                hole.mole = null;
+            }
+        } else {
+            // 超时缩回
+            if (timestamp - mole.spawnTime > mole.duration) {
+                hole.mole = null;
+            }
+        }
+    }
+}
+
+// ============================================================
+// 绘制辅助
+// ============================================================
+
+// 圆角矩形
+function drawRoundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+// 绘制地鼠（卡通造型：棕色圆形头 + 两个黑色小眼睛 + 两个小耳朵）
+function drawMole(x, y, radius, isGolden, hit) {
+    var headRadius = radius * 0.65;
+    var headY = y - radius * 0.15;
+
+    // 耳朵（两个小耳朵）
+    var earRadius = headRadius * 0.28;
+    var earColor = isGolden ? '#b8860b' : '#8B5E3C';
+    var earInnerColor = isGolden ? '#daa520' : '#D2691E';
+
+    // 左耳
+    ctx.fillStyle = earColor;
+    ctx.beginPath();
+    ctx.arc(x - headRadius * 0.7, headY - headRadius * 0.55, earRadius, 0, Math.PI * 2);
+    ctx.fill();
+    // 左耳内
+    ctx.fillStyle = earInnerColor;
+    ctx.beginPath();
+    ctx.arc(x - headRadius * 0.7, headY - headRadius * 0.55, earRadius * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    // 右耳
+    ctx.fillStyle = earColor;
+    ctx.beginPath();
+    ctx.arc(x + headRadius * 0.7, headY - headRadius * 0.55, earRadius, 0, Math.PI * 2);
+    ctx.fill();
+    // 右耳内
+    ctx.fillStyle = earInnerColor;
+    ctx.beginPath();
+    ctx.arc(x + headRadius * 0.7, headY - headRadius * 0.55, earRadius * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 头（棕色圆形）
+    ctx.fillStyle = isGolden ? '#DAA520' : '#A0522D';
+    ctx.beginPath();
+    ctx.arc(x, headY, headRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 头部高光
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath();
+    ctx.arc(x - headRadius * 0.2, headY - headRadius * 0.2, headRadius * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 鼻子
+    ctx.fillStyle = isGolden ? '#FFD700' : '#CD853F';
+    ctx.beginPath();
+    ctx.ellipse(x, headY + headRadius * 0.15, headRadius * 0.18, headRadius * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 两个黑色小眼睛
+    if (!hit) {
+        // 正常眼睛
+        ctx.fillStyle = '#000000';
+        var eyeOffX = headRadius * 0.3;
+        var eyeOffY = headRadius * 0.1;
+        var eyeR = headRadius * 0.12;
+        ctx.beginPath();
+        ctx.arc(x - eyeOffX, headY - eyeOffY, eyeR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x + eyeOffX, headY - eyeOffY, eyeR, 0, Math.PI * 2);
+        ctx.fill();
+        // 眼睛高光
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x - eyeOffX + 2, headY - eyeOffY - 2, eyeR * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x + eyeOffX + 2, headY - eyeOffY - 2, eyeR * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        // 嘴巴
+        ctx.strokeStyle = '#5D4037';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(x, headY + headRadius * 0.25, headRadius * 0.12, 0.2, Math.PI - 0.2);
+        ctx.stroke();
+    } else {
+        // 被打中 - X 眼睛
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2;
+        var eyeOffX = headRadius * 0.3;
+        var eyeOffY = headRadius * 0.1;
+        var es = headRadius * 0.12;
+        // 左眼 X
+        ctx.beginPath();
+        ctx.moveTo(x - eyeOffX - es, headY - eyeOffY - es);
+        ctx.lineTo(x - eyeOffX + es, headY - eyeOffY + es);
+        ctx.moveTo(x - eyeOffX + es, headY - eyeOffY - es);
+        ctx.lineTo(x - eyeOffX - es, headY - eyeOffY + es);
+        ctx.stroke();
+        // 右眼 X
+        ctx.beginPath();
+        ctx.moveTo(x + eyeOffX - es, headY - eyeOffY - es);
+        ctx.lineTo(x + eyeOffX + es, headY - eyeOffY + es);
+        ctx.moveTo(x + eyeOffX + es, headY - eyeOffY - es);
+        ctx.lineTo(x + eyeOffX - es, headY - eyeOffY + es);
+        ctx.stroke();
+    }
+
+    // 金色地鼠光晕
+    if (isGolden) {
+        var glowR = headRadius * 1.3 + Math.sin(performance.now() / 150) * 3;
+        var glow = ctx.createRadialGradient(x, headY, headRadius * 0.8, x, headY, glowR);
+        glow.addColorStop(0, 'rgba(255, 215, 0, 0.3)');
+        glow.addColorStop(1, 'rgba(255, 215, 0, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, headY, glowR, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// 绘制洞（深棕色椭圆）
+function drawHole(x, y, radius) {
+    // 洞的阴影
+    ctx.fillStyle = '#1a1008';
+    ctx.beginPath();
+    ctx.ellipse(x, y + radius * 0.15, radius, radius * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 洞边缘
+    ctx.fillStyle = '#3d2b0f';
+    ctx.beginPath();
+    ctx.ellipse(x, y, radius, radius * 0.45, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 洞内
+    ctx.fillStyle = '#1a1008';
+    ctx.beginPath();
+    ctx.ellipse(x, y, radius * 0.85, radius * 0.35, 0, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// 草地背景
+function drawGrassBg() {
+    var cw = canvas.width;
+    var ch = canvas.height;
+
+    // 草地渐变（绿色）
+    var grad = ctx.createLinearGradient(0, 0, 0, ch);
+    grad.addColorStop(0, '#4CAF50');
+    grad.addColorStop(0.3, '#388E3C');
+    grad.addColorStop(1, '#2E7D32');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, cw, ch);
+
+    // 草地纹理（固定小草点）
+    ctx.fillStyle = 'rgba(76, 175, 80, 0.4)';
+    for (var i = 0; i < 200; i++) {
+        var gx = ((i * 137 + 53) % cw);
+        var gy = ((i * 211 + 97) % ch);
+        ctx.beginPath();
+        ctx.arc(gx, gy, 2 + (i % 3), 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ============================================================
+// 绘制场景
+// ============================================================
+
+// 绘制开始界面
+function drawMenu() {
+    var cw = canvas.width;
+    var ch = canvas.height;
+
+    drawGrassBg();
+
+    // 标题
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold ' + Math.min(72, cw * 0.08) + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('打地鼠', cw / 2, ch * 0.18);
+
+    // 副标题
+    ctx.fillStyle = '#e0e0c0';
+    ctx.font = Math.min(24, cw * 0.03) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillText('点击/触控冒出的地鼠得分', cw / 2, ch * 0.30);
+
+    // 说明
+    ctx.fillStyle = '#c0c0a0';
+    ctx.font = Math.min(20, cw * 0.025) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillText('普通地鼠 +10 分，金色地鼠 +30 分', cw / 2, ch * 0.40);
+    ctx.fillText('限时 30 秒，看看你能得多少分！', cw / 2, ch * 0.46);
+
+    // 操作说明
+    ctx.fillStyle = '#a0a080';
+    ctx.font = Math.min(16, cw * 0.02) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillText('鼠标点击 / 触屏点击 / 方向键+空格', cw / 2, ch * 0.52);
+
+    // 开始按钮
+    var btnW = Math.min(260, cw * 0.3);
+    var btnH = Math.min(70, ch * 0.1);
+    var btnX = (cw - btnW) / 2;
+    var btnY = ch * 0.60;
+
+    ctx.fillStyle = '#e84545';
+    ctx.shadowColor = '#e84545';
+    ctx.shadowBlur = 20;
+    drawRoundRect(btnX, btnY, btnW, btnH, 15);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold ' + Math.min(36, cw * 0.04) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillText('开始游戏', cw / 2, btnY + btnH / 2);
+
+    // 绘制示例地鼠
+    drawMole(cw * 0.3, ch * 0.80, 50, false, false);
+    drawMole(cw * 0.7, ch * 0.80, 50, true, false);
+}
+
+// 绘制游戏中
+function drawGame() {
+    var cw = canvas.width;
+    var ch = canvas.height;
+
+    // 草地背景
+    drawGrassBg();
+
+    // 绘制所有洞和地鼠
+    for (var i = 0; i < holes.length; i++) {
+        var hole = holes[i];
+        // 先画洞
+        drawHole(hole.x, hole.y, hole.radius);
+
+        // 如果有地鼠，在洞前面画（地鼠从洞里冒出来）
+        if (hole.mole) {
+            var mole = hole.mole;
+            var elapsed = performance.now() - mole.spawnTime;
+            var showRatio;
+
+            if (mole.hit) {
+                // 被打中后快速缩回
+                var hitElapsed = performance.now() - mole.hitTime;
+                showRatio = Math.max(0, 1 - hitElapsed / 200);
+            } else {
+                // 冒出动画：前 200ms 冒出，最后 200ms 缩回
+                var totalDuration = mole.duration;
+                if (elapsed < 200) {
+                    showRatio = elapsed / 200;
+                } else if (elapsed > totalDuration - 200) {
+                    showRatio = Math.max(0, (totalDuration - elapsed) / 200);
+                } else {
+                    showRatio = 1;
+                }
+            }
+
+            if (showRatio > 0) {
+                var moleY = hole.y + hole.radius * 0.3 * (1 - showRatio);
+                // 裁剪：只显示洞以上的部分
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(0, 0, cw, hole.y + 2);
+                ctx.clip();
+                drawMole(hole.x, moleY, hole.radius, mole.isGolden, mole.hit);
+                ctx.restore();
+            }
+        }
+    }
+
+    // 键盘光标（绘制在洞上）
+    if (state === 'playing') {
+        var ci = cursorRow * GRID_COLS + cursorCol;
+        if (ci >= 0 && ci < holes.length) {
+            var ch2 = holes[ci];
+            ctx.strokeStyle = '#FFD740';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.ellipse(ch2.x, ch2.y, ch2.radius + 5, ch2.radius * 0.45 + 5, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
+    // HUD - 得分（左上）
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    drawRoundRect(15, 12, Math.max(160, cw * 0.14), 50, 12);
+    ctx.fill();
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold ' + Math.min(30, cw * 0.035) + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('得分: ' + score, 30, 37);
+
+    // HUD - 倒计时（右上）
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    var timerW = Math.max(180, cw * 0.16);
+    drawRoundRect(cw - timerW - 15, 12, timerW, 50, 12);
+    ctx.fill();
+    ctx.fillStyle = timeLeft <= 5 ? '#e84545' : '#ffffff';
+    ctx.font = 'bold ' + Math.min(30, cw * 0.035) + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('时间: ' + timeLeft + ' 秒', cw - 30, 37);
+}
+
+// 绘制游戏结束
+function drawGameOver() {
+    var cw = canvas.width;
+    var ch = canvas.height;
+
+    // 绘制游戏场景作为背景
+    drawGame();
+
+    // 遮罩
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(0, 0, cw, ch);
+
+    // 时间到
+    ctx.fillStyle = '#e84545';
+    ctx.font = 'bold ' + Math.min(60, cw * 0.07) + 'px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('时间到！', cw / 2, ch * 0.28);
+
+    // 评价
+    var grade = '';
+    if (score >= 200) grade = '太厉害了！你是打地鼠之王！';
+    else if (score >= 120) grade = '很棒！反应速度真快！';
+    else if (score >= 60) grade = '不错哦，继续加油！';
+    else grade = '再试试吧，你能做得更好！';
+
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold ' + Math.min(48, cw * 0.05) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillText('得分: ' + score, cw / 2, ch * 0.40);
+
+    ctx.fillStyle = '#e0e0c0';
+    ctx.font = Math.min(24, cw * 0.03) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillText(grade, cw / 2, ch * 0.50);
+
+    // 再来一局按钮
+    var btnW = Math.min(260, cw * 0.3);
+    var btnH = Math.min(70, ch * 0.1);
+    var btnX = (cw - btnW) / 2;
+    var btnY = ch * 0.62;
+
+    ctx.fillStyle = '#4CAF50';
+    ctx.shadowColor = '#4CAF50';
+    ctx.shadowBlur = 15;
+    drawRoundRect(btnX, btnY, btnW, btnH, 15);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold ' + Math.min(32, cw * 0.04) + 'px "Microsoft YaHei", sans-serif';
+    ctx.fillText('再来一局', cw / 2, btnY + btnH / 2);
+}
+
+// ============================================================
+// 输入处理
+// ============================================================
+
+// 按钮区域检测
+function getStartBtnRect() {
+    var cw = canvas.width;
+    var ch = canvas.height;
+    var btnW = Math.min(260, cw * 0.3);
+    var btnH = Math.min(70, ch * 0.1);
+    return { x: (cw - btnW) / 2, y: ch * 0.60, w: btnW, h: btnH };
+}
+
+function getRestartBtnRect() {
+    var cw = canvas.width;
+    var ch = canvas.height;
+    var btnW = Math.min(260, cw * 0.3);
+    var btnH = Math.min(70, ch * 0.1);
+    return { x: (cw - btnW) / 2, y: ch * 0.62, w: btnW, h: btnH };
+}
+
+function isInRect(rect, px, py) {
+    return px >= rect.x && px <= rect.x + rect.w && py >= rect.y && py <= rect.y + rect.h;
+}
+
+// 打地鼠检测
+function handleMoleHit(cx, cy) {
+    for (var i = 0; i < holes.length; i++) {
+        var hole = holes[i];
+        if (!hole.mole || hole.mole.hit) continue;
+
+        // 判断点击是否在地鼠头部区域
+        var headRadius = hole.radius * 0.65;
+        var headY = hole.y - hole.radius * 0.15;
+        var dx = cx - hole.x;
+        var dy = cy - headY;
+        if (dx * dx + dy * dy <= headRadius * headRadius * 1.3) {
+            // 打中了
+            hole.mole.hit = true;
+            hole.mole.hitTime = performance.now();
+            score += hole.mole.isGolden ? 30 : 10;
+            return true;
+        }
+    }
+    return false;
+}
+
+function handleClick(cx, cy) {
+    if (state === 'menu') {
+        if (isInRect(getStartBtnRect(), cx, cy)) {
+            startGame();
+        }
+    } else if (state === 'playing') {
+        handleMoleHit(cx, cy);
+    } else if (state === 'gameover') {
+        if (isInRect(getRestartBtnRect(), cx, cy)) {
+            startGame();
+        }
+    }
+}
+
+// 鼠标点击
+canvas.addEventListener('click', function(e) {
+    handleClick(e.clientX, e.clientY);
+});
+
+// 触屏点击
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var touch = e.touches[0];
+    handleClick(touch.clientX, touch.clientY);
+}, { passive: false });
+
+// 键盘支持（方向键移动光标 + 空格打地鼠/开始/重来）
+document.addEventListener('keydown', function(e) {
+    if (state === 'menu') {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            startGame();
+        }
+        return;
+    }
+
+    if (state === 'gameover') {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            startGame();
+        }
+        return;
+    }
+
+    if (state !== 'playing') return;
+
+    switch (e.key) {
+        case 'ArrowUp':
+            cursorRow = Math.max(0, cursorRow - 1);
+            e.preventDefault();
+            break;
+        case 'ArrowDown':
+            cursorRow = Math.min(GRID_ROWS - 1, cursorRow + 1);
+            e.preventDefault();
+            break;
+        case 'ArrowLeft':
+            cursorCol = Math.max(0, cursorCol - 1);
+            e.preventDefault();
+            break;
+        case 'ArrowRight':
+            cursorCol = Math.min(GRID_COLS - 1, cursorCol + 1);
+            e.preventDefault();
+            break;
+        case ' ':
+        case 'Enter':
+            // 键盘打当前光标位置的地鼠
+            var idx = cursorRow * GRID_COLS + cursorCol;
+            if (idx >= 0 && idx < holes.length) {
+                var hole = holes[idx];
+                if (hole.mole && !hole.mole.hit) {
+                    hole.mole.hit = true;
+                    hole.mole.hitTime = performance.now();
+                    score += hole.mole.isGolden ? 30 : 10;
+                }
+            }
+            e.preventDefault();
+            break;
+    }
+});
+
+// 主循环
+function gameLoop(timestamp) {
+    if (state === 'menu') {
+        drawMenu();
+    } else if (state === 'playing') {
+        update(timestamp);
+        drawGame();
+    } else if (state === 'gameover') {
+        drawGameOver();
+    }
+    requestAnimationFrame(gameLoop);
+}
+
+// 启动
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

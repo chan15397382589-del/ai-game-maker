@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎮 HTML5 经典游戏图鉴</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    color: #fff;
+    min-height: 100vh;
+  }
+  /* 顶部横幅 */
+  .hero {
+    text-align: center;
+    padding: 60px 20px 40px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 100%);
+  }
+  .hero h1 {
+    font-size: 2.8em;
+    margin-bottom: 12px;
+    background: linear-gradient(90deg, #f9d423, #ff4e50, #fc67fa, #00dbde);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero p {
+    font-size: 1.1em;
+    color: rgba(255,255,255,0.7);
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .hero .badge {
+    display: inline-block;
+    margin-top: 16px;
+    padding: 6px 18px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 20px;
+    font-size: 0.9em;
+    color: rgba(255,255,255,0.8);
+  }
+  /* 分类区域 */
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px 60px;
+  }
+  .category {
+    margin-bottom: 48px;
+  }
+  .category-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid rgba(255,255,255,0.1);
+  }
+  .category-header .emoji {
+    font-size: 2em;
+  }
+  .category-header h2 {
+    font-size: 1.5em;
+    font-weight: 600;
+  }
+  .category-header .subtitle {
+    font-size: 0.85em;
+    color: rgba(255,255,255,0.5);
+    margin-left: auto;
+  }
+  /* 游戏卡片网格 */
+  .games-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+  }
+  .game-card {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px;
+    padding: 24px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    color: #fff;
+    display: block;
+    position: relative;
+    overflow: hidden;
+  }
+  .game-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(135deg, transparent 0%, rgba(255,255,255,0.03) 100%);
+    transition: opacity 0.3s;
+    opacity: 0;
+  }
+  .game-card:hover {
+    transform: translateY(-4px);
+    background: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.25);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+  }
+  .game-card:hover::before { opacity: 1; }
+  .game-card .card-emoji {
+    font-size: 2.5em;
+    margin-bottom: 12px;
+    display: block;
+  }
+  .game-card h3 {
+    font-size: 1.2em;
+    margin-bottom: 4px;
+  }
+  .game-card .en-name {
+    font-size: 0.85em;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 10px;
+  }
+  .game-card .desc {
+    font-size: 0.9em;
+    color: rgba(255,255,255,0.6);
+    line-height: 1.5;
+  }
+  .game-card .play-hint {
+    margin-top: 14px;
+    font-size: 0.8em;
+    color: rgba(255,255,255,0.35);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  /* 游戏弹窗 */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: #1a1a2e;
+    border-radius: 16px;
+    overflow: hidden;
+    width: 90vw;
+    max-width: 900px;
+    height: 80vh;
+    max-height: 700px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: rgba(255,255,255,0.06);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .modal-header h3 { font-size: 1.1em; }
+  .modal-close {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #fff;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    font-size: 1.2em;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .modal-close:hover { background: rgba(255,80,80,0.4); }
+  .modal-body {
+    flex: 1;
+    position: relative;
+  }
+  .modal-body iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+  }
+  .modal-body .loading {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255,255,255,0.5);
+    font-size: 1.1em;
+  }
+  /* 底部 */
+  .footer {
+    text-align: center;
+    padding: 30px 20px;
+    color: rgba(255,255,255,0.3);
+    font-size: 0.85em;
+  }
+  /* 响应式 */
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 1.8em; }
+    .games-grid { grid-template-columns: 1fr; }
+    .modal { width: 96vw; height: 85vh; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 顶部横幅 -->
+<div class="hero">
+  <h1>🎮 HTML5 经典游戏图鉴</h1>
+  <p>收录 9 大类共 27 款适合前端开发的经典网页游戏，纯 HTML5 / CSS3 / Vanilla JS 驱动</p>
+  <div class="badge">🤖 卡片由 AI 实时生成 · 点击即玩</div>
+</div>
+
+<!-- 游戏列表 -->
+<div class="container">
+
+  <!-- 一、益智解谜 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">🧱</span>
+      <h2>一、益智解谜 PUZ</h2>
+      <span class="subtitle">最适合 HTML 基础开发的逻辑类游戏</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="01-puzzle/tetris.html" onclick="openGame(event, '01-puzzle/tetris.html', '🧱 俄罗斯方块 Tetris')">
+        <span class="card-emoji">🧱</span>
+        <h3>俄罗斯方块</h3>
+        <div class="en-name">Tetris</div>
+        <div class="desc">7 种 4 格方块从顶部下落，可左右移动、旋转、加速下落。一行填满即消除，多行同时消除分数更高。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="01-puzzle/2048.html" onclick="openGame(event, '01-puzzle/2048.html', '🔢 2048')">
+        <span class="card-emoji">🔢</span>
+        <h3>2048</h3>
+        <div class="en-name">2048</div>
+        <div class="desc">4×4 棋盘，上下左右滑动。相同数字相撞合并为相加值，目标合成 2048。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="01-puzzle/minesweeper.html" onclick="openGame(event, '01-puzzle/minesweeper.html', '💣 扫雷 Minesweeper')">
+        <span class="card-emoji">💣</span>
+        <h3>扫雷</h3>
+        <div class="en-name">Minesweeper</div>
+        <div class="desc">点开格子，数字表示周围地雷数。右键插旗标记地雷，标记所有地雷+点开所有安全格即胜利。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 二、休闲街机 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">🐍</span>
+      <h2>二、休闲街机</h2>
+      <span class="subtitle">简单的动作与反应挑战</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="02-arcade/snake.html" onclick="openGame(event, '02-arcade/snake.html', '🐍 贪吃蛇 Snake')">
+        <span class="card-emoji">🐍</span>
+        <h3>贪吃蛇</h3>
+        <div class="en-name">Snake</div>
+        <div class="desc">方向键控制蛇头，吃食物变长。撞墙或撞到自己身体游戏结束，尽可能得高分。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="02-arcade/breakout.html" onclick="openGame(event, '02-arcade/breakout.html', '🏏 打砖块 Breakout')">
+        <span class="card-emoji">🏏</span>
+        <h3>打砖块</h3>
+        <div class="en-name">Breakout</div>
+        <div class="desc">底部左右移动挡板，反弹小球击碎上方砖块。Canvas 碰撞检测+物理反弹。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="02-arcade/whack-a-mole.html" onclick="openGame(event, '02-arcade/whack-a-mole.html', '🐹 打地鼠 Whack-a-Mole')">
+        <span class="card-emoji">🐹</span>
+        <h3>打地鼠</h3>
+        <div class="en-name">Whack-a-Mole</div>
+        <div class="desc">地鼠随机从洞里冒出，鼠标点击得分。限时内尽可能高分，金色地鼠分值更高。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 三、平台跳跃 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">🍄</span>
+      <h2>三、平台跳跃 2D Platformer</h2>
+      <span class="subtitle">考验精准操作和地图机制</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="03-platformer/mario.html" onclick="openGame(event, '03-platformer/mario.html', '🍄 超级玛丽')">
+        <span class="card-emoji">🍄</span>
+        <h3>超级玛丽 (复刻)</h3>
+        <div class="en-name">Super Mario</div>
+        <div class="desc">方向键左右移动+跳跃，踩敌人、吃蘑菇变大，走到终点旗杆通关。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="03-platformer/frogger.html" onclick="openGame(event, '03-platformer/frogger.html', '🐸 青蛙过河 Frogger')">
+        <span class="card-emoji">🐸</span>
+        <h3>青蛙过河</h3>
+        <div class="en-name">Frogger</div>
+        <div class="desc">方向键控制青蛙过马路（躲车）、过河道（踩木头），安全到达上方终点。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="03-platformer/flappy-bird.html" onclick="openGame(event, '03-platformer/flappy-bird.html', '🐦 像素鸟 Flappy Bird')">
+        <span class="card-emoji">🐦</span>
+        <h3>像素鸟</h3>
+        <div class="en-name">Flappy Bird</div>
+        <div class="desc">点击让小鸟扇翅上升，松手自动下落。穿过水管间隙，不撞管、不掉地。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 四、卡牌/棋类 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">❌</span>
+      <h2>四、卡牌 / 棋类</h2>
+      <span class="subtitle">纯 DOM 与状态机即可实现</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="04-card/tic-tac-toe.html" onclick="openGame(event, '04-card/tic-tac-toe.html', '❌ 井字棋 Tic-Tac-Toe')">
+        <span class="card-emoji">❌</span>
+        <h3>井字棋</h3>
+        <div class="en-name">Tic-Tac-Toe</div>
+        <div class="desc">3×3 格子，玩家 vs 电脑轮流下 X/O。横/竖/斜连成 3 个相同符号获胜。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="04-card/gomoku.html" onclick="openGame(event, '04-card/gomoku.html', '⚫ 五子棋')">
+        <span class="card-emoji">⚫</span>
+        <h3>五子棋</h3>
+        <div class="en-name">Gomoku</div>
+        <div class="desc">棋盘轮流落子（黑白），横/竖/斜连成 5 子获胜。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="04-card/memory-match.html" onclick="openGame(event, '04-card/memory-match.html', '🃏 记忆翻牌')">
+        <span class="card-emoji">🃏</span>
+        <h3>记忆翻牌</h3>
+        <div class="en-name">Memory Match</div>
+        <div class="desc">牌面朝下，每次翻 2 张。相同图案保持翻开，全部配对完成，步数越少越好。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 五、回合制策略 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">📦</span>
+      <h2>五、回合制策略 / 战棋</h2>
+      <span class="subtitle">复杂的网格计算与阵营轮转</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="05-strategy/sokoban.html" onclick="openGame(event, '05-strategy/sokoban.html', '📦 推箱子 Sokoban')">
+        <span class="card-emoji">📦</span>
+        <h3>推箱子</h3>
+        <div class="en-name">Sokoban</div>
+        <div class="desc">方向键移动人，把箱子推到目标点。不能拉、不能穿墙、箱子不能叠推。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="05-strategy/sudoku.html" onclick="openGame(event, '05-strategy/sudoku.html', '📝 数独 Sudoku')">
+        <span class="card-emoji">📝</span>
+        <h3>数独</h3>
+        <div class="en-name">Sudoku</div>
+        <div class="desc">9×9 格，填 1–9。每行、每列、每个 3×3 宫数字不重复。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="05-strategy/simple-chess.html" onclick="openGame(event, '05-strategy/simple-chess.html', '♟️ 简单战棋')">
+        <span class="card-emoji">♟️</span>
+        <h3>简单战棋</h3>
+        <div class="en-name">Simple Tactics</div>
+        <div class="desc">格子地图，回合制移动/攻击，敌我轮流。消灭所有敌人获胜。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 六、2D 射击 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">✈️</span>
+      <h2>六、2D 射击 / 弹幕</h2>
+      <span class="subtitle">对象池技术与性能优化的试金石</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="06-shooter/galaga.html" onclick="openGame(event, '06-shooter/galaga.html', '✈️ 飞机大战')">
+        <span class="card-emoji">✈️</span>
+        <h3>飞机大战 (小蜜蜂)</h3>
+        <div class="en-name">Galaga</div>
+        <div class="desc">底部左右移动，发射子弹打上方敌机。被敌机子弹撞毁则失败。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="06-shooter/space-invaders.html" onclick="openGame(event, '06-shooter/space-invaders.html', '👾 太空侵略者')">
+        <span class="card-emoji">👾</span>
+        <h3>太空侵略者</h3>
+        <div class="en-name">Space Invaders</div>
+        <div class="desc">左右移动+射击，消灭一排向下移动的外星人。外星人越近越快，被碰到失败。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="06-shooter/tank-battle.html" onclick="openGame(event, '06-shooter/tank-battle.html', '🪖 坦克大战')">
+        <span class="card-emoji">🪖</span>
+        <h3>坦克大战</h3>
+        <div class="en-name">Tank Battle</div>
+        <div class="desc">上下左右移动坦克，发射子弹打敌方坦克+保护基地。清掉所有敌方坦克过关。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 七、消除类 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">💎</span>
+      <h2>七、消除类 Match-3</h2>
+      <span class="subtitle">状态矩阵变换与华丽特效结合</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="07-match3/bejeweled.html" onclick="openGame(event, '07-match3/bejeweled.html', '💎 宝石迷阵 Bejeweled')">
+        <span class="card-emoji">💎</span>
+        <h3>宝石迷阵</h3>
+        <div class="en-name">Bejeweled</div>
+        <div class="desc">交换相邻两个宝石，使横/竖 3 个同色连成线消除。连锁消除连续加分。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="07-match3/candy-crush.html" onclick="openGame(event, '07-match3/candy-crush.html', '🍬 开心消消乐')">
+        <span class="card-emoji">🍬</span>
+        <h3>开心消消乐</h3>
+        <div class="en-name">Candy Crush</div>
+        <div class="desc">拖动交换，3 连消除、4/5 连出特效。在步数内完成目标任务。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="07-match3/fruit-ninja.html" onclick="openGame(event, '07-match3/fruit-ninja.html', '🍉 水果忍者')">
+        <span class="card-emoji">🍉</span>
+        <h3>水果忍者</h3>
+        <div class="en-name">Fruit Ninja</div>
+        <div class="desc">鼠标滑动切飞来的水果，避开炸弹。连切加分，漏水果/切炸弹扣命。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 八、无尽跑酷 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">🎹</span>
+      <h2>八、无尽跑酷 / 躲避</h2>
+      <span class="subtitle">测试极限反应与生成算法</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="08-runner/dont-tap-white.html" onclick="openGame(event, '08-runner/dont-tap-white.html', '🎹 别踩白块儿')">
+        <span class="card-emoji">🎹</span>
+        <h3>别踩白块儿</h3>
+        <div class="en-name">Don't Tap the White Tile</div>
+        <div class="desc">只点黑块、不点白块，块自动下落。连续点击不断刷新高分。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="08-runner/space-runner.html" onclick="openGame(event, '08-runner/space-runner.html', '🏃‍♂️ 太空跑酷')">
+        <span class="card-emoji">🏃‍♂️</span>
+        <h3>Run 3 (太空跑酷)</h3>
+        <div class="en-name">Space Runner</div>
+        <div class="desc">角色自动前进，左右移动+跳跃，在悬空平台跑酷。掉出平台则失败。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="08-runner/pixel-runner.html" onclick="openGame(event, '08-runner/pixel-runner.html', '🌵 像素无尽跑酷')">
+        <span class="card-emoji">🌵</span>
+        <h3>像素无尽跑酷</h3>
+        <div class="en-name">Pixel Runner</div>
+        <div class="desc">角色一直向前，跳跃/下蹲躲障碍物。存活越久、分数越高。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 九、轻度模拟 -->
+  <div class="category">
+    <div class="category-header">
+      <span class="emoji">🌻</span>
+      <h2>九、轻度模拟 / 放置</h2>
+      <span class="subtitle">时间计算与离线收益机制</span>
+    </div>
+    <div class="games-grid">
+      <a class="game-card" href="09-simulation/plants-vs-zombies.html" onclick="openGame(event, '09-simulation/plants-vs-zombies.html', '🌻 植物大战僵尸')">
+        <span class="card-emoji">🌻</span>
+        <h3>植物大战僵尸</h3>
+        <div class="en-name">Plants vs Zombies</div>
+        <div class="desc">种植物发射子弹打僵尸，阳光用来种更多植物。守住房子不被僵尸吃掉脑子。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="09-simulation/cookie-clicker.html" onclick="openGame(event, '09-simulation/cookie-clicker.html', '🍪 Cookie Clicker')">
+        <span class="card-emoji">🍪</span>
+        <h3>Cookie Clicker</h3>
+        <div class="en-name">Cookie Clicker</div>
+        <div class="desc">不停点击饼干得金币，买建筑自动产饼干。无限累积饼干、解锁成就。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+      <a class="game-card" href="09-simulation/simple-farm.html" onclick="openGame(event, '09-simulation/simple-farm.html', '🌾 简单农场')">
+        <span class="card-emoji">🌾</span>
+        <h3>简单农场</h3>
+        <div class="en-name">Simple Farm</div>
+        <div class="desc">种菜、浇水、收割、卖钱、扩地。时间流逝，作物生长，持续经营。</div>
+        <div class="play-hint">▶ 点击开始游戏</div>
+      </a>
+    </div>
+  </div>
+
+</div>
+
+<!-- 底部 -->
+<div class="footer">
+  <p>纯前端 HTML5 / CSS3 / Vanilla JS 驱动 · 27 款经典游戏</p>
+</div>
+
+<!-- 游戏弹窗 -->
+<div class="modal-overlay" id="gameModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">游戏</h3>
+      <button class="modal-close" onclick="closeGame()">✕</button>
+    </div>
+    <div class="modal-body">
+      <iframe id="gameFrame" sandbox="allow-scripts"></iframe>
+      <div class="loading" id="gameLoading">加载中...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 打开游戏弹窗
+function openGame(e, url, title) {
+  e.preventDefault();
+  const modal = document.getElementById('gameModal');
+  const frame = document.getElementById('gameFrame');
+  const loading = document.getElementById('gameLoading');
+  document.getElementById('modalTitle').textContent = title;
+  loading.style.display = 'block';
+  frame.src = url;
+  frame.onload = function() { loading.style.display = 'none'; };
+  modal.classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+
+// 关闭游戏弹窗
+function closeGame() {
+  const modal = document.getElementById('gameModal');
+  const frame = document.getElementById('gameFrame');
+  modal.classList.remove('active');
+  frame.src = '';
+  document.body.style.overflow = '';
+}
+
+// ESC 关闭
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeGame();
+});
+
+// 点击遮罩关闭
+document.getElementById('gameModal').addEventListener('click', function(e) {
+  if (e.target === this) closeGame();
+});
+</script>
+
+</body>
+</html>

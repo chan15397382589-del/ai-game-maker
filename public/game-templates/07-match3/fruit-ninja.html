@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>水果忍者</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { overflow:hidden; background:#5c3317; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+// ===== 水果忍者 - 切割水果游戏 =====
+
+const canvas = document.getElementById('gc');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ===== 游戏状态 =====
+const STATE_MENU = 0, STATE_PLAYING = 1, STATE_OVER = 2;
+let gameState = STATE_MENU;
+
+let score = 0;
+let lives = 3;
+let gameTime = 0;  // 游戏内经过时间（秒）
+
+// ===== 水果配置 =====
+// 每种水果: {name, baseColor, lightColor, radius}
+const FRUIT_TYPES = [
+    { name:'苹果', base:'#ff2233', light:'#ff8899', dark:'#aa0011', radius:28 },
+    { name:'香蕉', base:'#ffdd33', light:'#ffee88', dark:'#ccaa11', radius:26 },
+    { name:'西瓜', base:'#33cc55', light:'#88ffaa', dark:'#118833', radius:35 },
+    { name:'橙子', base:'#ff8833', light:'#ffcc88', dark:'#cc5500', radius:26 },
+    { name:'草莓', base:'#ff66aa', light:'#ffaacc', dark:'#cc3377', radius:22 }
+];
+
+// 炸弹配置
+const BOMB_RADIUS = 26;
+
+// ===== 实体数组 =====
+let fruits = [];       // 水果 [{x,y,vx,vy,type,alive,radius,age}]
+let bombs = [];        // 炸弹 [{x,y,vx,vy,alive,radius,age}]
+let slices = [];       // 切割的水果残骸 [{x,y,vx,vy,color,age,dir, radius}]
+let scorePopups = [];  // 得分弹出 [{x,y,text,color,age}]
+
+// 切割轨迹
+let trail = [];        // [{x,y,age}]
+let isSlicing = false;
+let lastPointer = null;
+
+// 上次 spawn 时间
+let lastSpawnTime = 0;
+let spawnInterval = 1.5; // 秒
+
+// 本次切割中已经切到的水果（防止同一次滑动重复计分）
+let slicedThisSwipe = new Set();
+
+// ===== 工具函数 =====
+function lerp(a, b, t) { return a + (b - a) * t; }
+function dist(x1, y1, x2, y2) {
+    let dx = x2 - x1, dy = y2 - y1;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+// ===== 生成水果 =====
+function spawnFruit() {
+    // 随机从底部抛出
+    let x = canvas.width * 0.15 + Math.random() * canvas.width * 0.7;
+    let y = canvas.height + 50;
+
+    // 计算抛物线：目标大致在屏幕中央偏上
+    let targetX = canvas.width * 0.3 + Math.random() * canvas.width * 0.4;
+    let targetY = canvas.height * 0.2 + Math.random() * canvas.height * 0.2;
+
+    // 飞行时间约 1.5 秒
+    let t = 1.5;
+    let g = 1200; // 重力
+
+    let vx = (targetX - x) / t;
+    let vy = (targetY - y) / t - 0.5 * g * t;
+
+    let typeIdx = Math.floor(Math.random() * FRUIT_TYPES.length);
+    let ft = FRUIT_TYPES[typeIdx];
+
+    fruits.push({
+        x, y, vx, vy,
+        type: typeIdx,
+        alive: true,
+        radius: ft.radius,
+        age: 0
+    });
+}
+
+// 生成炸弹
+function spawnBomb() {
+    let x = canvas.width * 0.15 + Math.random() * canvas.width * 0.7;
+    let y = canvas.height + 50;
+
+    let targetX = canvas.width * 0.3 + Math.random() * canvas.width * 0.4;
+    let targetY = canvas.height * 0.2 + Math.random() * canvas.height * 0.2;
+
+    let t = 1.5;
+    let g = 1200;
+
+    let vx = (targetX - x) / t;
+    let vy = (targetY - y) / t - 0.5 * g * t;
+
+    bombs.push({
+        x, y, vx, vy,
+        alive: true,
+        radius: BOMB_RADIUS,
+        age: 0
+    });
+}
+
+// 生成一组水果（1-4 个）
+function spawnWave() {
+    let count = 1 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i++) {
+        setTimeout(() => spawnFruit(), i * 200);
+    }
+    // 20% 概率混入炸弹
+    if (Math.random() < 0.2 && gameTime > 5) {
+        setTimeout(() => spawnBomb(), 150);
+    }
+}
+
+// ===== 碰撞检测 =====
+function lineCircleDist(x1, y1, x2, y2, cx, cy) {
+    // 线段到圆心的最短距离
+    let dx = x2 - x1, dy = y2 - y1;
+    let len2 = dx * dx + dy * dy;
+    if (len2 === 0) return dist(x1, y1, cx, cy);
+    let t = Math.max(0, Math.min(1, ((cx - x1) * dx + (cy - y1) * dy) / len2));
+    let px = x1 + t * dx, py = y1 + t * dy;
+    return dist(px, py, cx, cy);
+}
+
+function checkSlice(x1, y1, x2, y2) {
+    // 检查切割轨迹是否切到水果或炸弹
+    let hitSomething = false;
+
+    // 检查水果
+    for (let i = 0; i < fruits.length; i++) {
+        let f = fruits[i];
+        if (!f.alive) continue;
+        if (slicedThisSwipe.has('f' + i)) continue;
+
+        let d = lineCircleDist(x1, y1, x2, y2, f.x, f.y);
+        if (d < f.radius + 8) {
+            // 切中了！
+            f.alive = false;
+            slicedThisSwipe.add('f' + i);
+            hitSomething = true;
+
+            let ft = FRUIT_TYPES[f.type];
+
+            // 生成两半残骸
+            slices.push({
+                x: f.x - f.radius * 0.3, y: f.y,
+                vx: -80 - Math.random() * 60, vy: -200 + Math.random() * 100,
+                color: ft.base, age: 0, dir: -1, radius: f.radius
+            });
+            slices.push({
+                x: f.x + f.radius * 0.3, y: f.y,
+                vx: 80 + Math.random() * 60, vy: -200 + Math.random() * 100,
+                color: ft.light, age: 0, dir: 1, radius: f.radius
+            });
+
+            // 计分（基本分 + 连击加分）
+            let earned = 10;
+            // 连击检测：这次滑动中已经切了多少个
+            let combo = slicedThisSwipe.size;
+            if (combo === 2) earned += 20;
+            else if (combo === 3) earned += 50;
+            else if (combo >= 4) earned += 80;
+            score += earned;
+
+            // 得分弹出
+            scorePopups.push({
+                x: f.x, y: f.y - 20,
+                text: '+' + earned,
+                color: '#ffffff',
+                age: 0
+            });
+            if (combo >= 2) {
+                scorePopups.push({
+                    x: f.x, y: f.y - 50,
+                    text: combo + '连击!',
+                    color: '#ffdd44',
+                    age: 0
+                });
+            }
+        }
+    }
+
+    // 检查炸弹
+    for (let i = 0; i < bombs.length; i++) {
+        let b = bombs[i];
+        if (!b.alive) continue;
+        if (slicedThisSwipe.has('b' + i)) continue;
+
+        let d = lineCircleDist(x1, y1, x2, y2, b.x, b.y);
+        if (d < b.radius + 8) {
+            b.alive = false;
+            slicedThisSwipe.add('b' + i);
+            hitSomething = true;
+
+            // 爆炸效果 - 红色弹出
+            scorePopups.push({
+                x: b.x, y: b.y - 30,
+                text: '💥 -1命!',
+                color: '#ff4444',
+                age: 0
+            });
+
+            lives--;
+            if (lives <= 0) endGame();
+        }
+    }
+
+    return hitSomething;
+}
+
+// ===== 输入处理 =====
+function onPointerDown(px, py) {
+    if (gameState === STATE_MENU) { startGame(); return; }
+    if (gameState === STATE_OVER) { startGame(); return; }
+    if (gameState !== STATE_PLAYING) return;
+
+    isSlicing = true;
+    lastPointer = { x: px, y: py };
+    trail = [{ x: px, y: py, age: 0 }];
+    slicedThisSwipe = new Set();
+}
+
+function onPointerMove(px, py) {
+    if (!isSlicing || gameState !== STATE_PLAYING) return;
+
+    if (lastPointer) {
+        checkSlice(lastPointer.x, lastPointer.y, px, py);
+    }
+
+    trail.push({ x: px, y: py, age: 0 });
+    lastPointer = { x: px, y: py };
+
+    // 限制轨迹长度
+    if (trail.length > 30) trail.shift();
+}
+
+function onPointerUp() {
+    isSlicing = false;
+    lastPointer = null;
+    slicedThisSwipe = new Set();
+}
+
+canvas.addEventListener('mousedown', e => onPointerDown(e.clientX, e.clientY));
+canvas.addEventListener('mousemove', e => onPointerMove(e.clientX, e.clientY));
+canvas.addEventListener('mouseup', onPointerUp);
+canvas.addEventListener('mouseleave', onPointerUp);
+canvas.addEventListener('touchstart', e => {
+    let t = e.touches[0]; onPointerDown(t.clientX, t.clientY); e.preventDefault();
+});
+canvas.addEventListener('touchmove', e => {
+    let t = e.touches[0]; onPointerMove(t.clientX, t.clientY); e.preventDefault();
+});
+canvas.addEventListener('touchend', e => { onPointerUp(); e.preventDefault(); });
+
+document.addEventListener('keydown', e => {
+    if (gameState === STATE_MENU || gameState === STATE_OVER) {
+        if (e.key === 'Enter' || e.key === ' ') startGame();
+    }
+});
+
+// ===== 绘制函数 =====
+
+// 木纹背景
+function drawBackground() {
+    let grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    grad.addColorStop(0, '#4a2a0a');
+    grad.addColorStop(0.3, '#5c3317');
+    grad.addColorStop(0.7, '#6b3d1e');
+    grad.addColorStop(1, '#3d1f0a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 木纹线条
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < canvas.height; i += 12) {
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        for (let x = 0; x < canvas.width; x += 40) {
+            ctx.quadraticCurveTo(x + 20, i + (Math.sin(x * 0.01 + i * 0.02) * 3), x + 40, i);
+        }
+        ctx.stroke();
+    }
+}
+
+// 绘制水果
+function drawFruit(f) {
+    if (!f.alive) return;
+    let ft = FRUIT_TYPES[f.type];
+
+    ctx.save();
+    ctx.translate(f.x, f.y);
+
+    // 阴影
+    ctx.beginPath();
+    ctx.arc(3, 3, f.radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fill();
+
+    // 水果主体
+    let grad = ctx.createRadialGradient(-f.radius * 0.3, -f.radius * 0.3, f.radius * 0.1, 0, 0, f.radius);
+    grad.addColorStop(0, ft.light);
+    grad.addColorStop(0.6, ft.base);
+    grad.addColorStop(1, ft.dark);
+    ctx.beginPath();
+    ctx.arc(0, 0, f.radius, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // 高光
+    ctx.beginPath();
+    ctx.arc(-f.radius * 0.25, -f.radius * 0.25, f.radius * 0.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fill();
+
+    // 小高光
+    ctx.beginPath();
+    ctx.arc(f.radius * 0.15, -f.radius * 0.1, f.radius * 0.08, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fill();
+
+    ctx.restore();
+}
+
+// 绘制炸弹
+function drawBomb(b) {
+    if (!b.alive) return;
+
+    ctx.save();
+    ctx.translate(b.x, b.y);
+
+    // 阴影
+    ctx.beginPath();
+    ctx.arc(3, 3, b.radius, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fill();
+
+    // 炸弹主体 - 黑色渐变
+    let grad = ctx.createRadialGradient(-b.radius * 0.2, -b.radius * 0.2, b.radius * 0.1, 0, 0, b.radius);
+    grad.addColorStop(0, '#444');
+    grad.addColorStop(0.5, '#222');
+    grad.addColorStop(1, '#000');
+    ctx.beginPath();
+    ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // 高光
+    ctx.beginPath();
+    ctx.arc(-b.radius * 0.2, -b.radius * 0.2, b.radius * 0.15, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fill();
+
+    // 引线
+    ctx.strokeStyle = '#886644';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, -b.radius);
+    ctx.quadraticCurveTo(b.radius * 0.5, -b.radius * 1.5, b.radius * 0.3, -b.radius * 1.8);
+    ctx.stroke();
+
+    // 火花
+    let sparkTime = (Date.now() % 500) / 500;
+    let sparkSize = 4 + sparkTime * 4;
+    ctx.beginPath();
+    ctx.arc(b.radius * 0.3, -b.radius * 1.8, sparkSize, 0, Math.PI * 2);
+    ctx.fillStyle = sparkTime < 0.5 ? '#ffaa00' : '#ff6600';
+    ctx.fill();
+
+    ctx.restore();
+}
+
+// 绘制切割的水果残骸
+function drawSlice(s) {
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    ctx.globalAlpha = Math.max(0, 1 - s.age / 1.5);
+
+    // 半圆
+    let r = s.radius;
+    ctx.beginPath();
+    if (s.dir < 0) {
+        // 左半
+        ctx.arc(0, 0, r, -Math.PI * 0.5, Math.PI * 0.5);
+        ctx.lineTo(0, -r);
+    } else {
+        // 右半
+        ctx.arc(0, 0, r, Math.PI * 0.5, Math.PI * 1.5);
+        ctx.lineTo(0, -r);
+    }
+    ctx.closePath();
+
+    let grad = ctx.createRadialGradient(0, 0, r * 0.1, 0, 0, r);
+    grad.addColorStop(0, s.color + 'cc');
+    grad.addColorStop(1, s.color);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // 切面（白色果肉）
+    ctx.fillStyle = '#ffffee';
+    if (s.dir < 0) {
+        ctx.fillRect(-2, -r * 0.6, 4, r * 1.2);
+    } else {
+        ctx.fillRect(-2, -r * 0.6, 4, r * 1.2);
+    }
+
+    ctx.restore();
+}
+
+// 绘制切割轨迹
+function drawTrail() {
+    if (trail.length < 2) return;
+
+    ctx.save();
+    for (let i = 1; i < trail.length; i++) {
+        let p0 = trail[i - 1], p1 = trail[i];
+        let alpha = Math.max(0, 1 - p1.age / 0.4);
+        let width = Math.max(1, 6 - p1.age * 15);
+
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+    }
+
+    // 发光效果
+    if (trail.length > 1) {
+        let last = trail[trail.length - 1];
+        ctx.beginPath();
+        ctx.arc(last.x, last.y, 8, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+// 绘制得分弹出
+function drawPopups() {
+    for (let p of scorePopups) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, 1 - p.age / 1.2);
+        ctx.fillStyle = p.color;
+        ctx.font = 'bold 28px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(p.text, p.x, p.y - p.age * 60);
+        ctx.restore();
+    }
+}
+
+// 绘制生命值
+function drawLives() {
+    let x = 20, y = 30;
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('生命: ', x, y);
+
+    for (let i = 0; i < 3; i++) {
+        let hx = x + 70 + i * 35;
+        ctx.beginPath();
+        if (i < lives) {
+            // 红心
+            drawHeart(hx, y - 8, 12, '#ff3344');
+        } else {
+            // 空心
+            drawHeart(hx, y - 8, 12, '#555');
+        }
+    }
+}
+
+function drawHeart(x, y, size, color) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, size * 0.3);
+    ctx.bezierCurveTo(-size, -size * 0.3, -size * 0.5, -size, 0, -size * 0.4);
+    ctx.bezierCurveTo(size * 0.5, -size, size, -size * 0.3, 0, size * 0.3);
+    ctx.fill();
+    ctx.restore();
+}
+
+// ===== 游戏状态画面 =====
+function drawMenu() {
+    drawBackground();
+
+    ctx.textAlign = 'center';
+
+    // 标题
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 56px sans-serif';
+    ctx.shadowColor = '#ff8800';
+    ctx.shadowBlur = 20;
+    ctx.fillText('水果忍者', canvas.width / 2, canvas.height * 0.25);
+    ctx.shadowBlur = 0;
+
+    // 副标题
+    ctx.fillStyle = '#ffddaa';
+    ctx.font = '20px sans-serif';
+    ctx.fillText('用手指或鼠标划过水果来切割它们！', canvas.width / 2, canvas.height * 0.34);
+    ctx.fillText('切割水果 +10 分，同时切多个有额外加分', canvas.width / 2, canvas.height * 0.39);
+    ctx.fillText('小心炸弹！切到会扣一条命', canvas.width / 2, canvas.height * 0.44);
+    ctx.fillText('水果飞出屏幕未切到也会扣命', canvas.width / 2, canvas.height * 0.49);
+
+    // 展示水果
+    let previewY = canvas.height * 0.58;
+    for (let i = 0; i < FRUIT_TYPES.length; i++) {
+        let px = canvas.width / 2 - 160 + i * 70;
+        let ft = FRUIT_TYPES[i];
+        ctx.beginPath();
+        let grad = ctx.createRadialGradient(px - 5, previewY - 5, 3, px, previewY, ft.radius);
+        grad.addColorStop(0, ft.light);
+        grad.addColorStop(0.6, ft.base);
+        grad.addColorStop(1, ft.dark);
+        ctx.arc(px, previewY, ft.radius, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(px - ft.radius * 0.25, previewY - ft.radius * 0.25, ft.radius * 0.2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fill();
+    }
+
+    // 炸弹预览
+    let bx = canvas.width / 2 + 190;
+    ctx.beginPath();
+    let bgrad = ctx.createRadialGradient(bx - 5, previewY - 5, 3, bx, previewY, BOMB_RADIUS);
+    bgrad.addColorStop(0, '#444');
+    bgrad.addColorStop(1, '#000');
+    ctx.arc(bx, previewY, BOMB_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = bgrad;
+    ctx.fill();
+    ctx.strokeStyle = '#886644';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(bx, previewY - BOMB_RADIUS);
+    ctx.quadraticCurveTo(bx + 10, previewY - BOMB_RADIUS - 15, bx + 8, previewY - BOMB_RADIUS - 25);
+    ctx.stroke();
+
+    // 开始按钮
+    let btnX = canvas.width / 2 - 120, btnY = canvas.height * 0.72, btnW = 240, btnH = 56;
+    let btnGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
+    btnGrad.addColorStop(0, '#ff8833');
+    btnGrad.addColorStop(1, '#ff5500');
+    ctx.fillStyle = btnGrad;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 14);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText('开始游戏', canvas.width / 2, btnY + 37);
+
+    ctx.fillStyle = '#aa8866';
+    ctx.font = '16px sans-serif';
+    ctx.fillText('按 Enter 开始 ｜ 鼠标或手指滑动切割', canvas.width / 2, canvas.height * 0.85);
+}
+
+function drawOver() {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff6644';
+    ctx.font = 'bold 52px sans-serif';
+    ctx.shadowColor = '#ff4422';
+    ctx.shadowBlur = 15;
+    ctx.fillText('游戏结束', canvas.width / 2, canvas.height * 0.32);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 38px sans-serif';
+    ctx.fillText('最终得分: ' + score, canvas.width / 2, canvas.height * 0.44);
+
+    let btnX = canvas.width / 2 - 120, btnY = canvas.height * 0.56, btnW = 240, btnH = 56;
+    let btnGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
+    btnGrad.addColorStop(0, '#ff8833');
+    btnGrad.addColorStop(1, '#ff5500');
+    ctx.fillStyle = btnGrad;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 14);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText('再来一局', canvas.width / 2, btnY + 37);
+}
+
+// ===== 游戏逻辑 =====
+function startGame() {
+    score = 0;
+    lives = 3;
+    gameTime = 0;
+    fruits = [];
+    bombs = [];
+    slices = [];
+    scorePopups = [];
+    trail = [];
+    lastSpawnTime = 0;
+    spawnInterval = 1.5;
+    gameState = STATE_PLAYING;
+
+    window.postMessage({
+        type: "game_event",
+        eventType: "game_start",
+        data: { gameType: "水果忍者" }
+    }, "*");
+}
+
+function endGame() {
+    gameState = STATE_OVER;
+    window.postMessage({
+        type: "game_event",
+        eventType: "game_end",
+        data: { score }
+    }, "*");
+}
+
+// ===== 更新逻辑 =====
+function update(dt) {
+    if (gameState !== STATE_PLAYING) return;
+
+    gameTime += dt;
+
+    // 生成节奏：逐渐加快
+    spawnInterval = Math.max(0.6, 1.5 - gameTime * 0.01);
+    if (gameTime - lastSpawnTime > spawnInterval) {
+        spawnWave();
+        lastSpawnTime = gameTime;
+    }
+
+    let g = 1200; // 重力
+
+    // 更新水果
+    for (let f of fruits) {
+        if (!f.alive) continue;
+        f.age += dt;
+        f.vy += g * dt;
+        f.x += f.vx * dt;
+        f.y += f.vy * dt;
+
+        // 检查是否飞出屏幕
+        if (f.y > canvas.height + 80 && f.age > 0.5) {
+            if (f.alive) {
+                f.alive = false;
+                lives--;
+                scorePopups.push({
+                    x: f.x, y: canvas.height - 30,
+                    text: '错过! -1命',
+                    color: '#ff6644',
+                    age: 0
+                });
+                if (lives <= 0) endGame();
+            }
+        }
+    }
+
+    // 更新炸弹
+    for (let b of bombs) {
+        if (!b.alive) continue;
+        b.age += dt;
+        b.vy += g * dt;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        if (b.y > canvas.height + 80) b.alive = false;
+    }
+
+    // 更新残骸
+    for (let s of slices) {
+        s.age += dt;
+        s.vy += g * dt * 0.6;
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+    }
+
+    // 更新弹出
+    for (let p of scorePopups) {
+        p.age += dt;
+    }
+
+    // 更新轨迹
+    for (let t of trail) {
+        t.age += dt;
+    }
+
+    // 清理过期元素
+    fruits = fruits.filter(f => f.alive || f.age < 2);
+    bombs = bombs.filter(b => b.alive || b.age < 2);
+    slices = slices.filter(s => s.age < 1.5 && s.y < canvas.height + 100);
+    scorePopups = scorePopups.filter(p => p.age < 1.3);
+    trail = trail.filter(t => t.age < 0.5);
+}
+
+// ===== 主循环 =====
+let lastTime = 0;
+function gameLoop(timestamp) {
+    let dt = lastTime ? Math.min((timestamp - lastTime) / 1000, 0.05) : 0.016;
+    lastTime = timestamp;
+
+    resize();
+    update(dt);
+
+    // 绘制
+    drawBackground();
+
+    if (gameState === STATE_MENU) {
+        drawMenu();
+    } else if (gameState === STATE_PLAYING || gameState === STATE_OVER) {
+        // 绘制所有水果
+        for (let f of fruits) drawFruit(f);
+
+        // 绘制炸弹
+        for (let b of bombs) drawBomb(b);
+
+        // 绘制残骸
+        for (let s of slices) drawSlice(s);
+
+        // 绘制切割线
+        drawTrail();
+
+        // 绘制弹出
+        drawPopups();
+
+        // UI
+        drawLives();
+
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 26px sans-serif';
+        ctx.fillText('得分: ' + score, canvas.width / 2, 35);
+
+        if (gameState === STATE_OVER) drawOver();
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

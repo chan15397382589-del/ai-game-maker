@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>扫雷</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #2d2d2d; font-family: 'Microsoft YaHei', sans-serif; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ============================================================
+// 扫雷 - Minesweeper
+// 9x9 棋盘，10 个地雷，首次点击安全，右键插旗
+// ============================================================
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// 全屏适配
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// 游戏常量
+const GRID_ROWS = 9;
+const GRID_COLS = 9;
+const MINE_COUNT = 10;
+
+// 数字颜色（1-8）
+const NUMBER_COLORS = [
+    null,
+    '#2196F3', // 1 蓝
+    '#4CAF50', // 2 绿
+    '#F44336', // 3 红
+    '#1A237E', // 4 深蓝
+    '#795548', // 5 棕
+    '#00BCD4', // 6 青
+    '#333333', // 7 黑
+    '#9E9E9E'  // 8 灰
+];
+
+// 格子状态
+const CELL_HIDDEN = 0;    // 未翻开
+const CELL_REVEALED = 1;  // 已翻开
+const CELL_FLAGGED = 2;   // 已插旗
+
+// 游戏数据
+let board = [];           // 棋盘数据（数字：0-8表示周围雷数，-1表示地雷）
+let cellState = [];       // 每个格子的状态
+let mines = new Set();    // 地雷位置集合 "r,c"
+let flagCount = 0;        // 已插旗数
+let revealedCount = 0;    // 已翻开数
+let timer = 0;            // 计时器（秒）
+let timerInterval = null; // 计时器间隔
+let firstClick = true;    // 是否首次点击
+
+// 游戏状态枚举
+const STATE = { MENU: 0, PLAYING: 1, GAMEOVER: 2, WON: 3 };
+let gameState = STATE.MENU;
+
+// ============================================================
+// 核心游戏逻辑
+// ============================================================
+
+// 初始化棋盘（空棋盘，地雷在首次点击后生成）
+function initBoard() {
+    board = [];
+    cellState = [];
+    for (let r = 0; r < GRID_ROWS; r++) {
+        board.push(new Array(GRID_COLS).fill(0));
+        cellState.push(new Array(GRID_COLS).fill(CELL_HIDDEN));
+    }
+    mines.clear();
+    flagCount = 0;
+    revealedCount = 0;
+    timer = 0;
+    firstClick = true;
+    if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+}
+
+// 生成地雷（排除首次点击位置及周围3x3区域）
+function generateMines(safeR, safeC) {
+    const safeSet = new Set();
+    for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+            const nr = safeR + dr;
+            const nc = safeC + dc;
+            if (nr >= 0 && nr < GRID_ROWS && nc >= 0 && nc < GRID_COLS) {
+                safeSet.add(nr + ',' + nc);
+            }
+        }
+    }
+
+    // 随机放置地雷
+    mines.clear();
+    while (mines.size < MINE_COUNT) {
+        const r = Math.floor(Math.random() * GRID_ROWS);
+        const c = Math.floor(Math.random() * GRID_COLS);
+        const key = r + ',' + c;
+        if (!safeSet.has(key) && !mines.has(key)) {
+            mines.add(key);
+            board[r][c] = -1;
+        }
+    }
+
+    // 计算每个格子周围的地雷数
+    for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+            if (board[r][c] === -1) continue;
+            let count = 0;
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    if (dr === 0 && dc === 0) continue;
+                    const nr = r + dr;
+                    const nc = c + dc;
+                    if (nr >= 0 && nr < GRID_ROWS && nc >= 0 && nc < GRID_COLS) {
+                        if (board[nr][nc] === -1) count++;
+                    }
+                }
+            }
+            board[r][c] = count;
+        }
+    }
+}
+
+// 翻开格子（递归翻开空白区域）
+function revealCell(r, c) {
+    if (r < 0 || r >= GRID_ROWS || c < 0 || c >= GRID_COLS) return;
+    if (cellState[r][c] !== CELL_HIDDEN) return;
+
+    cellState[r][c] = CELL_REVEALED;
+    revealedCount++;
+
+    // 如果是空白格（周围无雷），递归翻开周围
+    if (board[r][c] === 0) {
+        for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                revealCell(r + dr, c + dc);
+            }
+        }
+    }
+}
+
+// 检查是否胜利（所有安全格已翻开）
+function checkWin() {
+    const totalSafe = GRID_ROWS * GRID_COLS - MINE_COUNT;
+    if (revealedCount === totalSafe) {
+        gameState = STATE.WON;
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+        // 自动标记所有地雷
+        mines.forEach(function(key) {
+            var parts = key.split(',');
+            cellState[Number(parts[0])][Number(parts[1])] = CELL_FLAGGED;
+        });
+        flagCount = MINE_COUNT;
+        // 得分公式：基础1000分减去用时
+        var score = Math.max(1, 1000 - timer * 2);
+        window.parent.postMessage({ type: "game_event", eventType: "game_end", data: { score: score } }, "*");
+    }
+}
+
+// 点击格子
+function clickCell(r, c) {
+    if (gameState !== STATE.PLAYING) return;
+    if (cellState[r][c] === CELL_FLAGGED) return;
+    if (cellState[r][c] === CELL_REVEALED) return;
+
+    // 首次点击：生成地雷并启动计时器
+    if (firstClick) {
+        firstClick = false;
+        generateMines(r, c);
+        timerInterval = setInterval(function() {
+            timer++;
+        }, 1000);
+    }
+
+    // 踩雷
+    if (board[r][c] === -1) {
+        gameState = STATE.GAMEOVER;
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+        // 显示所有地雷
+        mines.forEach(function(key) {
+            var parts = key.split(',');
+            cellState[Number(parts[0])][Number(parts[1])] = CELL_REVEALED;
+        });
+        window.parent.postMessage({ type: "game_event", eventType: "game_end", data: { score: 0 } }, "*");
+        return;
+    }
+
+    // 翻开格子
+    revealCell(r, c);
+    checkWin();
+}
+
+// 右键插旗/取消旗
+function toggleFlag(r, c) {
+    if (gameState !== STATE.PLAYING) return;
+    if (cellState[r][c] === CELL_REVEALED) return;
+
+    if (cellState[r][c] === CELL_FLAGGED) {
+        cellState[r][c] = CELL_HIDDEN;
+        flagCount--;
+    } else {
+        cellState[r][c] = CELL_FLAGGED;
+        flagCount++;
+    }
+}
+
+// 重新开始游戏
+function resetGame() {
+    initBoard();
+    gameState = STATE.PLAYING;
+    window.parent.postMessage({ type: "game_event", eventType: "game_start", data: { gameType: "扫雷" } }, "*");
+}
+
+// ============================================================
+// 绘制辅助
+// ============================================================
+
+// 圆角矩形（兼容性更好）
+function drawRoundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+// 绘制红色地雷图标
+function drawMineIcon(cx, cy, size) {
+    var r = size * 0.22;
+    // 雷刺
+    ctx.strokeStyle = '#F44336';
+    ctx.lineWidth = Math.max(2, size * 0.04);
+    for (var i = 0; i < 8; i++) {
+        var angle = (Math.PI * 2 / 8) * i;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * r * 0.5, cy + Math.sin(angle) * r * 0.5);
+        ctx.lineTo(cx + Math.cos(angle) * r * 1.6, cy + Math.sin(angle) * r * 1.6);
+        ctx.stroke();
+    }
+    // 雷身体
+    ctx.fillStyle = '#F44336';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    // 高光
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// ============================================================
+// 绘制相关
+// ============================================================
+
+// 获取布局参数
+function getLayout() {
+    var w = canvas.width;
+    var h = canvas.height;
+    var maxCellSize = 60;
+    var headerH = 70;
+    var availH = h - headerH - 40;
+    var availW = w - 40;
+    var cellSize = Math.min(
+        Math.floor(availW / GRID_COLS),
+        Math.floor(availH / GRID_ROWS),
+        maxCellSize
+    );
+    var boardW = cellSize * GRID_COLS;
+    var boardH = cellSize * GRID_ROWS;
+    var boardX = Math.floor((w - boardW) / 2);
+    var boardY = headerH + Math.floor((h - headerH - boardH) / 2);
+    return { cellSize: cellSize, boardX: boardX, boardY: boardY, boardW: boardW, boardH: boardH, headerH: headerH, w: w, h: h };
+}
+
+// 绘制渐变背景（深灰色）
+function drawBackground() {
+    ctx.fillStyle = '#2d2d2d';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// 绘制顶部信息栏
+function drawHeader(layout) {
+    var w = layout.w;
+    var boardX = layout.boardX;
+    var boardW = layout.boardW;
+
+    // 标题
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('扫雷', w / 2, 30);
+
+    // 剩余雷数（左侧）
+    var remainMines = MINE_COUNT - flagCount;
+    ctx.fillStyle = '#FF5252';
+    ctx.font = 'bold 20px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('💣 ' + remainMines, boardX, 55);
+
+    // 计时器（右侧）
+    ctx.fillStyle = '#FFD740';
+    ctx.font = 'bold 20px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('⏱ ' + timer + 's', boardX + boardW, 55);
+}
+
+// 绘制单个格子
+function drawCell(x, y, size, r, c) {
+    var state = cellState[r][c];
+    var value = board[r][c];
+    var padding = 2;
+
+    if (state === CELL_HIDDEN) {
+        // 未翻开 - 深灰色凸起效果
+        ctx.fillStyle = '#555555';
+        ctx.fillRect(x + padding, y + padding, size - padding * 2, size - padding * 2);
+        // 高光
+        ctx.fillStyle = '#666666';
+        ctx.fillRect(x + padding, y + padding, size - padding * 2, 3);
+        ctx.fillRect(x + padding, y + padding, 3, size - padding * 2);
+        // 阴影
+        ctx.fillStyle = '#444444';
+        ctx.fillRect(x + size - padding - 3, y + padding, 3, size - padding * 2);
+        ctx.fillRect(x + padding, y + size - padding - 3, size - padding * 2, 3);
+
+    } else if (state === CELL_FLAGGED) {
+        // 已插旗 - 深灰色底 + 红色旗帜
+        ctx.fillStyle = '#555555';
+        ctx.fillRect(x + padding, y + padding, size - padding * 2, size - padding * 2);
+        // 旗帜（三角旗）
+        var flagX = x + size / 2;
+        var flagY = y + size / 2;
+        var s = size * 0.22;
+        // 旗杆
+        ctx.strokeStyle = '#CCCCCC';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(flagX - s * 0.2, flagY - s * 1.3);
+        ctx.lineTo(flagX - s * 0.2, flagY + s * 1.3);
+        ctx.stroke();
+        // 旗帜
+        ctx.fillStyle = '#FF5722';
+        ctx.beginPath();
+        ctx.moveTo(flagX - s * 0.2, flagY - s * 1.3);
+        ctx.lineTo(flagX + s * 1.2, flagY - s * 0.5);
+        ctx.lineTo(flagX - s * 0.2, flagY + s * 0.3);
+        ctx.closePath();
+        ctx.fill();
+        // 底座
+        ctx.fillStyle = '#CCCCCC';
+        ctx.fillRect(flagX - s * 0.7, flagY + s * 1.1, s * 1.4, 3);
+
+    } else {
+        // 已翻开 - 浅色格子
+        ctx.fillStyle = '#D0D0D0';
+        ctx.fillRect(x + padding, y + padding, size - padding * 2, size - padding * 2);
+        // 内阴影
+        ctx.strokeStyle = '#B8B8B8';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + padding + 0.5, y + padding + 0.5, size - padding * 2 - 1, size - padding * 2 - 1);
+
+        if (value === -1) {
+            // 地雷背景（踩中的雷用深红色底）
+            if (gameState === STATE.GAMEOVER) {
+                ctx.fillStyle = '#B71C1C';
+                ctx.fillRect(x + padding, y + padding, size - padding * 2, size - padding * 2);
+            }
+            // 红色地雷图标
+            drawMineIcon(x + size / 2, y + size / 2, size);
+
+        } else if (value > 0) {
+            // 数字
+            ctx.fillStyle = NUMBER_COLORS[value];
+            ctx.font = 'bold ' + Math.floor(size * 0.55) + 'px "Microsoft YaHei", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(value.toString(), x + size / 2, y + size / 2 + 1);
+        }
+    }
+}
+
+// 绘制键盘光标
+function drawCursor(layout) {
+    if (gameState !== STATE.PLAYING) return;
+    var x = layout.boardX + cursorC * layout.cellSize;
+    var y = layout.boardY + cursorR * layout.cellSize;
+    ctx.strokeStyle = '#FFD740';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x + 1, y + 1, layout.cellSize - 2, layout.cellSize - 2);
+}
+
+// 绘制棋盘
+function drawBoard(layout) {
+    var cellSize = layout.cellSize;
+    var boardX = layout.boardX;
+    var boardY = layout.boardY;
+
+    // 棋盘外框
+    ctx.fillStyle = '#808080';
+    ctx.fillRect(boardX - 4, boardY - 4, cellSize * GRID_COLS + 8, cellSize * GRID_ROWS + 8);
+
+    // 绘制每个格子
+    for (var r = 0; r < GRID_ROWS; r++) {
+        for (var c = 0; c < GRID_COLS; c++) {
+            var x = boardX + c * cellSize;
+            var y = boardY + r * cellSize;
+            drawCell(x, y, cellSize, r, c);
+        }
+    }
+
+    // 绘制键盘光标
+    drawCursor(layout);
+}
+
+// 绘制开始菜单
+function drawMenu() {
+    drawBackground();
+    var cx = canvas.width / 2;
+    var cy = canvas.height / 2;
+
+    // 标题
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 52px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('扫雷', cx, cy - 120);
+
+    // 副标题
+    ctx.fillStyle = '#AAAAAA';
+    ctx.font = '20px "Microsoft YaHei", sans-serif';
+    ctx.fillText('9x9 棋盘  ·  10 个地雷', cx, cy - 75);
+
+    // 规则说明
+    ctx.fillStyle = '#888888';
+    ctx.font = '16px "Microsoft YaHei", sans-serif';
+    var rules = [
+        '左键点击翻开格子',
+        '右键（长按）插旗标记地雷',
+        '数字表示周围地雷数量',
+        '翻开所有安全格即可获胜'
+    ];
+    for (var i = 0; i < rules.length; i++) {
+        ctx.fillText(rules[i], cx, cy - 30 + i * 26);
+    }
+
+    // 开始按钮
+    var btnW = 260, btnH = 60;
+    var btnX = cx - btnW / 2, btnY = cy + 100;
+    ctx.fillStyle = '#4CAF50';
+    drawRoundRect(btnX, btnY, btnW, btnH, 12);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 28px "Microsoft YaHei", sans-serif';
+    ctx.fillText('开始游戏', cx, btnY + 30);
+}
+
+// 绘制游戏结束界面
+function drawGameOverScreen() {
+    var layout = getLayout();
+    drawHeader(layout);
+    drawBoard(layout);
+
+    // 半透明遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    var cx = canvas.width / 2;
+    var cy = canvas.height / 2;
+
+    ctx.fillStyle = '#F44336';
+    ctx.font = 'bold 48px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('踩到地雷！', cx, cy - 60);
+
+    ctx.fillStyle = '#CCCCCC';
+    ctx.font = '22px "Microsoft YaHei", sans-serif';
+    ctx.fillText('用时: ' + timer + ' 秒', cx, cy - 10);
+
+    // 再来一局按钮
+    var btnW = 260, btnH = 60;
+    var btnX = cx - btnW / 2, btnY = cy + 30;
+    ctx.fillStyle = '#4CAF50';
+    drawRoundRect(btnX, btnY, btnW, btnH, 12);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 26px "Microsoft YaHei", sans-serif';
+    ctx.fillText('再来一局', cx, btnY + 30);
+}
+
+// 绘制胜利界面
+function drawWonScreen() {
+    var layout = getLayout();
+    drawHeader(layout);
+    drawBoard(layout);
+
+    // 半透明遮罩
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    var cx = canvas.width / 2;
+    var cy = canvas.height / 2;
+
+    ctx.fillStyle = '#4CAF50';
+    ctx.font = 'bold 48px "Microsoft YaHei", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('恭喜通关！', cx, cy - 80);
+
+    var score = Math.max(1, 1000 - timer * 2);
+
+    ctx.fillStyle = '#FFD740';
+    ctx.font = 'bold 26px "Microsoft YaHei", sans-serif';
+    ctx.fillText('用时: ' + timer + ' 秒', cx, cy - 30);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '22px "Microsoft YaHei", sans-serif';
+    ctx.fillText('得分: ' + score, cx, cy + 5);
+
+    // 再来一局按钮
+    var btnW = 260, btnH = 60;
+    var btnX = cx - btnW / 2, btnY = cy + 40;
+    ctx.fillStyle = '#4CAF50';
+    drawRoundRect(btnX, btnY, btnW, btnH, 12);
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 26px "Microsoft YaHei", sans-serif';
+    ctx.fillText('再来一局', cx, btnY + 30);
+}
+
+// 主绘制函数
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (gameState === STATE.MENU) {
+        drawMenu();
+    } else if (gameState === STATE.GAMEOVER) {
+        drawGameOverScreen();
+    } else if (gameState === STATE.WON) {
+        drawWonScreen();
+    } else {
+        drawBackground();
+        var layout = getLayout();
+        drawHeader(layout);
+        drawBoard(layout);
+    }
+}
+
+// 游戏主循环（需要持续重绘以更新计时器）
+function gameLoop() {
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+// 输入处理
+// ============================================================
+
+// 获取点击的格子坐标
+function getCellAt(clientX, clientY) {
+    var layout = getLayout();
+    var cellSize = layout.cellSize;
+    var boardX = layout.boardX;
+    var boardY = layout.boardY;
+    var c = Math.floor((clientX - boardX) / cellSize);
+    var r = Math.floor((clientY - boardY) / cellSize);
+    if (r >= 0 && r < GRID_ROWS && c >= 0 && c < GRID_COLS) {
+        return { r: r, c: c };
+    }
+    return null;
+}
+
+// 获取按钮区域
+function getStartBtn() {
+    var cx = canvas.width / 2;
+    var cy = canvas.height / 2;
+    var btnW = 260, btnH = 60;
+    return { x: cx - btnW / 2, y: cy + 100, w: btnW, h: btnH };
+}
+
+function getRestartBtn() {
+    var cx = canvas.width / 2;
+    var cy = canvas.height / 2;
+    var btnW = 260, btnH = 60;
+    var btnY = (gameState === STATE.WON) ? cy + 40 : cy + 30;
+    return { x: cx - btnW / 2, y: btnY, w: btnW, h: btnH };
+}
+
+function isInBtn(btn, px, py) {
+    return px >= btn.x && px <= btn.x + btn.w && py >= btn.y && py <= btn.y + btn.h;
+}
+
+// 鼠标左键点击
+canvas.addEventListener('click', function(e) {
+    var px = e.clientX, py = e.clientY;
+
+    if (gameState === STATE.MENU) {
+        if (isInBtn(getStartBtn(), px, py)) {
+            resetGame();
+        }
+        return;
+    }
+
+    if (gameState === STATE.GAMEOVER || gameState === STATE.WON) {
+        if (isInBtn(getRestartBtn(), px, py)) {
+            resetGame();
+        }
+        return;
+    }
+
+    if (gameState !== STATE.PLAYING) return;
+
+    var cell = getCellAt(px, py);
+    if (cell) {
+        clickCell(cell.r, cell.c);
+    }
+});
+
+// 鼠标右键 - 插旗
+canvas.addEventListener('contextmenu', function(e) {
+    e.preventDefault();
+    if (gameState !== STATE.PLAYING) return;
+
+    var cell = getCellAt(e.clientX, e.clientY);
+    if (cell) {
+        toggleFlag(cell.r, cell.c);
+    }
+});
+
+// 触屏支持（短按=翻开，长按=插旗）
+var touchStartTime = 0;
+var touchStartPos = { x: 0, y: 0 };
+var longPressTimer = null;
+var touchDidLongPress = false;
+
+canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    var touch = e.touches[0];
+    touchStartPos = { x: touch.clientX, y: touch.clientY };
+    touchStartTime = Date.now();
+    touchDidLongPress = false;
+
+    if (gameState === STATE.MENU) {
+        if (isInBtn(getStartBtn(), touch.clientX, touch.clientY)) {
+            resetGame();
+        }
+        return;
+    }
+    if (gameState === STATE.GAMEOVER || gameState === STATE.WON) {
+        if (isInBtn(getRestartBtn(), touch.clientX, touch.clientY)) {
+            resetGame();
+        }
+        return;
+    }
+
+    // 长按 = 插旗
+    if (gameState === STATE.PLAYING) {
+        longPressTimer = setTimeout(function() {
+            touchDidLongPress = true;
+            var cell = getCellAt(touchStartPos.x, touchStartPos.y);
+            if (cell) {
+                toggleFlag(cell.r, cell.c);
+            }
+            longPressTimer = null;
+        }, 500);
+    }
+}, { passive: false });
+
+canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+
+    // 清除长按计时器
+    if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+    }
+
+    if (gameState !== STATE.PLAYING) return;
+    if (touchDidLongPress) return;
+
+    var touch = e.changedTouches[0];
+    var dt = Date.now() - touchStartTime;
+
+    // 短按 = 翻开
+    if (dt < 500) {
+        var cell = getCellAt(touch.clientX, touch.clientY);
+        if (cell) {
+            clickCell(cell.r, cell.c);
+        }
+    }
+}, { passive: false });
+
+// 键盘支持（方向键移动光标，空格翻开，F键插旗）
+var cursorR = 0, cursorC = 0;
+
+document.addEventListener('keydown', function(e) {
+    if (gameState === STATE.MENU) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            resetGame();
+        }
+        return;
+    }
+
+    if (gameState === STATE.GAMEOVER || gameState === STATE.WON) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            resetGame();
+        }
+        return;
+    }
+
+    if (gameState !== STATE.PLAYING) return;
+
+    switch (e.key) {
+        case 'ArrowUp':
+            cursorR = Math.max(0, cursorR - 1);
+            e.preventDefault();
+            break;
+        case 'ArrowDown':
+            cursorR = Math.min(GRID_ROWS - 1, cursorR + 1);
+            e.preventDefault();
+            break;
+        case 'ArrowLeft':
+            cursorC = Math.max(0, cursorC - 1);
+            e.preventDefault();
+            break;
+        case 'ArrowRight':
+            cursorC = Math.min(GRID_COLS - 1, cursorC + 1);
+            e.preventDefault();
+            break;
+        case ' ':
+        case 'Enter':
+            clickCell(cursorR, cursorC);
+            e.preventDefault();
+            break;
+        case 'f':
+        case 'F':
+            toggleFlag(cursorR, cursorC);
+            e.preventDefault();
+            break;
+    }
+});
+
+// 启动游戏
+initBoard();
+gameLoop();
+</script>
+</body>
+</html>

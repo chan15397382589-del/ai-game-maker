@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>像素无尽跑酷</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #f7f7f7; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+(function() {
+    "use strict";
+
+    // ========== 画布初始化 ==========
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    // ========== 颜色常量 ==========
+    const BG_SKY = "#87CEEB";         // 天空蓝
+    const BG_FAR = "#a8d8ea";         // 远山色
+    const BG_NEAR = "#7ec8c8";        // 近山色
+    const GROUND_COLOR = "#8B7355";   // 地面土色
+    const GROUND_TOP = "#6B8E23";     // 地面草地
+    const LINE_COLOR = "#5a4a3a";     // 地面纹理
+    const CACTUS_COLOR = "#2d8a4e";   // 仙人掌绿
+    const CACTUS_DARK = "#1a6b35";    // 仙人掌深色
+    const BIRD_COLOR = "#555555";     // 飞鸟颜色
+    const ROBOT_BODY = "#6a6a8a";     // 机器人身体
+    const ROBOT_HEAD = "#7a7a9a";     // 机器人头
+    const ROBOT_EYE = "#00ccff";      // 机器人眼睛
+    const ROBOT_ACCENT = "#ff6644";   // 机器人装饰
+    const TEXT_COLOR = "#333333";
+
+    // ========== 游戏状态 ==========
+    const STATE = { MENU: 0, PLAYING: 1, OVER: 2 };
+    let gameState = STATE.MENU;
+    let score = 0;
+    let distance = 0;
+    let speed = 5;
+    let speedTimer = 0;
+
+    // ========== 角色 ==========
+    let robot = {
+        x: 0,
+        y: 0,
+        baseY: 0,
+        width: 0,
+        height: 0,
+        normalHeight: 0,
+        duckHeight: 0,
+        vy: 0,
+        jumping: false,
+        ducking: false,
+        runFrame: 0,
+        frameTimer: 0
+    };
+
+    // ========== 场景 ==========
+    let obstacles = [];       // 障碍物数组
+    let groundLines = [];     // 地面纹理
+    let clouds = [];          // 云
+    let mountains = [];       // 远山
+
+    // ========== 输入 ==========
+    let keys = {};
+
+    document.addEventListener("keydown", function(e) {
+        keys[e.code] = true;
+
+        if (gameState === STATE.MENU) {
+            if (e.code === "Space" || e.code === "Enter") {
+                e.preventDefault();
+                startGame();
+            }
+            return;
+        }
+        if (gameState === STATE.OVER) {
+            if (e.code === "Space" || e.code === "Enter") {
+                e.preventDefault();
+                startGame();
+            }
+            return;
+        }
+        if (gameState === STATE.PLAYING) {
+            if (e.code === "Space" || e.code === "ArrowUp" || e.code === "KeyW") {
+                e.preventDefault();
+                doJump();
+            }
+            if (e.code === "ArrowDown" || e.code === "KeyS") {
+                e.preventDefault();
+                robot.ducking = true;
+            }
+        }
+    });
+
+    document.addEventListener("keyup", function(e) {
+        keys[e.code] = false;
+        if (e.code === "ArrowDown" || e.code === "KeyS") {
+            robot.ducking = false;
+        }
+    });
+
+    // 触控：上半屏跳跃，下半屏下蹲
+    canvas.addEventListener("touchstart", function(e) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const ty = touch.clientY;
+
+        if (gameState === STATE.MENU) {
+            startGame();
+            return;
+        }
+        if (gameState === STATE.OVER) {
+            // 检查是否点了再来一局
+            const btnY = canvas.height / 2 + 100;
+            if (Math.abs(ty - btnY) < 50) {
+                startGame();
+            }
+            return;
+        }
+        if (gameState === STATE.PLAYING) {
+            if (ty < canvas.height * 0.5) {
+                doJump();
+            } else {
+                robot.ducking = true;
+                setTimeout(function() { robot.ducking = false; }, 400);
+            }
+        }
+    }, { passive: false });
+
+    function doJump() {
+        if (!robot.jumping) {
+            robot.vy = -15;
+            robot.jumping = true;
+            robot.ducking = false;
+        }
+    }
+
+    // ========== 初始化 ==========
+    function getGroundY() {
+        return canvas.height * 0.78;
+    }
+
+    function initClouds() {
+        clouds = [];
+        for (let i = 0; i < 6; i++) {
+            clouds.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height * 0.35 + 20,
+                size: Math.random() * 40 + 30,
+                speed: Math.random() * 0.3 + 0.1
+            });
+        }
+    }
+
+    function initMountains() {
+        mountains = [];
+        for (let i = 0; i < 8; i++) {
+            mountains.push({
+                x: i * canvas.width / 4,
+                width: Math.random() * 200 + 150,
+                height: Math.random() * 100 + 80,
+                color: Math.random() < 0.5 ? BG_FAR : BG_NEAR,
+                speed: 0.3
+            });
+        }
+    }
+
+    function initGroundLines() {
+        groundLines = [];
+        for (let i = 0; i < 20; i++) {
+            groundLines.push({
+                x: Math.random() * canvas.width * 2,
+                width: Math.random() * 30 + 10
+            });
+        }
+    }
+
+    function startGame() {
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: "game_event",
+                eventType: "game_start",
+                data: { gameType: "像素无尽跑酷" }
+            }, "*");
+        }
+
+        score = 0;
+        distance = 0;
+        speed = 5;
+        speedTimer = 0;
+        obstacles = [];
+
+        const groundY = getGroundY();
+        robot.width = Math.min(canvas.width * 0.045, 36);
+        robot.normalHeight = robot.width * 1.8;
+        robot.duckHeight = robot.width * 1.0;
+        robot.height = robot.normalHeight;
+        robot.x = canvas.width * 0.12;
+        robot.baseY = groundY;
+        robot.y = groundY;
+        robot.vy = 0;
+        robot.jumping = false;
+        robot.ducking = false;
+        robot.runFrame = 0;
+        robot.frameTimer = 0;
+
+        initClouds();
+        initMountains();
+        initGroundLines();
+
+        gameState = STATE.PLAYING;
+    }
+
+    // ========== 障碍物生成 ==========
+    function spawnCactus() {
+        const groundY = getGroundY();
+        const types = [
+            { w: 18, h: 40 },  // 小仙人掌
+            { w: 22, h: 55 },  // 中仙人掌
+            { w: 16, h: 30, double: true },  // 双仙人掌
+            { w: 26, h: 70 }   // 大仙人掌
+        ];
+        const t = types[Math.floor(Math.random() * types.length)];
+        obstacles.push({
+            type: "cactus",
+            x: canvas.width + 50,
+            y: groundY - t.h,
+            width: t.w,
+            height: t.h,
+            double: t.double || false
+        });
+    }
+
+    function spawnBird() {
+        const groundY = getGroundY();
+        // 飞鸟在不同高度：高（需下蹲躲）或中等（需下蹲躲）
+        const birdY = groundY - robot.normalHeight - 10 - Math.random() * 30;
+        obstacles.push({
+            type: "bird",
+            x: canvas.width + 50,
+            y: birdY,
+            width: 35,
+            height: 20,
+            wingFrame: 0,
+            wingTimer: 0,
+            bobOffset: 0
+        });
+    }
+
+    // ========== 辅助：矩形绘制 ==========
+    function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    // ========== 绘制：背景 ==========
+    function drawBackground() {
+        // 天空渐变
+        const grad = ctx.createLinearGradient(0, 0, 0, getGroundY());
+        grad.addColorStop(0, "#5ba3d9");
+        grad.addColorStop(0.6, "#87CEEB");
+        grad.addColorStop(1, "#b8e4f0");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, canvas.width, getGroundY());
+
+        // 远山（三角形视差）
+        for (let i = 0; i < mountains.length; i++) {
+            const m = mountains[i];
+            ctx.fillStyle = m.color;
+            ctx.beginPath();
+            ctx.moveTo(m.x, getGroundY());
+            ctx.lineTo(m.x + m.width / 2, getGroundY() - m.height);
+            ctx.lineTo(m.x + m.width, getGroundY());
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // 云（圆形组合）
+        for (let i = 0; i < clouds.length; i++) {
+            const c = clouds[i];
+            ctx.fillStyle = "rgba(255,255,255,0.85)";
+            ctx.beginPath();
+            ctx.arc(c.x, c.y, c.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(c.x - c.size * 0.6, c.y + c.size * 0.2, c.size * 0.7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(c.x + c.size * 0.7, c.y + c.size * 0.15, c.size * 0.65, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // ========== 绘制：地面 ==========
+    function drawGround() {
+        const groundY = getGroundY();
+        const groundH = canvas.height - groundY;
+
+        // 草地顶部
+        ctx.fillStyle = GROUND_TOP;
+        ctx.fillRect(0, groundY, canvas.width, 6);
+
+        // 泥土
+        ctx.fillStyle = GROUND_COLOR;
+        ctx.fillRect(0, groundY + 6, canvas.width, groundH - 6);
+
+        // 地面纹理（短线段）
+        ctx.strokeStyle = LINE_COLOR;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < groundLines.length; i++) {
+            const gl = groundLines[i];
+            ctx.beginPath();
+            ctx.moveTo(gl.x, groundY + 15 + (i % 3) * 12);
+            ctx.lineTo(gl.x + gl.width, groundY + 15 + (i % 3) * 12);
+            ctx.stroke();
+        }
+    }
+
+    // ========== 绘制：小机器人 ==========
+    function drawRobot(x, y, w, h, ducking, jumping, frame) {
+        const px = Math.floor; // 像素化取整
+
+        if (ducking) {
+            // 下蹲姿态：矮而宽
+            const dw = w * 1.3;
+            const dh = h * 0.6;
+
+            // 身体（扁方形）
+            ctx.fillStyle = ROBOT_BODY;
+            roundRect(ctx, px(x - dw/2), px(y - dh), px(dw), px(dh), 3);
+            ctx.fill();
+
+            // 头部（小方块）
+            ctx.fillStyle = ROBOT_HEAD;
+            roundRect(ctx, px(x - dw/2 + 2), px(y - dh - dw * 0.4), px(dw * 0.6), px(dw * 0.4), 2);
+            ctx.fill();
+
+            // 眼睛
+            ctx.fillStyle = ROBOT_EYE;
+            ctx.fillRect(px(x - dw/2 + 6), px(y - dh - dw * 0.3), 4, 3);
+            ctx.fillRect(px(x - dw/2 + 14), px(y - dh - dw * 0.3), 4, 3);
+
+            // 装饰条纹
+            ctx.fillStyle = ROBOT_ACCENT;
+            ctx.fillRect(px(x - dw/2 + 3), px(y - dh/2 - 2), px(dw - 6), 3);
+
+            // 小轮子/脚
+            ctx.fillStyle = "#444466";
+            ctx.fillRect(px(x - dw/2 + 2), px(y - 5), 6, 5);
+            ctx.fillRect(px(x + dw/2 - 8), px(y - 5), 6, 5);
+
+        } else {
+            // 站立/跳跃姿态
+            // 身体
+            ctx.fillStyle = ROBOT_BODY;
+            roundRect(ctx, px(x - w/2), px(y - h * 0.65), px(w), px(h * 0.55), 3);
+            ctx.fill();
+
+            // 头部
+            ctx.fillStyle = ROBOT_HEAD;
+            const headH = h * 0.35;
+            const headW = w * 0.85;
+            roundRect(ctx, px(x - headW/2), px(y - h), px(headW), px(headH), 3);
+            ctx.fill();
+
+            // 天线
+            ctx.strokeStyle = ROBOT_ACCENT;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(px(x), px(y - h));
+            ctx.lineTo(px(x), px(y - h - 8));
+            ctx.stroke();
+            ctx.fillStyle = ROBOT_ACCENT;
+            ctx.beginPath();
+            ctx.arc(px(x), px(y - h - 10), 3, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 眼睛
+            ctx.fillStyle = ROBOT_EYE;
+            const eyeSize = 4;
+            ctx.fillRect(px(x - headW/2 + 6), px(y - h + headH * 0.35), eyeSize, eyeSize);
+            ctx.fillRect(px(x + headW/2 - 10), px(y - h + headH * 0.35), eyeSize, eyeSize);
+
+            // 装饰条纹
+            ctx.fillStyle = ROBOT_ACCENT;
+            ctx.fillRect(px(x - w/2 + 3), px(y - h * 0.45), px(w - 6), 3);
+
+            // 手臂
+            const armSwing = jumping ? -0.5 : Math.sin(frame) * 0.5;
+            ctx.strokeStyle = ROBOT_BODY;
+            ctx.lineWidth = 4;
+            ctx.lineCap = "round";
+
+            // 左臂
+            ctx.beginPath();
+            ctx.moveTo(px(x - w/2), px(y - h * 0.55));
+            ctx.lineTo(px(x - w/2 - 8), px(y - h * 0.35 + Math.sin(armSwing) * 6));
+            ctx.stroke();
+
+            // 右臂
+            ctx.beginPath();
+            ctx.moveTo(px(x + w/2), px(y - h * 0.55));
+            ctx.lineTo(px(x + w/2 + 8), px(y - h * 0.35 - Math.sin(armSwing) * 6));
+            ctx.stroke();
+
+            // 腿
+            const legSwing = jumping ? 0.3 : Math.sin(frame) * 0.5;
+            ctx.strokeStyle = "#444466";
+            ctx.lineWidth = 4;
+
+            // 左腿
+            ctx.beginPath();
+            ctx.moveTo(px(x - w * 0.2), px(y - h * 0.1));
+            ctx.lineTo(px(x - w * 0.3 + Math.sin(legSwing) * 5), px(y));
+            ctx.stroke();
+
+            // 右腿
+            ctx.beginPath();
+            ctx.moveTo(px(x + w * 0.2), px(y - h * 0.1));
+            ctx.lineTo(px(x + w * 0.3 - Math.sin(legSwing) * 5), px(y));
+            ctx.stroke();
+
+            // 鞋子
+            ctx.fillStyle = ROBOT_ACCENT;
+            ctx.fillRect(px(x - w * 0.35 + Math.sin(legSwing) * 5 - 3), px(y - 3), 7, 4);
+            ctx.fillRect(px(x + w * 0.25 - Math.sin(legSwing) * 5 - 3), px(y - 3), 7, 4);
+        }
+    }
+
+    // ========== 绘制：仙人掌 ==========
+    function drawCactus(ob) {
+        const x = ob.x;
+        const y = ob.y;
+        const w = ob.width;
+        const h = ob.height;
+
+        // 主干
+        ctx.fillStyle = CACTUS_COLOR;
+        roundRect(ctx, x, y, w, h, 3);
+        ctx.fill();
+
+        // 深色纹理
+        ctx.fillStyle = CACTUS_DARK;
+        ctx.fillRect(x + 3, y + h * 0.2, 3, h * 0.3);
+        ctx.fillRect(x + w - 6, y + h * 0.4, 3, h * 0.3);
+
+        // 左臂
+        if (h > 35) {
+            ctx.fillStyle = CACTUS_COLOR;
+            roundRect(ctx, x - w * 0.4, y + h * 0.3, w * 0.4, 8, 3);
+            ctx.fill();
+            roundRect(ctx, x - w * 0.4, y + h * 0.15, 8, h * 0.15 + 5, 3);
+            ctx.fill();
+        }
+
+        // 右臂
+        if (h > 45) {
+            ctx.fillStyle = CACTUS_COLOR;
+            roundRect(ctx, x + w, y + h * 0.45, w * 0.35, 8, 3);
+            ctx.fill();
+            roundRect(ctx, x + w + w * 0.35 - 8, y + h * 0.3, 8, h * 0.15 + 5, 3);
+            ctx.fill();
+        }
+
+        // 双仙人掌
+        if (ob.double) {
+            ctx.fillStyle = CACTUS_COLOR;
+            roundRect(ctx, x + w + 10, y + 10, w * 0.7, h - 10, 3);
+            ctx.fill();
+            ctx.fillStyle = CACTUS_DARK;
+            ctx.fillRect(x + w + 13, y + h * 0.35, 3, h * 0.25);
+        }
+    }
+
+    // ========== 绘制：飞鸟 ==========
+    function drawBird(ob) {
+        const x = ob.x;
+        const y = ob.y + ob.bobOffset;
+        const w = ob.width;
+        const h = ob.height;
+        const wingAngle = Math.sin(ob.wingFrame) * 0.6;
+
+        ctx.save();
+        ctx.translate(x + w/2, y + h/2);
+
+        // V形翅膀
+        ctx.strokeStyle = BIRD_COLOR;
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+
+        // 左翅膀
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-w * 0.5, -h * 0.6 * (1 + wingAngle));
+        ctx.stroke();
+
+        // 右翅膀
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(w * 0.5, -h * 0.6 * (1 + wingAngle));
+        ctx.stroke();
+
+        // 身体
+        ctx.fillStyle = BIRD_COLOR;
+        ctx.beginPath();
+        ctx.ellipse(0, 2, w * 0.2, h * 0.25, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 嘴
+        ctx.fillStyle = "#ff8844";
+        ctx.beginPath();
+        ctx.moveTo(w * 0.2, 2);
+        ctx.lineTo(w * 0.35, 0);
+        ctx.lineTo(w * 0.2, 4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    // ========== 绘制：HUD ==========
+    function drawHUD() {
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.textAlign = "right";
+        ctx.textBaseline = "top";
+        ctx.font = "bold " + Math.min(canvas.width * 0.05, 36) + "px Arial, sans-serif";
+        ctx.fillText("得分: " + score, canvas.width - 20, 20);
+
+        ctx.font = Math.min(canvas.width * 0.03, 18) + "px Arial, sans-serif";
+        ctx.fillStyle = "#888888";
+        ctx.fillText("速度: " + speed.toFixed(1), canvas.width - 20, 60);
+    }
+
+    // ========== 菜单 ==========
+    function drawMenu() {
+        drawBackground();
+        drawGround();
+
+        // 标题
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "bold " + Math.min(canvas.width * 0.07, 52) + "px Arial, sans-serif";
+        ctx.fillText("像素无尽跑酷", canvas.width / 2, canvas.height / 2 - 130);
+
+        // 机器人预览
+        drawRobot(canvas.width / 2, canvas.height / 2 + 10, 36, 65, false, false, 0);
+
+        // 提示
+        ctx.font = Math.min(canvas.width * 0.035, 20) + "px Arial, sans-serif";
+        ctx.fillStyle = "#666666";
+        ctx.fillText("空格/上键: 跳跃  |  下键: 下蹲", canvas.width / 2, canvas.height / 2 + 60);
+
+        // 开始按钮
+        drawBtn(canvas.width / 2, canvas.height / 2 + 120, 240, 60, "按空格开始");
+    }
+
+    function drawBtn(cx, cy, w, h, text) {
+        ctx.fillStyle = "rgba(106,106,138,0.12)";
+        roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
+        ctx.fill();
+
+        ctx.strokeStyle = ROBOT_BODY;
+        ctx.lineWidth = 2;
+        roundRect(ctx, cx - w/2, cy - h/2, w, h, 10);
+        ctx.stroke();
+
+        ctx.fillStyle = ROBOT_BODY;
+        ctx.font = "bold " + Math.min(24, h * 0.4) + "px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, cx, cy);
+    }
+
+    function drawOver() {
+        // 遮罩
+        ctx.fillStyle = "rgba(247,247,247,0.85)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        ctx.font = "bold " + Math.min(canvas.width * 0.07, 52) + "px Arial, sans-serif";
+        ctx.fillText("游戏结束", canvas.width / 2, canvas.height / 2 - 100);
+
+        ctx.fillStyle = ROBOT_ACCENT;
+        ctx.font = "bold " + Math.min(canvas.width * 0.13, 85) + "px Arial, sans-serif";
+        ctx.fillText(score, canvas.width / 2, canvas.height / 2 - 20);
+
+        ctx.fillStyle = "#888888";
+        ctx.font = Math.min(canvas.width * 0.04, 22) + "px Arial, sans-serif";
+        ctx.fillText("分", canvas.width / 2, canvas.height / 2 + 30);
+
+        drawBtn(canvas.width / 2, canvas.height / 2 + 100, 240, 60, "再来一局");
+    }
+
+    // ========== 游戏结束 ==========
+    function gameOver() {
+        gameState = STATE.OVER;
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: "game_event",
+                eventType: "game_end",
+                data: { score: score }
+            }, "*");
+        }
+    }
+
+    // ========== 更新 ==========
+    function update() {
+        if (gameState !== STATE.PLAYING) return;
+
+        // 加速
+        speedTimer++;
+        if (speedTimer > 250) {
+            speed += 0.3;
+            speedTimer = 0;
+        }
+
+        // 距离和分数
+        distance += speed;
+        score = Math.floor(distance / 10);
+
+        // 跑步动画
+        robot.frameTimer++;
+        if (robot.frameTimer > 3) {
+            robot.frameTimer = 0;
+            robot.runFrame += 0.4;
+        }
+
+        // 跳跃物理
+        if (robot.jumping) {
+            robot.vy += 0.8;
+            robot.y += robot.vy;
+            if (robot.y >= robot.baseY) {
+                robot.y = robot.baseY;
+                robot.vy = 0;
+                robot.jumping = false;
+            }
+        }
+
+        // 更新角色高度（下蹲时变矮）
+        const targetH = robot.ducking ? robot.duckHeight : robot.normalHeight;
+        robot.height += (targetH - robot.height) * 0.3;
+
+        // 云移动（视差）
+        for (let i = 0; i < clouds.length; i++) {
+            clouds[i].x -= clouds[i].speed * (speed / 5);
+            if (clouds[i].x < -clouds[i].size * 2) {
+                clouds[i].x = canvas.width + clouds[i].size;
+                clouds[i].y = Math.random() * canvas.height * 0.35 + 20;
+            }
+        }
+
+        // 山移动（视差）
+        for (let i = 0; i < mountains.length; i++) {
+            mountains[i].x -= mountains[i].speed * (speed / 5);
+            if (mountains[i].x + mountains[i].width < -10) {
+                mountains[i].x = canvas.width + Math.random() * 200;
+                mountains[i].height = Math.random() * 100 + 80;
+                mountains[i].width = Math.random() * 200 + 150;
+            }
+        }
+
+        // 地面纹理移动
+        for (let i = 0; i < groundLines.length; i++) {
+            groundLines[i].x -= speed;
+            if (groundLines[i].x + groundLines[i].width < 0) {
+                groundLines[i].x = canvas.width + Math.random() * 100;
+                groundLines[i].width = Math.random() * 30 + 10;
+            }
+        }
+
+        // 障碍物移动
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            const ob = obstacles[i];
+            ob.x -= speed;
+
+            // 飞鸟动画
+            if (ob.type === "bird") {
+                ob.wingTimer++;
+                if (ob.wingTimer > 4) {
+                    ob.wingTimer = 0;
+                    ob.wingFrame += 0.4;
+                }
+                ob.bobOffset = Math.sin(Date.now() * 0.003 + i) * 8;
+            }
+
+            if (ob.x + ob.width < -50) {
+                obstacles.splice(i, 1);
+            }
+        }
+
+        // 生成障碍物
+        let maxObsX = 0;
+        for (let i = 0; i < obstacles.length; i++) {
+            if (obstacles[i].x > maxObsX) maxObsX = obstacles[i].x;
+        }
+        if (maxObsX < canvas.width) {
+            const gap = Math.max(200, 400 - speed * 15);
+            const spawnX = canvas.width + Math.random() * gap;
+            if (Math.random() < 0.7) {
+                spawnCactus();
+            } else {
+                spawnBird();
+            }
+        }
+
+        // 碰撞检测
+        const rx = robot.x - robot.width * 0.35;
+        const rw = robot.width * 0.7;
+        const ry = robot.y - robot.height;
+        const rh = robot.height;
+
+        for (let i = 0; i < obstacles.length; i++) {
+            const ob = obstacles[i];
+            let ox, oy, ow, oh;
+
+            if (ob.type === "cactus") {
+                ox = ob.x;
+                oy = ob.y;
+                ow = ob.width;
+                oh = ob.height;
+            } else {
+                ox = ob.x;
+                oy = ob.y + ob.bobOffset;
+                ow = ob.width;
+                oh = ob.height;
+            }
+
+            // AABB碰撞
+            if (rx < ox + ow * 0.8 &&
+                rx + rw > ox + ow * 0.2 &&
+                ry < oy + oh * 0.8 &&
+                ry + rh > oy + oh * 0.2) {
+                gameOver();
+                return;
+            }
+        }
+    }
+
+    // ========== 渲染 ==========
+    function render() {
+        switch (gameState) {
+            case STATE.MENU:
+                drawMenu();
+                break;
+            case STATE.PLAYING:
+                drawBackground();
+                drawGround();
+
+                // 障碍物
+                for (let i = 0; i < obstacles.length; i++) {
+                    if (obstacles[i].type === "cactus") {
+                        drawCactus(obstacles[i]);
+                    } else {
+                        drawBird(obstacles[i]);
+                    }
+                }
+
+                // 机器人
+                drawRobot(robot.x, robot.y, robot.width, robot.height,
+                          robot.ducking, robot.jumping, robot.runFrame);
+
+                drawHUD();
+                break;
+            case STATE.OVER:
+                drawBackground();
+                drawGround();
+
+                for (let i = 0; i < obstacles.length; i++) {
+                    if (obstacles[i].type === "cactus") {
+                        drawCactus(obstacles[i]);
+                    } else {
+                        drawBird(obstacles[i]);
+                    }
+                }
+
+                drawRobot(robot.x, robot.y, robot.width, robot.height,
+                          robot.ducking, robot.jumping, robot.runFrame);
+                drawHUD();
+                drawOver();
+                break;
+        }
+    }
+
+    // ========== 主循环 ==========
+    function gameLoop() {
+        update();
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+
+})();
+</script>
+</body>
+</html>

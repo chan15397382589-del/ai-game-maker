@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>别踩白块儿</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #ffffff; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+(function() {
+    "use strict";
+
+    // ========== 画布初始化 ==========
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    resizeCanvas();
+    window.addEventListener("resize", resizeCanvas);
+
+    // ========== 游戏常量 ==========
+    const COLS = 4;                              // 列数
+    const BLOCK_COLOR = "#333333";               // 黑块颜色
+    const BLOCK_PRESSED_COLOR = "#1a1a1a";       // 黑块按下颜色
+    const WHITE_COLOR = "#eeeeee";               // 白块颜色
+    const BG_COLOR = "#ffffff";                  // 背景色
+    const DIVIDER_COLOR = "#cccccc";             // 分隔线颜色
+    const TEXT_COLOR = "#333333";                 // 文字颜色
+    const SPEED_LEVEL_INTERVAL = 10;             // 每10分加速一次
+
+    // ========== 游戏状态 ==========
+    const STATE = { MENU: 0, PLAYING: 1, OVER: 2 };
+    let gameState = STATE.MENU;
+    let score = 0;
+    let speedLevel = 1;
+    let baseSpeed = 3;
+    let currentSpeed = baseSpeed;
+    let rows = [];          // 行数组：每行包含4个方块信息
+    let pressedBlock = null; // 被按下的方块动画
+    let animTimer = 0;
+
+    // ========== 方块行结构 ==========
+    // 每行: { y: number, blocks: [ {col: 0-3, isBlack: bool, pressed: bool} ] }
+
+    function getBlockSize() {
+        const w = canvas.width / COLS;
+        const h = canvas.height / 5;   // 屏幕分成5等份，方便滚动
+        return { w: w, h: h };
+    }
+
+    function createRow(y) {
+        // 随机选一个黑块列
+        const blackCol = Math.floor(Math.random() * COLS);
+        const blocks = [];
+        for (let c = 0; c < COLS; c++) {
+            blocks.push({ col: c, isBlack: (c === blackCol), pressed: false });
+        }
+        return { y: y, blocks: blocks, scored: false };
+    }
+
+    function initGame() {
+        score = 0;
+        speedLevel = 1;
+        baseSpeed = 3;
+        currentSpeed = baseSpeed;
+        rows = [];
+        pressedBlock = null;
+        animTimer = 0;
+
+        const bs = getBlockSize();
+        // 初始化多行，从屏幕顶部往上排列
+        for (let i = -1; i < 6; i++) {
+            rows.push(createRow(-i * bs.h));
+        }
+    }
+
+    // ========== 输入处理 ==========
+    function getInputPos(e) {
+        let clientX, clientY;
+        if (e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else if (e.changedTouches && e.changedTouches.length > 0) {
+            clientX = e.changedTouches[0].clientX;
+            clientY = e.changedTouches[0].clientY;
+        } else {
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+        return { x: clientX, y: clientY };
+    }
+
+    function handleClick(e) {
+        e.preventDefault();
+        const pos = getInputPos(e);
+
+        if (gameState === STATE.MENU) {
+            // 发送游戏开始事件
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({
+                    type: "game_event",
+                    eventType: "game_start",
+                    data: { gameType: "别踩白块儿" }
+                }, "*");
+            }
+            initGame();
+            gameState = STATE.PLAYING;
+            return;
+        }
+
+        if (gameState === STATE.OVER) {
+            if (isClickOnRestart(pos)) {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: "game_event",
+                        eventType: "game_start",
+                        data: { gameType: "别踩白块儿" }
+                    }, "*");
+                }
+                initGame();
+                gameState = STATE.PLAYING;
+            }
+            return;
+        }
+
+        // 游戏中：判断点击了哪个方块
+        if (gameState === STATE.PLAYING) {
+            const bs = getBlockSize();
+            for (let r = 0; r < rows.length; r++) {
+                const row = rows[r];
+                for (let c = 0; c < row.blocks.length; c++) {
+                    const block = row.blocks[c];
+                    const bx = block.col * bs.w;
+                    const by = row.y;
+                    if (pos.x >= bx && pos.x <= bx + bs.w &&
+                        pos.y >= by && pos.y <= by + bs.h) {
+
+                        if (block.isBlack && !row.scored) {
+                            // 点击黑块：加分
+                            row.scored = true;
+                            block.pressed = true;
+                            score++;
+                            updateSpeed();
+                            // 按下动画
+                            pressedBlock = { row: r, col: c, timer: 10 };
+                        } else if (!block.isBlack) {
+                            // 点击白块：游戏结束
+                            gameOver();
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // 鼠标/触控事件
+    canvas.addEventListener("mousedown", handleClick);
+    canvas.addEventListener("touchstart", handleClick, { passive: false });
+
+    // ========== 速度控制 ==========
+    function updateSpeed() {
+        const newLevel = Math.floor(score / SPEED_LEVEL_INTERVAL) + 1;
+        if (newLevel !== speedLevel) {
+            speedLevel = newLevel;
+        }
+        currentSpeed = baseSpeed + (speedLevel - 1) * 0.5;
+    }
+
+    // ========== 游戏结束 ==========
+    function gameOver() {
+        gameState = STATE.OVER;
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({
+                type: "game_event",
+                eventType: "game_end",
+                data: { score: score }
+            }, "*");
+        }
+    }
+
+    // ========== 碰撞检测辅助 ==========
+    function isClickOnRestart(pos) {
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2 + 80;
+        const bw = 200;
+        const bh = 60;
+        return pos.x >= cx - bw/2 && pos.x <= cx + bw/2 &&
+               pos.y >= cy - bh/2 && pos.y <= cy + bh/2;
+    }
+
+    // ========== 绘制函数 ==========
+    function drawMenu() {
+        ctx.fillStyle = BG_COLOR;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 标题
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "bold " + Math.min(canvas.width * 0.08, 60) + "px Arial, sans-serif";
+        ctx.fillText("别踩白块儿", canvas.width / 2, canvas.height / 2 - 100);
+
+        // 副标题
+        ctx.font = Math.min(canvas.width * 0.04, 24) + "px Arial, sans-serif";
+        ctx.fillStyle = "#666666";
+        ctx.fillText("点击黑块得分，点到白块游戏结束", canvas.width / 2, canvas.height / 2 - 40);
+
+        // 开始按钮
+        drawButton(canvas.width / 2, canvas.height / 2 + 60, 220, 64, "开始游戏");
+    }
+
+    function drawButton(cx, cy, w, h, text) {
+        // 按钮阴影
+        ctx.fillStyle = "rgba(0,0,0,0.1)";
+        roundRect(ctx, cx - w/2 + 3, cy - h/2 + 3, w, h, 12);
+        ctx.fill();
+
+        // 按钮背景
+        ctx.fillStyle = BLOCK_COLOR;
+        roundRect(ctx, cx - w/2, cy - h/2, w, h, 12);
+        ctx.fill();
+
+        // 按钮文字
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold " + Math.min(28, h * 0.45) + "px Arial, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, cx, cy);
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    function drawPlaying() {
+        ctx.fillStyle = BG_COLOR;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const bs = getBlockSize();
+
+        // 绘制所有行
+        for (let r = 0; r < rows.length; r++) {
+            const row = rows[r];
+            for (let c = 0; c < row.blocks.length; c++) {
+                const block = row.blocks[c];
+                const bx = block.col * bs.w;
+                const by = row.y;
+
+                // 判断是否是被按下的方块
+                if (pressedBlock && pressedBlock.row === r && pressedBlock.col === c) {
+                    ctx.fillStyle = BLOCK_PRESSED_COLOR;
+                } else if (block.isBlack) {
+                    ctx.fillStyle = BLOCK_COLOR;
+                } else {
+                    ctx.fillStyle = WHITE_COLOR;
+                }
+                ctx.fillRect(bx, by, bs.w, bs.h);
+
+                // 方块边框
+                ctx.strokeStyle = DIVIDER_COLOR;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(bx, by, bs.w, bs.h);
+            }
+        }
+
+        // 绘制列分隔线
+        ctx.strokeStyle = DIVIDER_COLOR;
+        ctx.lineWidth = 1;
+        for (let c = 1; c < COLS; c++) {
+            const x = c * bs.w;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+            ctx.stroke();
+        }
+
+        // 顶部半透明渐变（指示区域）
+        const grad = ctx.createLinearGradient(0, 0, 0, 60);
+        grad.addColorStop(0, "rgba(255,255,255,0.9)");
+        grad.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, canvas.width, 60);
+
+        // 分数显示
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "bold " + Math.min(canvas.width * 0.12, 80) + "px Arial, sans-serif";
+        ctx.fillText(score, canvas.width / 2, 50);
+
+        // 速度等级显示
+        ctx.font = Math.min(canvas.width * 0.035, 18) + "px Arial, sans-serif";
+        ctx.fillStyle = "#999999";
+        ctx.fillText("速度等级: " + speedLevel, canvas.width / 2, 85);
+    }
+
+    function drawOver() {
+        // 保持游戏画面作背景
+        drawPlaying();
+
+        // 半透明遮罩
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // 游戏结束标题
+        ctx.fillStyle = TEXT_COLOR;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = "bold " + Math.min(canvas.width * 0.08, 56) + "px Arial, sans-serif";
+        ctx.fillText("游戏结束", canvas.width / 2, canvas.height / 2 - 100);
+
+        // 得分
+        ctx.fillStyle = BLOCK_COLOR;
+        ctx.font = "bold " + Math.min(canvas.width * 0.14, 90) + "px Arial, sans-serif";
+        ctx.fillText(score, canvas.width / 2, canvas.height / 2 - 20);
+
+        ctx.fillStyle = "#888888";
+        ctx.font = Math.min(canvas.width * 0.04, 22) + "px Arial, sans-serif";
+        ctx.fillText("分", canvas.width / 2, canvas.height / 2 + 30);
+
+        // 再来一局按钮
+        drawButton(canvas.width / 2, canvas.height / 2 + 100, 220, 64, "再来一局");
+    }
+
+    // ========== 主循环 ==========
+    function update() {
+        if (gameState !== STATE.PLAYING) return;
+
+        const bs = getBlockSize();
+
+        // 移动所有行
+        for (let r = 0; r < rows.length; r++) {
+            rows[r].y += currentSpeed;
+        }
+
+        // 检查是否有行移出屏幕底部
+        for (let r = rows.length - 1; r >= 0; r--) {
+            if (rows[r].y > canvas.height + 10) {
+                // 如果有黑块未被点击（漏掉了），游戏结束
+                const hasUnscoredBlack = rows[r].blocks.some(function(b) {
+                    return b.isBlack && !rows[r].scored;
+                });
+                if (hasUnscoredBlack) {
+                    gameOver();
+                    return;
+                }
+                rows.splice(r, 1);
+            }
+        }
+
+        // 在顶部添加新行
+        let topY = Infinity;
+        for (let r = 0; r < rows.length; r++) {
+            if (rows[r].y < topY) topY = rows[r].y;
+        }
+        while (topY > -bs.h) {
+            const newRow = createRow(topY - bs.h);
+            rows.push(newRow);
+            topY -= bs.h;
+        }
+
+        // 按下动画
+        if (pressedBlock) {
+            pressedBlock.timer--;
+            if (pressedBlock.timer <= 0) {
+                pressedBlock = null;
+            }
+        }
+    }
+
+    function render() {
+        switch (gameState) {
+            case STATE.MENU:
+                drawMenu();
+                break;
+            case STATE.PLAYING:
+                drawPlaying();
+                break;
+            case STATE.OVER:
+                drawOver();
+                break;
+        }
+    }
+
+    function gameLoop() {
+        update();
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    // 启动游戏循环
+    gameLoop();
+
+})();
+</script>
+</body>
+</html>

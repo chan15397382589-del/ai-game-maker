@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>开心消消乐</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #ffb6c1; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+// ===== 开心消消乐 - 拖拽消除游戏 =====
+
+const canvas = document.getElementById('gc');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ===== 配置 =====
+const ROWS = 8, COLS = 8, NUM_CANDIES = 5;
+const MAX_STEPS = 30, TARGET_SCORE = 5000;
+
+// 糖果颜色: [主体色, 高光色, 暗色]
+const CANDY_COLORS = [
+    ['#ff4466','#ff99aa','#cc2244'], // 粉红
+    ['#44aaff','#99ddff','#2277cc'], // 蓝
+    ['#44dd66','#99ffaa','#22aa44'], // 绿
+    ['#ffbb33','#ffdd88','#cc8811'], // 黄
+    ['#cc66ff','#dd99ff','#9933cc']  // 紫
+];
+
+// 特殊糖果类型
+const SPECIAL_NONE = 0;
+const SPECIAL_LINE_H = 1;   // 4 连横线特效（消除整行）
+const SPECIAL_LINE_V = 2;   // 4 连竖线特效（消除整列）
+const SPECIAL_BOMB = 3;     // 5 连超级特效（消除所有同色）
+
+// 游戏状态
+const STATE_MENU = 0, STATE_PLAYING = 1, STATE_WIN = 2, STATE_LOSE = 3;
+let gameState = STATE_MENU;
+
+// 糖果数据
+let grid = [];          // grid[r][c] = 颜色索引
+let specials = [];      // specials[r][c] = 特殊类型
+let score = 0;
+let stepsLeft = MAX_STEPS;
+
+// 拖拽状态
+let dragStart = null;   // {r, c, x, y}
+let dragOffset = {x: 0, y: 0};
+let isDragging = false;
+
+// 动画
+let swapAnim = null;     // 交换动画
+let revertAnim = null;   // 退回动画
+let clearingCells = [];  // 消除动画 [{r, c, t, color}]
+let fallingCells = [];   // 下落动画 [{r, c, fromY, toY, t}]
+let pendingSpecial = null; // 待放置的特殊糖果
+
+// ===== 布局计算 =====
+function getLayout() {
+    let maxGridW = canvas.width * 0.8;
+    let maxGridH = (canvas.height - 120) * 0.85;
+    let sz = Math.min(maxGridW / COLS, maxGridH / ROWS, 72);
+    sz = Math.floor(sz);
+    let bw = sz * COLS, bh = sz * ROWS;
+    let ox = Math.floor((canvas.width - bw) / 2);
+    let oy = Math.floor((canvas.height - bh) / 2) + 20;
+    return { sz, ox, oy, bw, bh };
+}
+
+// ===== 工具函数 =====
+function lerp(a, b, t) { return a + (b - a) * t; }
+function easeOutBounce(t) {
+    if (t < 1/2.75) return 7.5625*t*t;
+    if (t < 2/2.75) { t-=1.5/2.75; return 7.5625*t*t+0.75; }
+    if (t < 2.5/2.75) { t-=2.25/2.75; return 7.5625*t*t+0.9375; }
+    t-=2.625/2.75; return 7.5625*t*t+0.984375;
+}
+function easeOutQuad(t) { return 1 - (1-t)*(1-t); }
+
+// ===== 初始化 =====
+function initGrid() {
+    grid = [];
+    specials = [];
+    for (let r = 0; r < ROWS; r++) {
+        grid[r] = [];
+        specials[r] = [];
+        for (let c = 0; c < COLS; c++) {
+            let color;
+            do {
+                color = Math.floor(Math.random() * NUM_CANDIES);
+            } while (
+                (c >= 2 && grid[r][c-1] === color && grid[r][c-2] === color) ||
+                (r >= 2 && grid[r-1][c] === color && grid[r-2][c] === color)
+            );
+            grid[r][c] = color;
+            specials[r][c] = SPECIAL_NONE;
+        }
+    }
+    score = 0;
+    stepsLeft = MAX_STEPS;
+    dragStart = null;
+    isDragging = false;
+    swapAnim = null;
+    revertAnim = null;
+    clearingCells = [];
+    fallingCells = [];
+    pendingSpecial = null;
+}
+
+// ===== 匹配检测 =====
+function findMatches() {
+    let matched = new Set();
+    let groups = [];
+
+    // 水平
+    for (let r = 0; r < ROWS; r++) {
+        let c = 0;
+        while (c < COLS) {
+            let color = grid[r][c];
+            if (color < 0) { c++; continue; }
+            let run = 1;
+            while (c + run < COLS && grid[r][c + run] === color) run++;
+            if (run >= 3) {
+                let cells = [];
+                for (let k = 0; k < run; k++) {
+                    cells.push({r, c: c + k});
+                    matched.add(r * COLS + c + k);
+                }
+                groups.push({ cells, size: run, dir: 'h', color });
+            }
+            c += run;
+        }
+    }
+
+    // 垂直
+    for (let c = 0; c < COLS; c++) {
+        let r = 0;
+        while (r < ROWS) {
+            let color = grid[r][c];
+            if (color < 0) { r++; continue; }
+            let run = 1;
+            while (r + run < ROWS && grid[r + run][c] === color) run++;
+            if (run >= 3) {
+                let cells = [];
+                for (let k = 0; k < run; k++) {
+                    cells.push({r: r + k, c});
+                    matched.add((r + k) * COLS + c);
+                }
+                groups.push({ cells, size: run, dir: 'v', color });
+            }
+            r += run;
+        }
+    }
+
+    return { matched, groups };
+}
+
+// ===== 检查可行移动 =====
+function hasValidMoves() {
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (c < COLS - 1) {
+                swap(r, c, r, c+1);
+                let m = findMatches();
+                if (m.matched.size > 0) { swap(r, c, r, c+1); return true; }
+                swap(r, c, r, c+1);
+            }
+            if (r < ROWS - 1) {
+                swap(r, c, r+1, c);
+                let m = findMatches();
+                if (m.matched.size > 0) { swap(r, c, r+1, c); return true; }
+                swap(r, c, r+1, c);
+            }
+        }
+    }
+    return false;
+}
+
+function swap(r1, c1, r2, c2) {
+    [grid[r1][c1], grid[r2][c2]] = [grid[r2][c2], grid[r1][c1]];
+    [specials[r1][c1], specials[r2][c2]] = [specials[r2][c2], specials[r1][c1]];
+}
+
+// ===== 特殊糖果处理 =====
+function processSpecials(matchedSet, groups) {
+    let newSpecial = null;
+
+    for (let g of groups) {
+        if (g.size >= 5) {
+            newSpecial = {
+                r: g.cells[2].r,
+                c: g.cells[2].c,
+                type: SPECIAL_BOMB,
+                color: g.color
+            };
+        } else if (g.size === 4) {
+            let type = g.dir === 'h' ? SPECIAL_LINE_V : SPECIAL_LINE_H;
+            newSpecial = {
+                r: g.cells[1].r,
+                c: g.cells[1].c,
+                type,
+                color: g.color
+            };
+        }
+    }
+
+    // 计分
+    let earned = 0;
+    for (let g of groups) {
+        if (g.size === 3) earned += 100;
+        else if (g.size === 4) earned += 200;
+        else if (g.size >= 5) earned += 500;
+    }
+
+    // 检查是否有特殊糖果被消除（触发额外效果）
+    let extraClear = new Set();
+    for (let idx of matchedSet) {
+        let r = Math.floor(idx / COLS), c = idx % COLS;
+        let sp = specials[r][c];
+        if (sp === SPECIAL_LINE_H) {
+            for (let cc = 0; cc < COLS; cc++) extraClear.add(r * COLS + cc);
+            earned += 150;
+        } else if (sp === SPECIAL_LINE_V) {
+            for (let rr = 0; rr < ROWS; rr++) extraClear.add(rr * COLS + c);
+            earned += 150;
+        } else if (sp === SPECIAL_BOMB) {
+            let targetColor = grid[r][c];
+            for (let rr = 0; rr < ROWS; rr++)
+                for (let cc = 0; cc < COLS; cc++)
+                    if (grid[rr][cc] === targetColor) extraClear.add(rr * COLS + cc);
+            earned += 300;
+        }
+    }
+
+    for (let idx of extraClear) matchedSet.add(idx);
+
+    score += earned;
+    return newSpecial;
+}
+
+// ===== 消除动画启动 =====
+function startClearAnimation(matchResult) {
+    let { matched, groups } = matchResult;
+    let newSp = processSpecials(matched, groups);
+
+    clearingCells = [];
+    for (let idx of matched) {
+        let r = Math.floor(idx / COLS), c = idx % COLS;
+        clearingCells.push({ r, c, t: 0, color: grid[r][c] });
+    }
+
+    pendingSpecial = newSp;
+
+    setTimeout(() => {
+        for (let idx of matched) {
+            let r = Math.floor(idx / COLS), c = idx % COLS;
+            grid[r][c] = -1;
+            specials[r][c] = SPECIAL_NONE;
+        }
+        clearingCells = [];
+
+        if (pendingSpecial) {
+            let sp = pendingSpecial;
+            grid[sp.r][sp.c] = (sp.color !== undefined && sp.color >= 0) ? sp.color : Math.floor(Math.random() * NUM_CANDIES);
+            specials[sp.r][sp.c] = sp.type;
+            pendingSpecial = null;
+        }
+
+        applyGravity();
+    }, 420);
+}
+
+// ===== 下落填充 =====
+function applyGravity() {
+    fallingCells = [];
+
+    for (let c = 0; c < COLS; c++) {
+        let emptyCount = 0;
+        for (let r = ROWS - 1; r >= 0; r--) {
+            if (grid[r][c] === -1) {
+                emptyCount++;
+            } else if (emptyCount > 0) {
+                let toR = r + emptyCount;
+                grid[toR][c] = grid[r][c];
+                specials[toR][c] = specials[r][c];
+                grid[r][c] = -1;
+                specials[r][c] = SPECIAL_NONE;
+                let layout = getLayout();
+                fallingCells.push({
+                    r: toR, c,
+                    fromY: layout.oy + r * layout.sz,
+                    toY: layout.oy + toR * layout.sz,
+                    t: 0
+                });
+            }
+        }
+        for (let i = 0; i < emptyCount; i++) {
+            let r = emptyCount - 1 - i;
+            grid[r][c] = Math.floor(Math.random() * NUM_CANDIES);
+            specials[r][c] = SPECIAL_NONE;
+            let layout = getLayout();
+            fallingCells.push({
+                r, c,
+                fromY: layout.oy - (emptyCount - r) * layout.sz,
+                toY: layout.oy + r * layout.sz,
+                t: 0
+            });
+        }
+    }
+
+    setTimeout(() => {
+        fallingCells = [];
+        let newMatch = findMatches();
+        if (newMatch.matched.size > 0) {
+            startClearAnimation(newMatch);
+        } else {
+            if (!hasValidMoves()) shuffleGrid();
+        }
+    }, 480);
+}
+
+// 洗牌
+function shuffleGrid() {
+    let all = [];
+    for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) all.push(grid[r][c]);
+    for (let i = all.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [all[i], all[j]] = [all[j], all[i]];
+    }
+    let idx = 0;
+    for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++) {
+            grid[r][c] = all[idx++];
+            specials[r][c] = SPECIAL_NONE;
+        }
+    if (findMatches().matched.size > 0 || !hasValidMoves()) initGrid();
+}
+
+// ===== 输入处理 =====
+function getCellAt(px, py) {
+    let { sz, ox, oy } = getLayout();
+    let c = Math.floor((px - ox) / sz);
+    let r = Math.floor((py - oy) / sz);
+    if (r >= 0 && r < ROWS && c >= 0 && c < COLS) return { r, c };
+    return null;
+}
+
+function isBusy() {
+    return swapAnim || revertAnim || clearingCells.length > 0 || fallingCells.length > 0;
+}
+
+// 鼠标/触摸事件
+function onPointerDown(px, py) {
+    if (gameState !== STATE_PLAYING || isBusy()) return;
+    let cell = getCellAt(px, py);
+    if (!cell) return;
+    dragStart = { r: cell.r, c: cell.c, x: px, y: py };
+    isDragging = false;
+}
+
+function onPointerMove(px, py) {
+    if (!dragStart || gameState !== STATE_PLAYING || isBusy()) return;
+    let dx = px - dragStart.x, dy = py - dragStart.y;
+    let layout = getLayout();
+    if (Math.abs(dx) > layout.sz * 0.3 || Math.abs(dy) > layout.sz * 0.3) {
+        isDragging = true;
+        let dr = 0, dc = 0;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            dc = dx > 0 ? 1 : -1;
+        } else {
+            dr = dy > 0 ? 1 : -1;
+        }
+        let r2 = dragStart.r + dr, c2 = dragStart.c + dc;
+        if (r2 >= 0 && r2 < ROWS && c2 >= 0 && c2 < COLS) {
+            trySwap(dragStart.r, dragStart.c, r2, c2);
+        }
+        dragStart = null;
+    }
+}
+
+function onPointerUp() {
+    dragStart = null;
+    isDragging = false;
+}
+
+canvas.addEventListener('mousedown', e => onPointerDown(e.clientX, e.clientY));
+canvas.addEventListener('mousemove', e => onPointerMove(e.clientX, e.clientY));
+canvas.addEventListener('mouseup', onPointerUp);
+canvas.addEventListener('touchstart', e => {
+    let t = e.touches[0]; onPointerDown(t.clientX, t.clientY); e.preventDefault();
+});
+canvas.addEventListener('touchmove', e => {
+    let t = e.touches[0]; onPointerMove(t.clientX, t.clientY); e.preventDefault();
+});
+canvas.addEventListener('touchend', e => { onPointerUp(); e.preventDefault(); });
+
+canvas.addEventListener('click', e => {
+    if (gameState === STATE_MENU) { startGame(); return; }
+    if (gameState === STATE_WIN || gameState === STATE_LOSE) { startGame(); return; }
+    if (gameState !== STATE_PLAYING || isBusy()) return;
+    if (isDragging) return;
+});
+
+// 尝试交换
+function trySwap(r1, c1, r2, c2) {
+    if (isBusy()) return;
+    swap(r1, c1, r2, c2);
+    let matchResult = findMatches();
+    if (matchResult.matched.size > 0) {
+        stepsLeft--;
+        startSwapAnim(r1, c1, r2, c2, false, () => {
+            swapAnim = null;
+            startClearAnimation(matchResult);
+        });
+    } else {
+        swap(r1, c1, r2, c2);
+        startSwapAnim(r1, c1, r2, c2, false, () => {
+            swapAnim = null;
+            startSwapAnim(r1, c1, r2, c2, true, () => { revertAnim = null; });
+        });
+    }
+}
+
+// ===== 交换动画 =====
+function startSwapAnim(r1, c1, r2, c2, isRevert, onDone) {
+    let anim = { r1, c1, r2, c2, t: 0, dur: isRevert ? 220 : 180, isRevert, onDone };
+    if (isRevert) revertAnim = anim; else swapAnim = anim;
+}
+
+// ===== 绘制函数 =====
+function drawBackground() {
+    let grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    grad.addColorStop(0, '#ffd4e8');
+    grad.addColorStop(0.5, '#ffc1d6');
+    grad.addColorStop(1, '#ffb3c6');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// 绘制糖果
+function drawCandy(x, y, sz, colorIdx, alpha, scale, special) {
+    if (colorIdx < 0 || colorIdx >= NUM_CANDIES) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x + sz/2, y + sz/2);
+    ctx.scale(scale, scale);
+
+    let radius = sz * 0.36;
+    let [base, light, dark] = CANDY_COLORS[colorIdx];
+
+    // 糖果主体
+    let grad = ctx.createRadialGradient(-radius*0.3, -radius*0.3, radius*0.1, 0, 0, radius);
+    grad.addColorStop(0, light);
+    grad.addColorStop(0.6, base);
+    grad.addColorStop(1, dark);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // 外圈描边
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.strokeStyle = dark;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 高光
+    ctx.beginPath();
+    ctx.arc(-radius*0.25, -radius*0.25, radius*0.2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fill();
+
+    // 小高光
+    ctx.beginPath();
+    ctx.arc(radius*0.15, -radius*0.15, radius*0.08, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fill();
+
+    // 特殊标记
+    if (special === SPECIAL_LINE_H) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-radius * 0.6, 0);
+        ctx.lineTo(radius * 0.6, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(radius * 0.6, 0);
+        ctx.lineTo(radius * 0.3, -radius * 0.3);
+        ctx.moveTo(radius * 0.6, 0);
+        ctx.lineTo(radius * 0.3, radius * 0.3);
+        ctx.stroke();
+    } else if (special === SPECIAL_LINE_V) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, -radius * 0.6);
+        ctx.lineTo(0, radius * 0.6);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, radius * 0.6);
+        ctx.lineTo(-radius * 0.3, radius * 0.3);
+        ctx.moveTo(0, radius * 0.6);
+        ctx.lineTo(radius * 0.3, radius * 0.3);
+        ctx.stroke();
+    } else if (special === SPECIAL_BOMB) {
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${radius}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('★', 0, 2);
+    }
+
+    ctx.restore();
+}
+
+// 绘制网格
+function drawGrid() {
+    let { sz, ox, oy } = getLayout();
+
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            let x = ox + c * sz, y = oy + r * sz;
+            ctx.fillStyle = (r + c) % 2 === 0 ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.15)';
+            ctx.fillRect(x, y, sz, sz);
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x, y, sz, sz);
+        }
+    }
+
+    let clearingSet = new Set(clearingCells.map(g => g.r * COLS + g.c));
+
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (grid[r][c] < 0) continue;
+
+            let x = ox + c * sz, y = oy + r * sz;
+            let alpha = 1, scale = 1;
+
+            // 交换动画偏移
+            if (swapAnim && !swapAnim.isRevert) {
+                let a = swapAnim;
+                let p = easeOutQuad(Math.min(a.t / a.dur, 1));
+                if (r === a.r1 && c === a.c1) {
+                    x = ox + (c + (a.c2 - a.c1) * p) * sz;
+                    y = oy + (r + (a.r2 - a.r1) * p) * sz;
+                } else if (r === a.r2 && c === a.c2) {
+                    x = ox + (c + (a.c1 - a.c2) * p) * sz;
+                    y = oy + (r + (a.r1 - a.r2) * p) * sz;
+                }
+            }
+            if (revertAnim) {
+                let a = revertAnim;
+                let p = easeOutQuad(Math.min(a.t / a.dur, 1));
+                if (r === a.r1 && c === a.c1) {
+                    x = ox + (c + (a.c2 - a.c1) * (1 - p)) * sz;
+                    y = oy + (r + (a.r2 - a.r1) * (1 - p)) * sz;
+                } else if (r === a.r2 && c === a.c2) {
+                    x = ox + (c + (a.c1 - a.c2) * (1 - p)) * sz;
+                    y = oy + (r + (a.r1 - a.r2) * (1 - p)) * sz;
+                }
+            }
+
+            // 消除动画
+            let key = r * COLS + c;
+            if (clearingSet.has(key)) {
+                let cg = clearingCells.find(g => g.r === r && g.c === c);
+                if (cg) {
+                    let p = Math.min(cg.t / 420, 1);
+                    scale = 1 - p * 0.8;
+                    alpha = 1 - p;
+                    if (p < 0.25) alpha = 0.4 + 0.6 * Math.abs(Math.sin(p * 25));
+                }
+            }
+
+            // 下落动画
+            let fg = fallingCells.find(g => g.r === r && g.c === c);
+            if (fg) {
+                let p = easeOutBounce(Math.min(fg.t / 450, 1));
+                y = lerp(fg.fromY, fg.toY, p);
+            }
+
+            drawCandy(x, y, sz, grid[r][c], alpha, scale, specials[r][c]);
+        }
+    }
+}
+
+// 绘制 UI
+function drawUI() {
+    ctx.textAlign = 'center';
+
+    // 标题
+    ctx.fillStyle = '#e8508b';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.fillText('开心消消乐', canvas.width / 2, 32);
+
+    let layout = getLayout();
+    let infoY = layout.oy - 10;
+
+    // 目标分数
+    ctx.fillStyle = '#995588';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('目标: ' + TARGET_SCORE, layout.ox, infoY);
+
+    // 当前得分
+    ctx.textAlign = 'center';
+    ctx.fillStyle = score >= TARGET_SCORE ? '#22aa44' : '#cc4488';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText('得分: ' + score, canvas.width / 2, infoY);
+
+    // 剩余步数
+    ctx.textAlign = 'right';
+    ctx.fillStyle = stepsLeft <= 5 ? '#ff3333' : '#995588';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText('步数: ' + stepsLeft, layout.ox + layout.bw, infoY);
+}
+
+// ===== 游戏状态画面 =====
+function drawMenu() {
+    drawBackground();
+    ctx.textAlign = 'center';
+
+    ctx.fillStyle = '#e8508b';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.shadowColor = '#ff88bb';
+    ctx.shadowBlur = 15;
+    ctx.fillText('开心消消乐', canvas.width / 2, canvas.height * 0.25);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#995588';
+    ctx.font = '18px sans-serif';
+    ctx.fillText('拖动交换相邻糖果，3 个以上相同即可消除', canvas.width / 2, canvas.height * 0.34);
+    ctx.fillText('4 连出特效（消除整行/列）| 5 连出超级特效（消除同色）', canvas.width / 2, canvas.height * 0.39);
+    ctx.fillText('30 步内达到 ' + TARGET_SCORE + ' 分即可过关', canvas.width / 2, canvas.height * 0.44);
+
+    // 预览糖果
+    let py = canvas.height * 0.52;
+    for (let i = 0; i < NUM_CANDIES; i++) {
+        let px = canvas.width / 2 - 120 + i * 60;
+        drawCandy(px, py, 50, i, 1, 1, SPECIAL_NONE);
+    }
+
+    // 按钮
+    let bx = canvas.width / 2 - 110, by = canvas.height * 0.66, bw = 220, bh = 52;
+    let grad = ctx.createLinearGradient(bx, by, bx, by + bh);
+    grad.addColorStop(0, '#ff66aa');
+    grad.addColorStop(1, '#ff3388');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, 14);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillText('开始游戏', canvas.width / 2, by + 34);
+
+    ctx.fillStyle = '#aa7799';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('拖拽交换 或 方向键 + 空格', canvas.width / 2, canvas.height * 0.80);
+}
+
+function drawResultScreen(isWin) {
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = isWin ? '#44dd66' : '#ff4466';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.shadowColor = isWin ? '#44dd66' : '#ff4466';
+    ctx.shadowBlur = 15;
+    ctx.fillText(isWin ? '恭喜过关!' : '挑战失败', canvas.width / 2, canvas.height * 0.32);
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 30px sans-serif';
+    ctx.fillText('得分: ' + score, canvas.width / 2, canvas.height * 0.43);
+
+    if (!isWin) {
+        ctx.fillStyle = '#ffaacc';
+        ctx.font = '18px sans-serif';
+        ctx.fillText('目标: ' + TARGET_SCORE + ' 分', canvas.width / 2, canvas.height * 0.50);
+    }
+
+    let bx = canvas.width / 2 - 110, by = canvas.height * 0.58, bw = 220, bh = 52;
+    let grad = ctx.createLinearGradient(bx, by, bx, by + bh);
+    grad.addColorStop(0, '#ff66aa');
+    grad.addColorStop(1, '#ff3388');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, 14);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillText('再来一局', canvas.width / 2, by + 34);
+}
+
+// ===== 游戏流程 =====
+function startGame() {
+    initGrid();
+    gameState = STATE_PLAYING;
+    window.postMessage({
+        type: "game_event",
+        eventType: "game_start",
+        data: { gameType: "开心消消乐" }
+    }, "*");
+}
+
+function checkGameEnd() {
+    if (score >= TARGET_SCORE) {
+        gameState = STATE_WIN;
+        window.postMessage({
+            type: "game_event",
+            eventType: "game_end",
+            data: { score }
+        }, "*");
+    } else if (stepsLeft <= 0) {
+        gameState = STATE_LOSE;
+        window.postMessage({
+            type: "game_event",
+            eventType: "game_end",
+            data: { score }
+        }, "*");
+    }
+}
+
+// ===== 主循环 =====
+let lastTime = 0;
+function gameLoop(timestamp) {
+    let dt = lastTime ? Math.min(timestamp - lastTime, 50) : 16;
+    lastTime = timestamp;
+
+    resize();
+
+    // 更新动画
+    if (swapAnim) swapAnim.t += dt;
+    if (revertAnim) revertAnim.t += dt;
+    for (let g of clearingCells) g.t += dt;
+    for (let g of fallingCells) g.t += dt;
+
+    if (swapAnim && swapAnim.t >= swapAnim.dur && swapAnim.onDone) {
+        swapAnim.onDone();
+    }
+    if (revertAnim && revertAnim.t >= revertAnim.dur && revertAnim.onDone) {
+        revertAnim.onDone();
+    }
+
+    if (gameState === STATE_PLAYING && !isBusy()) {
+        if (clearingCells.length === 0 && fallingCells.length === 0) {
+            checkGameEnd();
+        }
+    }
+
+    if (gameState === STATE_MENU) {
+        drawMenu();
+    } else {
+        drawBackground();
+        drawGrid();
+        drawUI();
+        if (gameState === STATE_WIN) drawResultScreen(true);
+        if (gameState === STATE_LOSE) drawResultScreen(false);
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>

@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>简单战棋</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{overflow:hidden;background:#1a1a2e;font-family:"Microsoft YaHei",Arial,sans-serif}
+canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// 简单战棋 - 8x8格子 回合制
+var canvas=document.getElementById('c');
+var ctx=canvas.getContext('2d');
+var W,H;
+
+function resize(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  calcLayout();
+  draw();
+}
+window.addEventListener('resize',resize);
+
+// 状态
+var state='start'; // start / game / end
+var currentTurn='player';
+var selectedUnit=null;
+var phase='select'; // select / move / attack
+var moveRange=[];
+var attackRange=[];
+var gameOver=false;
+var gameResult='';
+var message='';
+var msgTimer=0;
+
+// 布局
+var cellSz,gridX,gridY,boardSz;
+var btnEndTurn;
+
+function calcLayout(){
+  var maxB=Math.min(W-40,H-160);
+  cellSz=Math.floor(maxB/8);
+  boardSz=cellSz*8;
+  gridX=Math.floor((W-boardSz)/2);
+  gridY=80;
+  btnEndTurn={x:W/2-70,y:gridY+boardSz+20,w:140,h:44};
+}
+
+// 单位
+var units=[]; // {id,team,x,y,hp,maxHp,atk,moved,attacked}
+
+function initGame(){
+  units=[];
+  var pp=[{x:0,y:6},{x:1,y:7},{x:2,y:7}];
+  pp.forEach(function(p,i){
+    units.push({id:'p'+i,team:'player',x:p.x,y:p.y,hp:100,maxHp:100,atk:20,moved:false,attacked:false});
+  });
+  var ep=[{x:7,y:1},{x:6,y:0},{x:5,y:0}];
+  ep.forEach(function(p,i){
+    units.push({id:'e'+i,team:'enemy',x:p.x,y:p.y,hp:100,maxHp:100,atk:20,moved:false,attacked:false});
+  });
+  selectedUnit=null;phase='select';moveRange=[];attackRange=[];
+  currentTurn='player';gameOver=false;gameResult='';
+  message='你的回合，选择一个单位';msgTimer=120;
+}
+
+function unitAt(x,y){
+  for(var i=0;i<units.length;i++){
+    if(units[i].x===x&&units[i].y===y&&units[i].hp>0)return units[i];
+  }
+  return null;
+}
+
+function calcMoveRange(u){
+  var r=[];
+  for(var x=0;x<8;x++)for(var y=0;y<8;y++){
+    var d=Math.abs(x-u.x)+Math.abs(y-u.y);
+    if(d>0&&d<=2&&!unitAt(x,y))r.push({x:x,y:y});
+  }
+  return r;
+}
+
+function calcAttackRange(u){
+  var r=[];
+  var tgt=u.team==='player'?'enemy':'player';
+  for(var x=0;x<8;x++)for(var y=0;y<8;y++){
+    if(Math.abs(x-u.x)+Math.abs(y-u.y)===1){
+      var t=unitAt(x,y);
+      if(t&&t.team===tgt)r.push({x:x,y:y});
+    }
+  }
+  return r;
+}
+
+function performAttack(atk,def){
+  def.hp-=atk.atk;
+  message=(atk.team==='player'?'我方':'敌方')+'攻击！造成'+atk.atk+'点伤害';
+  msgTimer=120;
+  if(def.hp<=0){def.hp=0;message+='，单位被消灭！';checkEnd();}
+}
+
+function checkEnd(){
+  var pa=units.filter(function(u){return u.team==='player'&&u.hp>0;});
+  var ea=units.filter(function(u){return u.team==='enemy'&&u.hp>0;});
+  if(ea.length===0){
+    gameOver=true;gameResult='win';state='end';
+    try{parent.postMessage({type:"game_event",eventType:"game_end",data:{score:pa.length*100+pa.reduce(function(s,u){return s+u.hp;},0)}},"*");}catch(e){}
+  }else if(pa.length===0){
+    gameOver=true;gameResult='lose';state='end';
+    try{parent.postMessage({type:"game_event",eventType:"game_end",data:{score:0}},"*");}catch(e){}
+  }
+}
+
+function enemyTurn(){
+  currentTurn='enemy';message='敌方回合...';msgTimer=60;
+  var enemies=units.filter(function(u){return u.team==='enemy'&&u.hp>0;});
+  var players=units.filter(function(u){return u.team==='player'&&u.hp>0;});
+  if(!enemies.length||!players.length)return;
+  var idx=0;
+  function next(){
+    if(idx>=enemies.length){
+      setTimeout(function(){
+        currentTurn='player';
+        units.forEach(function(u){if(u.team==='player'){u.moved=false;u.attacked=false;}});
+        phase='select';selectedUnit=null;moveRange=[];attackRange=[];
+        message='你的回合，选择一个单位';msgTimer=0;draw();
+      },500);
+      return;
+    }
+    var e=enemies[idx];
+    if(e.hp<=0){idx++;next();return;}
+    // 找血量最低的玩家单位
+    var tgt=players.filter(function(p){return p.hp>0;}).sort(function(a,b){return a.hp-b.hp;})[0];
+    if(!tgt){idx++;next();return;}
+    var dist=Math.abs(e.x-tgt.x)+Math.abs(e.y-tgt.y);
+    if(dist===1){
+      performAttack(e,tgt);draw();idx++;setTimeout(next,600);
+    }else{
+      // 向目标移动
+      var best=null,bestD=999;
+      for(var x=0;x<8;x++)for(var y=0;y<8;y++){
+        var md=Math.abs(x-e.x)+Math.abs(y-e.y);
+        if(md>0&&md<=2&&!unitAt(x,y)){
+          var td=Math.abs(x-tgt.x)+Math.abs(y-tgt.y);
+          if(td<bestD){bestD=td;best={x:x,y:y};}
+        }
+      }
+      if(best){e.x=best.x;e.y=best.y;}
+      var nd=Math.abs(e.x-tgt.x)+Math.abs(e.y-tgt.y);
+      if(nd===1){
+        setTimeout(function(){performAttack(e,tgt);draw();idx++;setTimeout(next,600);},400);
+      }else{draw();idx++;setTimeout(next,400);}
+    }
+  }
+  setTimeout(next,500);
+}
+
+// ===== 绘制 =====
+function rrect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+function drawUnit(u){
+  var cx=gridX+u.x*cellSz+cellSz/2;
+  var cy=gridY+u.y*cellSz+cellSz/2;
+  var rad=cellSz*0.35;
+  ctx.beginPath();ctx.arc(cx,cy,rad,0,Math.PI*2);
+  ctx.fillStyle=u.team==='player'?'#3498db':'#e74c3c';ctx.fill();
+  if(selectedUnit&&selectedUnit.id===u.id){
+    ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke();
+  }
+  // HP条
+  var hw=cellSz*0.7,hh=5,hx=cx-hw/2,hy=cy+rad+5;
+  ctx.fillStyle='#333';ctx.fillRect(hx,hy,hw,hh);
+  var ratio=u.hp/u.maxHp;
+  ctx.fillStyle=ratio>0.5?'#2ecc71':(ratio>0.25?'#f39c12':'#e74c3c');
+  ctx.fillRect(hx,hy,hw*ratio,hh);
+  ctx.fillStyle='#fff';ctx.font='bold 11px Arial';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText(u.hp,cx,hy+hh+10);
+}
+
+var startBtn={},endBtn={};
+
+function drawStart(){
+  ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#e0e0e0';
+  ctx.font='bold '+Math.min(W*0.07,50)+'px "Microsoft YaHei",Arial';
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillText('简单战棋',W/2,H*0.28);
+  ctx.fillStyle='#8899aa';
+  ctx.font=Math.min(W*0.03,20)+'px "Microsoft YaHei",Arial';
+  ctx.fillText('消灭所有敌人获胜！',W/2,H*0.38);
+  ctx.fillText('选中单位 - 移动(2格) - 攻击(1格)',W/2,H*0.43);
+  var bw=200,bh=50,bx=W/2-bw/2,by=H*0.55;
+  ctx.fillStyle='#3498db';rrect(bx,by,bw,bh,12);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='bold 22px "Microsoft YaHei",Arial';
+  ctx.fillText('开始游戏',W/2,by+bh/2);
+  startBtn={x:bx,y:by,w:bw,h:bh};
+}
+
+function drawGame(){
+  ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,W,H);
+  // 棋盘
+  for(var x=0;x<8;x++)for(var y=0;y<8;y++){
+    ctx.fillStyle=(x+y)%2===0?'#2d5a27':'#3a7a32';
+    ctx.fillRect(gridX+x*cellSz,gridY+y*cellSz,cellSz,cellSz);
+  }
+  // 移动范围
+  for(var i=0;i<moveRange.length;i++){
+    var p=moveRange[i];
+    ctx.fillStyle='rgba(52,152,219,0.35)';
+    ctx.fillRect(gridX+p.x*cellSz,gridY+p.y*cellSz,cellSz,cellSz);
+    ctx.strokeStyle='rgba(52,152,219,0.6)';ctx.lineWidth=2;
+    ctx.strokeRect(gridX+p.x*cellSz+1,gridY+p.y*cellSz+1,cellSz-2,cellSz-2);
+  }
+  // 攻击范围
+  for(var i=0;i<attackRange.length;i++){
+    var p=attackRange[i];
+    ctx.fillStyle='rgba(231,76,60,0.35)';
+    ctx.fillRect(gridX+p.x*cellSz,gridY+p.y*cellSz,cellSz,cellSz);
+    ctx.strokeStyle='rgba(231,76,60,0.6)';ctx.lineWidth=2;
+    ctx.strokeRect(gridX+p.x*cellSz+1,gridY+p.y*cellSz+1,cellSz-2,cellSz-2);
+  }
+  // 单位
+  units.filter(function(u){return u.hp>0;}).forEach(drawUnit);
+  // 回合
+  ctx.fillStyle=currentTurn==='player'?'#3498db':'#e74c3c';
+  ctx.font='bold 20px "Microsoft YaHei",Arial';ctx.textAlign='center';
+  ctx.fillText(currentTurn==='player'?'玩家回合':'敌方回合',W/2,35);
+  ctx.fillStyle='#bbb';ctx.font='16px "Microsoft YaHei",Arial';
+  var pt=phase==='select'?'选择单位':(phase==='move'?'选择移动位置':'选择攻击目标');
+  ctx.fillText(pt,W/2,58);
+  if(msgTimer>0){
+    ctx.fillStyle='#f1c40f';ctx.font='bold 18px "Microsoft YaHei",Arial';
+    ctx.fillText(message,W/2,gridY+boardSz+10);
+  }
+  if(currentTurn==='player'){
+    ctx.fillStyle='#e67e22';rrect(btnEndTurn.x,btnEndTurn.y,btnEndTurn.w,btnEndTurn.h,10);ctx.fill();
+    ctx.fillStyle='#fff';ctx.font='bold 16px "Microsoft YaHei",Arial';
+    ctx.fillText('结束回合',btnEndTurn.x+btnEndTurn.w/2,btnEndTurn.y+btnEndTurn.h/2);
+  }
+}
+
+function drawEnd(){
+  ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=gameResult==='win'?'#f1c40f':'#e74c3c';
+  ctx.font='bold '+Math.min(W*0.07,48)+'px "Microsoft YaHei",Arial';
+  ctx.textAlign='center';
+  ctx.fillText(gameResult==='win'?'胜利！':'失败！',W/2,H*0.3);
+  ctx.fillStyle='#bbb';ctx.font='24px "Microsoft YaHei",Arial';
+  ctx.fillText(gameResult==='win'?'成功消灭所有敌人！':'你的部队被全灭...',W/2,H*0.4);
+  var bw=200,bh=50,bx=W/2-bw/2,by=H*0.55;
+  ctx.fillStyle='#3498db';rrect(bx,by,bw,bh,12);ctx.fill();
+  ctx.fillStyle='#fff';ctx.font='bold 22px "Microsoft YaHei",Arial';
+  ctx.fillText('再来一局',W/2,by+bh/2);
+  endBtn={x:bx,y:by,w:bw,h:bh};
+}
+
+function draw(){
+  if(state==='start')drawStart();
+  else if(state==='game')drawGame();
+  else if(state==='end')drawEnd();
+}
+
+// ===== 交互 =====
+function handleClick(mx,my){
+  if(state==='start'){
+    var b=startBtn;
+    if(b&&mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){
+      state='game';initGame();draw();
+      try{parent.postMessage({type:"game_event",eventType:"game_start",data:{gameType:"简单战棋"}},"*");}catch(e){}
+    }
+    return;
+  }
+  if(state==='end'){
+    var b=endBtn;
+    if(b&&mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){
+      state='game';initGame();draw();
+      try{parent.postMessage({type:"game_event",eventType:"game_start",data:{gameType:"简单战棋"}},"*");}catch(e){}
+    }
+    return;
+  }
+  if(state!=='game'||currentTurn!=='player')return;
+  // 结束回合
+  if(mx>=btnEndTurn.x&&mx<=btnEndTurn.x+btnEndTurn.w&&my>=btnEndTurn.y&&my<=btnEndTurn.y+btnEndTurn.h){
+    selectedUnit=null;moveRange=[];attackRange=[];phase='select';enemyTurn();draw();return;
+  }
+  var gx=Math.floor((mx-gridX)/cellSz),gy=Math.floor((my-gridY)/cellSz);
+  if(gx<0||gx>=8||gy<0||gy>=8)return;
+  if(phase==='select'){
+    var u=unitAt(gx,gy);
+    if(u&&u.team==='player'&&!u.moved){
+      selectedUnit=u;moveRange=calcMoveRange(u);attackRange=[];phase='move';draw();
+    }
+  }else if(phase==='move'){
+    var inR=false;
+    for(var i=0;i<moveRange.length;i++)if(moveRange[i].x===gx&&moveRange[i].y===gy)inR=true;
+    if(inR){
+      selectedUnit.x=gx;selectedUnit.y=gy;selectedUnit.moved=true;moveRange=[];
+      attackRange=calcAttackRange(selectedUnit);
+      if(attackRange.length>0){phase='attack';message='选择攻击目标';msgTimer=60;}
+      else{selectedUnit=null;phase='select';message='选择下一个单位';msgTimer=60;}
+      draw();
+    }else{
+      var u=unitAt(gx,gy);
+      if(u&&u.team==='player'&&!u.moved){selectedUnit=u;moveRange=calcMoveRange(u);attackRange=[];}
+      else{selectedUnit=null;moveRange=[];attackRange=[];phase='select';}
+      draw();
+    }
+  }else if(phase==='attack'){
+    var inR=false;
+    for(var i=0;i<attackRange.length;i++)if(attackRange[i].x===gx&&attackRange[i].y===gy)inR=true;
+    if(inR){
+      var tgt=unitAt(gx,gy);
+      if(tgt)performAttack(selectedUnit,tgt);
+      selectedUnit=null;moveRange=[];attackRange=[];phase='select';draw();
+    }else{
+      selectedUnit=null;moveRange=[];attackRange=[];phase='select';draw();
+    }
+  }
+}
+
+canvas.addEventListener('click',function(e){handleClick(e.clientX,e.clientY);});
+canvas.addEventListener('touchstart',function(e){
+  e.preventDefault();var t=e.touches[0];handleClick(t.clientX,t.clientY);
+});
+
+setInterval(function(){
+  if(msgTimer>0){msgTimer--;if(state==='game')drawGame();}
+},16);
+
+resize();
+</script>
+</body>
+</html>
