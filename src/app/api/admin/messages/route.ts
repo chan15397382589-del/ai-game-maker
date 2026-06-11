@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       .from("messages")
       .select("*")
       .order("created_at", { ascending: true })
-      .limit(2000);
+      .limit(50000);
 
     if (userId) {
       query = query.eq("user_id", userId);
