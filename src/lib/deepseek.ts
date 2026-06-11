@@ -8,10 +8,12 @@ const anthropic = new Anthropic({
 });
 
 // Supabase 服务端客户端单例（用于消息保存等后端操作）
-export const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+
+export const supabaseAdmin = supabaseUrl && supabaseServiceKey
+  ? createClient(supabaseUrl, supabaseServiceKey)
+  : createClient("https://placeholder.supabase.co", "placeholder");
 
 // 小学信息技术教师人设的 System Prompt
 export const TEACHER_SYSTEM_PROMPT = `你是"小智老师"，一位亲切、耐心的小学信息技术教师，也是学生的"游戏设计教练"。
