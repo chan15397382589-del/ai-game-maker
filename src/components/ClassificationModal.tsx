@@ -355,7 +355,7 @@ export default function ClassificationModal({ convId, onComplete, testType = "pr
           {/* 左侧：游戏 */}
           <div className="flex-1 min-w-0 border-r border-gray-200">
             {gameStarted ? (
-              <iframe ref={gameRef} srcDoc={buildGame(gameParams)} className="w-full h-full" sandbox="allow-scripts" scrolling="no" />
+              <iframe ref={gameRef} srcDoc={buildGame(gameParams)} className="w-full h-full" sandbox="allow-scripts allow-same-origin" scrolling="no" />
             ) : (
               <div className="w-full h-full bg-gradient-to-br from-sky-100 to-blue-100 flex items-center justify-center cursor-pointer hover:from-sky-200 hover:to-blue-200 transition"
                 onClick={() => setGameStarted(true)}>

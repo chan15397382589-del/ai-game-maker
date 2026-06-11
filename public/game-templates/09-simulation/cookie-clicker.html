@@ -36,9 +36,9 @@ let lastTime = performance.now();
 
 // 升级系统
 const upgrades = [
-    { name: '光标', desc: '每10秒自动+1', basePrice: 15, price: 15, count: 0, cps: 0.1, icon: '👆' },
-    { name: '奶奶', desc: '每秒+1', basePrice: 100, price: 100, count: 0, cps: 1, icon: '👵' },
-    { name: '农场', desc: '每秒+5', basePrice: 500, price: 500, count: 0, cps: 5, icon: '🌾' }
+    { name: '光标', desc: '每10秒自动+1', basePrice: 15, price: 15, count: 0, cps: 0.1, icon: '\u{1F446}' },
+    { name: '奶奶', desc: '每秒+1', basePrice: 100, price: 100, count: 0, cps: 1, icon: '\u{1F475}' },
+    { name: '农场', desc: '每秒+5', basePrice: 500, price: 500, count: 0, cps: 5, icon: '\u{1F33E}' }
 ];
 
 // 漂浮文字
@@ -59,9 +59,7 @@ for (let i = 0; i < 12; i++) {
 // 计算CPS
 function calcCPS() {
     cps = 0;
-    for (const u of upgrades) {
-        cps += u.count * u.cps;
-    }
+    for (const u of upgrades) { cps += u.count * u.cps; }
 }
 
 // 添加漂浮文字
@@ -86,24 +84,15 @@ function drawCookie(cx, cy, radius) {
 
     // 阴影
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,0.3)';
-    ctx.shadowBlur = 20;
-    ctx.shadowOffsetX = 5;
-    ctx.shadowOffsetY = 5;
-
-    // 饼干主体
+    ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 20;
+    ctx.shadowOffsetX = 5; ctx.shadowOffsetY = 5;
     ctx.fillStyle = '#D2691E';
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
 
     // 边缘纹理
-    ctx.strokeStyle = '#A0522D';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r - 5, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.strokeStyle = '#A0522D'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, r - 5, 0, Math.PI * 2); ctx.stroke();
 
     // 巧克力碎粒
     ctx.fillStyle = '#3E2723';
@@ -115,8 +104,7 @@ function drawCookie(cx, cy, radius) {
     }
 
     // 表面纹理
-    ctx.strokeStyle = 'rgba(139,69,19,0.3)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(139,69,19,0.3)'; ctx.lineWidth = 1;
     for (let i = 0; i < 6; i++) {
         const angle = (i / 6) * Math.PI * 2;
         ctx.beginPath();
@@ -129,28 +117,17 @@ function drawCookie(cx, cy, radius) {
 function drawShop() {
     const panelW = Math.min(320, canvas.width * 0.3);
     const panelX = canvas.width - panelW;
-    const panelY = 0;
-    const panelH = canvas.height;
 
-    // 背景
     ctx.fillStyle = 'rgba(40, 20, 10, 0.85)';
-    ctx.fillRect(panelX, panelY, panelW, panelH);
+    ctx.fillRect(panelX, 0, panelW, canvas.height);
 
-    // 标题
-    ctx.fillStyle = '#FFD700';
-    ctx.font = 'bold 28px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('🏪 商店', panelX + panelW / 2, 35);
+    ctx.fillStyle = '#FFD700'; ctx.font = 'bold 28px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F3EA} 商店', panelX + panelW / 2, 35);
 
-    // CPS显示
-    ctx.fillStyle = '#90EE90';
-    ctx.font = '18px Arial';
+    ctx.fillStyle = '#90EE90'; ctx.font = '18px Arial';
     ctx.fillText('每秒产出: ' + cps.toFixed(1) + ' 饼干', panelX + panelW / 2, 70);
 
-    // 升级列表
-    const itemH = 100;
-    const startY = 100;
+    const itemH = 100, startY = 100;
     for (let i = 0; i < upgrades.length; i++) {
         const u = upgrades[i];
         const iy = startY + i * (itemH + 15);
@@ -158,41 +135,24 @@ function drawShop() {
         const hover = mouseX >= panelX + 10 && mouseX <= panelX + panelW - 10 &&
                       mouseY >= iy && mouseY <= iy + itemH;
 
-        // 按钮背景
         const bg = canBuy ? (hover ? 'rgba(100,80,50,0.9)' : 'rgba(70,50,30,0.9)') : 'rgba(40,30,20,0.7)';
         ctx.fillStyle = bg;
-        ctx.beginPath();
-        ctx.roundRect(panelX + 10, iy, panelW - 20, itemH, 10);
-        ctx.fill();
-        ctx.strokeStyle = canBuy ? '#8B7355' : '#444';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        ctx.beginPath(); ctx.roundRect(panelX + 10, iy, panelW - 20, itemH, 10); ctx.fill();
+        ctx.strokeStyle = canBuy ? '#8B7355' : '#444'; ctx.lineWidth = 2; ctx.stroke();
 
-        // 图标
-        ctx.font = '36px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = canBuy ? '#fff' : '#666';
+        ctx.font = '36px Arial'; ctx.textAlign = 'center'; ctx.fillStyle = canBuy ? '#fff' : '#666';
         ctx.fillText(u.icon, panelX + 45, iy + 35);
 
-        // 名称
-        ctx.font = 'bold 18px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillStyle = canBuy ? '#fff' : '#888';
+        ctx.font = 'bold 18px Arial'; ctx.textAlign = 'left'; ctx.fillStyle = canBuy ? '#fff' : '#888';
         ctx.fillText(u.name, panelX + 75, iy + 25);
 
-        // 描述
-        ctx.font = '14px Arial';
-        ctx.fillStyle = canBuy ? '#ccc' : '#666';
+        ctx.font = '14px Arial'; ctx.fillStyle = canBuy ? '#ccc' : '#666';
         ctx.fillText(u.desc, panelX + 75, iy + 48);
 
-        // 价格
-        ctx.font = 'bold 16px Arial';
-        ctx.fillStyle = canBuy ? '#FFD700' : '#664400';
-        ctx.fillText('🍪 ' + u.price, panelX + 75, iy + 72);
+        ctx.font = 'bold 16px Arial'; ctx.fillStyle = canBuy ? '#FFD700' : '#664400';
+        ctx.fillText('\u{1F36A} ' + u.price, panelX + 75, iy + 72);
 
-        // 数量
-        ctx.textAlign = 'right';
-        ctx.font = 'bold 22px Arial';
+        ctx.textAlign = 'right'; ctx.font = 'bold 22px Arial';
         ctx.fillStyle = canBuy ? '#90EE90' : '#555';
         ctx.fillText('x' + u.count, panelX + panelW - 25, iy + 50);
         ctx.textAlign = 'left';
@@ -202,105 +162,63 @@ function drawShop() {
 // 绘制漂浮文字
 function drawFloatingTexts() {
     for (const ft of floatingTexts) {
-        ctx.save();
-        ctx.globalAlpha = Math.min(1, ft.alpha);
-        ctx.fillStyle = ft.color;
-        ctx.font = 'bold ' + ft.size + 'px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(ft.text, ft.x, ft.y);
-        ctx.restore();
+        ctx.save(); ctx.globalAlpha = Math.min(1, ft.alpha);
+        ctx.fillStyle = ft.color; ctx.font = 'bold ' + ft.size + 'px Arial';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(ft.text, ft.x, ft.y); ctx.restore();
     }
 }
 
 // 菜单界面
 function drawMenu() {
-    // 温暖背景渐变
     const grad = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, 0, canvas.width / 2, canvas.height / 2, canvas.width * 0.7);
-    grad.addColorStop(0, '#FFF8DC');
-    grad.addColorStop(0.5, '#FAEBD7');
-    grad.addColorStop(1, '#D2B48C');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    grad.addColorStop(0, '#FFF8DC'); grad.addColorStop(0.5, '#FAEBD7'); grad.addColorStop(1, '#D2B48C');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // 标题
-    ctx.fillStyle = '#8B4513';
-    ctx.font = 'bold 52px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('🍪 Cookie Clicker', canvas.width / 2, canvas.height * 0.22);
+    ctx.fillStyle = '#8B4513'; ctx.font = 'bold 52px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F36A} Cookie Clicker', canvas.width / 2, canvas.height * 0.22);
 
-    ctx.fillStyle = '#A0522D';
-    ctx.font = '24px Arial';
+    ctx.fillStyle = '#A0522D'; ctx.font = '24px Arial';
     ctx.fillText('饼干工厂', canvas.width / 2, canvas.height * 0.31);
 
-    // 小饼干装饰
     drawCookie(canvas.width / 2, canvas.height * 0.48, 50);
 
-    // 开始按钮
     const btnW = 280, btnH = 70;
-    const btnX = canvas.width / 2 - btnW / 2;
-    const btnY = canvas.height * 0.63;
+    const btnX = canvas.width / 2 - btnW / 2, btnY = canvas.height * 0.63;
     const hover = mouseX >= btnX && mouseX <= btnX + btnW && mouseY >= btnY && mouseY <= btnY + btnH;
-
     ctx.fillStyle = hover ? '#CD853F' : '#D2691E';
-    ctx.beginPath();
-    ctx.roundRect(btnX, btnY, btnW, btnH, 15);
-    ctx.fill();
-    ctx.strokeStyle = '#8B4513';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    ctx.fillStyle = '#FFF';
-    ctx.font = 'bold 30px Arial';
+    ctx.beginPath(); ctx.roundRect(btnX, btnY, btnW, btnH, 15); ctx.fill();
+    ctx.strokeStyle = '#8B4513'; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = '#FFF'; ctx.font = 'bold 30px Arial';
     ctx.fillText('开始游戏', canvas.width / 2, btnY + btnH / 2);
 
-    // 说明
-    ctx.fillStyle = '#666';
-    ctx.font = '18px Arial';
+    ctx.fillStyle = '#666'; ctx.font = '18px Arial';
     ctx.fillText('点击饼干赚金币，购买升级自动产出！', canvas.width / 2, canvas.height * 0.8);
 }
 
 // 游戏界面
 function drawGame() {
-    // 温暖背景渐变
     const grad = ctx.createRadialGradient(canvas.width * 0.35, canvas.height / 2, 0, canvas.width * 0.35, canvas.height / 2, canvas.width * 0.5);
-    grad.addColorStop(0, '#FFF8DC');
-    grad.addColorStop(0.5, '#FAEBD7');
-    grad.addColorStop(1, '#D2B48C');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    grad.addColorStop(0, '#FFF8DC'); grad.addColorStop(0.5, '#FAEBD7'); grad.addColorStop(1, '#D2B48C');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const shopW = Math.min(320, canvas.width * 0.3);
     const mainAreaW = canvas.width - shopW;
-    const cx = mainAreaW / 2;
-    const cy = canvas.height / 2;
+    const cx = mainAreaW / 2, cy = canvas.height / 2;
 
-    // 金币数（大号显示在饼干上方）
-    ctx.fillStyle = '#8B4513';
-    ctx.font = 'bold 42px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('🍪 ' + Math.floor(cookies).toLocaleString(), cx, cy - 160);
+    ctx.fillStyle = '#8B4513'; ctx.font = 'bold 42px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('\u{1F36A} ' + Math.floor(cookies).toLocaleString(), cx, cy - 160);
 
-    // CPS
-    ctx.fillStyle = '#A0522D';
-    ctx.font = '20px Arial';
+    ctx.fillStyle = '#A0522D'; ctx.font = '20px Arial';
     ctx.fillText('每秒 ' + cps.toFixed(1) + ' 个', cx, cy - 120);
 
-    // 绘制大饼干
     const cookieR = Math.min(120, mainAreaW * 0.2, canvas.height * 0.18);
     drawCookie(cx, cy + 20, cookieR);
 
-    // 提示
-    ctx.fillStyle = '#999';
-    ctx.font = '16px Arial';
+    ctx.fillStyle = '#999'; ctx.font = '16px Arial';
     ctx.fillText('点击饼干！', cx, cy + 20 + cookieR + 40);
 
-    // 漂浮文字
     drawFloatingTexts();
-
-    // 商店
     drawShop();
 }
 
@@ -308,16 +226,12 @@ function drawGame() {
 function clickCookie() {
     const shopW = Math.min(320, canvas.width * 0.3);
     const mainAreaW = canvas.width - shopW;
-    const cx = mainAreaW / 2;
-    const cy = canvas.height / 2 + 20;
+    const cx = mainAreaW / 2, cy = canvas.height / 2 + 20;
     const cookieR = Math.min(120, mainAreaW * 0.2, canvas.height * 0.18);
 
-    const dx = mouseX - cx;
-    const dy = mouseY - cy;
+    const dx = mouseX - cx, dy = mouseY - cy;
     if (dx * dx + dy * dy <= cookieR * cookieR * 1.1) {
-        cookies += 1;
-        totalCookies += 1;
-        cookieScaleTarget = 1.15;
+        cookies += 1; totalCookies += 1; cookieScaleTarget = 1.15;
         const txtX = cx + (Math.random() - 0.5) * 60;
         const txtY = cy - cookieR - 10 + (Math.random() - 0.5) * 20;
         addFloatingText(txtX, txtY, '+1', '#FFD700');
@@ -328,33 +242,26 @@ function clickCookie() {
 function handleClick(x, y) {
     if (gameState === 'menu') {
         const btnW = 280, btnH = 70;
-        const btnX = canvas.width / 2 - btnW / 2;
-        const btnY = canvas.height * 0.63;
+        const btnX = canvas.width / 2 - btnW / 2, btnY = canvas.height * 0.63;
         if (x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH) {
-            gameState = 'playing';
-            cookies = 0;
-            totalCookies = 0;
-            cps = 0;
+            gameState = 'playing'; cookies = 0; totalCookies = 0; cps = 0;
             for (const u of upgrades) { u.count = 0; u.price = u.basePrice; }
             window.postMessage({ type: 'game_event', eventType: 'game_start', data: { gameType: 'Cookie Clicker' } }, '*');
         }
         return;
     }
 
-    // 点击饼干
     clickCookie();
 
     // 点击商店
     const shopW = Math.min(320, canvas.width * 0.3);
     const panelX = canvas.width - shopW;
     if (x >= panelX) {
-        const itemH = 100;
-        const startY = 100;
+        const itemH = 100, startY = 100;
         for (let i = 0; i < upgrades.length; i++) {
             const iy = startY + i * (itemH + 15);
             if (x >= panelX + 10 && x <= panelX + shopW - 10 && y >= iy && y <= iy + itemH) {
-                buyUpgrade(i);
-                return;
+                buyUpgrade(i); return;
             }
         }
     }
@@ -363,33 +270,22 @@ function handleClick(x, y) {
 // 更新
 function update(dt) {
     if (gameState !== 'playing') return;
-
-    // 自动产出
     if (cps > 0) {
         const autoCookies = cps * dt / 1000;
-        cookies += autoCookies;
-        totalCookies += autoCookies;
+        cookies += autoCookies; totalCookies += autoCookies;
     }
 
-    // 饼干缩放弹跳
     if (cookieScaleTarget > 1) {
         cookieScale += (cookieScaleTarget - cookieScale) * 0.2;
-        if (cookieScale >= cookieScaleTarget - 0.01) {
-            cookieScaleTarget = 0.95;
-        }
+        if (cookieScale >= cookieScaleTarget - 0.01) { cookieScaleTarget = 0.95; }
     } else if (cookieScaleTarget < 1) {
         cookieScale += (cookieScaleTarget - cookieScale) * 0.15;
-        if (cookieScale <= 1.01) {
-            cookieScale = 1;
-            cookieScaleTarget = 1;
-        }
+        if (cookieScale <= 1.01) { cookieScale = 1; cookieScaleTarget = 1; }
     }
 
-    // 更新漂浮文字
     for (let i = floatingTexts.length - 1; i >= 0; i--) {
         const ft = floatingTexts[i];
-        ft.y += ft.vy;
-        ft.alpha -= 0.02;
+        ft.y += ft.vy; ft.alpha -= 0.02;
         if (ft.alpha <= 0) floatingTexts.splice(i, 1);
     }
 }
@@ -397,28 +293,20 @@ function update(dt) {
 // 渲染
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (gameState === 'menu') {
-        drawMenu();
-    } else {
-        drawGame();
-    }
+    if (gameState === 'menu') { drawMenu(); } else { drawGame(); }
 }
 
 // 事件
 canvas.addEventListener('click', e => handleClick(e.clientX, e.clientY));
 canvas.addEventListener('touchstart', e => {
-    e.preventDefault();
-    const t = e.touches[0];
-    handleClick(t.clientX, t.clientY);
+    e.preventDefault(); const t = e.touches[0]; handleClick(t.clientX, t.clientY);
 }, { passive: false });
 canvas.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
 
 // 游戏循环
 function gameLoop(time) {
-    const dt = time - lastTime;
-    lastTime = time;
-    update(dt);
-    draw();
+    const dt = time - lastTime; lastTime = time;
+    update(dt); draw();
     requestAnimationFrame(gameLoop);
 }
 requestAnimationFrame(gameLoop);

@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
         .select("id, name, student_id, grade, class_num")
         .eq("role", "student");
       const studentMap = new Map<string, any>();
-      (students || []).forEach((s) => studentMap.set(s.id, s));
+      (students || []).forEach((s: any) => studentMap.set(s.id, s));
 
       const { data: convs, error } = await supabaseAdmin
         .from("conversations")
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-      const result = (convs || []).map((c) => {
+      const result = (convs || []).map((c: any) => {
         const s = studentMap.get(c.user_id);
         return {
           ...c,
@@ -68,8 +68,8 @@ export async function GET(req: NextRequest) {
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-      const withReflection = (data || []).filter((c) => c.reflection);
-      const withoutReflection = (data || []).filter((c) => !c.reflection);
+      const withReflection = (data || []).filter((c: any) => c.reflection);
+      const withoutReflection = (data || []).filter((c: any) => !c.reflection);
       return NextResponse.json([...withReflection, ...withoutReflection]);
     }
 

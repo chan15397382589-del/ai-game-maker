@@ -319,7 +319,7 @@ export default function StudentViewPage({ params }: { params: Promise<{ userId: 
           </div>
           <div className="flex-1 min-h-0">
             {previewCode ? (
-              <iframe srcDoc={previewCode} className="w-full h-full" sandbox="allow-scripts" scrolling="no" />
+              <iframe srcDoc={previewCode} className="w-full h-full" sandbox="allow-scripts allow-same-origin" scrolling="no" />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-400">
                 <div className="text-center">

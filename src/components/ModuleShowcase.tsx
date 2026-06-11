@@ -55,7 +55,7 @@ export default function ModuleShowcase({ userId }: Props) {
               onClick={() => router.push(`/student/reviews/${item.id}`)}
             >
               <div className="aspect-square bg-gray-50 relative overflow-hidden">
-                <iframe srcDoc={item.html_code} className="w-full h-full border-0" sandbox="allow-scripts" loading="lazy" scrolling="no" />
+                <iframe srcDoc={item.html_code} className="w-full h-full border-0" sandbox="allow-scripts allow-same-origin" loading="lazy" scrolling="no" />
               </div>
               <div className="flex items-center justify-between px-3 py-2">
                 <span className="text-sm font-bold text-gray-800 truncate">{item.author_name}</span>

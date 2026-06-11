@@ -1907,7 +1907,7 @@ function ProjectsReview() {
             </div>
             <div className="flex-1 p-4 bg-gray-900 rounded-b-2xl">
               <iframe srcDoc={selectedProject.html_code} title={selectedProject.game_title}
-                className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts" scrolling="no" />
+                className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts allow-same-origin" scrolling="no" />
             </div>
           </div>
         </div>
@@ -3237,7 +3237,7 @@ function GameMaker() {
           <div className="flex-1 min-h-0 p-4">
             {current.htmlCode ? (
               current.gameStarted ? (
-                <iframe key={current.htmlCode} srcDoc={current.htmlCode} title="游戏预览" className="w-full h-full rounded-2xl bg-white shadow-inner" sandbox="allow-scripts" scrolling="no" />
+                <iframe key={current.htmlCode} srcDoc={current.htmlCode} title="游戏预览" className="w-full h-full rounded-2xl bg-white shadow-inner" sandbox="allow-scripts allow-same-origin" scrolling="no" />
               ) : (
                 <div className="w-full h-full rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer hover:from-indigo-100 hover:to-purple-100 transition" onClick={() => setCurrent((prev) => ({ ...prev, gameStarted: true }))}>
                   <div className="text-center">

@@ -101,11 +101,15 @@ export async function POST(req: NextRequest) {
 3. 游戏元素要匹配图片中的角色、背景、道具
 4. 颜色风格要与图片一致
 5. 代码要完整可运行
-6. 游戏要有基本的交互（键盘/鼠标控制）
+6. **输入事件绑定（必须遵守）**：
+   - 键盘：document.addEventListener('keydown'/'keyup')，用e.code判断按键（如'ArrowLeft'、'Space'）
+   - 鼠标点击：canvas.addEventListener('click')
+   - 触摸：canvas.addEventListener('touchstart', (e) => { e.preventDefault(); ... }, { passive: false })
+   - 游戏必须同时支持键盘和触摸操作
 7. 添加中文注释说明每个部分
-8. 确保代码在 iframe 中能正常运行
+8. 确保代码在 iframe 中能正常运行（不用localStorage、fetch）
 9. 不要使用任何外部资源或CDN
-10. 画布全屏：Canvas使用width="100%" height="100%"铺满页面，body设置margin:0;padding:0;overflow:hidden
+10. 画布尺寸：Canvas使用固定尺寸（如800x600）或动态计算，body设置margin:0;padding:0;overflow:hidden
 
 请直接输出完整的 HTML 游戏代码，用 \`\`\`html ... \`\`\` 包裹。`
             }

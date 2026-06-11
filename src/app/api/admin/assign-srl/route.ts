@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
     // 按年级+班级分组
     const groups: Record<string, typeof students> = {};
-    students.forEach((s) => {
+    students.forEach((s: any) => {
       const key = `${s.grade || 0}_${s.class_num || 0}`;
       if (!groups[key]) groups[key] = [];
       groups[key].push(s);
@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
 
       // 前一半分到 srl_scaffold，后一半分到 control
       const mid = Math.ceil(classStudents.length / 2);
-      const scaffoldIds = classStudents.slice(0, mid).map((s) => s.id);
-      const controlIds = classStudents.slice(mid).map((s) => s.id);
+      const scaffoldIds = classStudents.slice(0, mid).map((s: any) => s.id);
+      const controlIds = classStudents.slice(mid).map((s: any) => s.id);
 
       // 批量更新
       if (scaffoldIds.length > 0) {

@@ -207,7 +207,7 @@ export default function ReviewsPage() {
                       srcDoc={item.html_code}
                       title={item.game_title}
                       className="w-full h-full border-0"
-                      sandbox="allow-scripts"
+                      sandbox="allow-scripts allow-same-origin"
                       loading="lazy"
                       scrolling="no"
                     />

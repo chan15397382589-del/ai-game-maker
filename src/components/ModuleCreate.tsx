@@ -797,7 +797,7 @@ export default function ModuleCreate({ userId }: Props) {
                 <iframe
                   srcDoc={htmlCode}
                   className="rounded-xl"
-                  sandbox="allow-scripts"
+                  sandbox="allow-scripts allow-same-origin"
                   scrolling="no"
                   style={{ border: 'none', display: 'block', width: '800px', height: '600px', maxWidth: '100%', maxHeight: '100%' }}
                 />

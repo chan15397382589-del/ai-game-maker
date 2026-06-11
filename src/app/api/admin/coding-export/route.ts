@@ -74,7 +74,7 @@ export async function GET(req: NextRequest) {
       .eq("role", "student");
 
     const studentMap = new Map<string, any>();
-    (students || []).forEach((s) => studentMap.set(s.id, s));
+    (students || []).forEach((s: any) => studentMap.set(s.id, s));
 
     // 2. 获取学生 SRL 分组
     const { data: classifications } = await supabaseAdmin

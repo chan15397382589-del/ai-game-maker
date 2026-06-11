@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     }
 
     // 批量获取每个对话的消息数量（避免 N+1 查询）
-    const convIds = (conversations || []).map((c) => c.id);
+    const convIds = (conversations || []).map((c: any) => c.id);
     const countMap: Record<string, number> = {};
     if (convIds.length > 0) {
       const { data: msgRows } = await supabaseAdmin
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const result = (conversations || []).map((conv) => ({
+    const result = (conversations || []).map((conv: any) => ({
       id: conv.id,
       title: conv.title,
       has_game: !!conv.html_code,

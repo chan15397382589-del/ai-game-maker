@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
       .eq("role", "student");
 
     const studentMap = new Map<string, any>();
-    (students || []).forEach((s) => studentMap.set(s.id, s));
+    (students || []).forEach((s: any) => studentMap.set(s.id, s));
 
     // 获取消息
     let query = supabaseAdmin
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     // 按学生 → 会话分组，每条消息单独保留
     const studentData = new Map<string, { student: any; sessions: Map<string, { firstTime: string; messages: { role: string; content: string; time: string }[] }> }>();
 
-    (messages || []).forEach((msg) => {
+    (messages || []).forEach((msg: any) => {
       const student = studentMap.get(msg.user_id);
       if (!student) return;
 
@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
       // 将所有会话的消息合并为一条时间线（每条消息单独保留）
       const allTurns: { role: string; content: string }[] = [];
       sortedSessions.forEach(([, s]) => {
-        s.messages.forEach((m) => {
+        s.messages.forEach((m: any) => {
           allTurns.push({ role: m.role === "user" ? "学生" : "AI老师", content: m.content });
         });
       });
