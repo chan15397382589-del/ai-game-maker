@@ -85,3 +85,24 @@ export function validateComment(text: string): ValidationResult {
 
   return { valid: true };
 }
+
+// 验证游戏名称
+export function validateGameName(text: string): ValidationResult {
+  if (!text || !text.trim()) {
+    return { valid: false, error: "游戏名称不能为空" };
+  }
+
+  if (containsProfanity(text)) {
+    return { valid: false, error: "游戏名称包含不当内容，请换一个名字" };
+  }
+
+  if (text.trim().length < 2) {
+    return { valid: false, error: "游戏名称至少需要2个字" };
+  }
+
+  if (text.trim().length > 20) {
+    return { valid: false, error: "游戏名称不能超过20个字" };
+  }
+
+  return { valid: true };
+}

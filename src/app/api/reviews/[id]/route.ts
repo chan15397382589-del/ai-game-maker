@@ -33,23 +33,23 @@ export async function GET(
 
     // 获取点赞数
     const { count: likeCount } = await db
-      .from("item_likes")
+      .from("likes")
       .select("*", { count: "exact", head: true })
-      .eq("item_id", id);
+      .eq("shared_item_id", id);
 
     // 是否已点赞
     const { data: myLike } = await db
-      .from("item_likes")
+      .from("likes")
       .select("id")
-      .eq("item_id", id)
+      .eq("shared_item_id", id)
       .eq("user_id", user.id)
       .maybeSingle();
 
     // 评论数
     const { count: commentCount } = await db
-      .from("item_comments")
+      .from("comments")
       .select("*", { count: "exact", head: true })
-      .eq("item_id", id);
+      .eq("shared_item_id", id);
 
     return NextResponse.json({
       ...item,

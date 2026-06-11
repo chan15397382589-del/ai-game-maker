@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import VoiceButton from "@/components/VoiceButton";
 import { isRandomInput } from "@/utils/inputValidation";
+import { validateGameName } from "@/lib/profanity";
 
 // 素材库定义（每个分类80个）
 // 素材库定义（每个分类80个，全部使用 Unicode 6.0-9.0 高兼容性emoji）
@@ -152,7 +153,7 @@ export default function ModuleIdeation({ userId }: Props) {
   const [strokes, setStrokes] = useState<DrawStroke[]>([]);
   const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
   const [dragging, setDragging] = useState<{ index: number; offsetX: number; offsetY: number } | null>(null);
-  const [isOverTrash, setIsOverTrash] = useState(false);
+  const trashRef = useRef<HTMLDivElement>(null);
   const [materialTab, setMaterialTab] = useState<"role" | "bg" | "prop">("role");
   const [drawTime, setDrawTime] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
@@ -165,6 +166,8 @@ export default function ModuleIdeation({ userId }: Props) {
   // 撤销/重做历史
   const [history, setHistory] = useState<{ items: CanvasItem[]; strokes: DrawStroke[]; bg: string }[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyIndexRef = useRef(-1);
+  useEffect(() => { historyIndexRef.current = historyIndex; }, [historyIndex]);
 
   // 小组讨论
   const [groupCode, setGroupCode] = useState<string | null>(null);
@@ -180,6 +183,13 @@ export default function ModuleIdeation({ userId }: Props) {
   const [showJoinInput, setShowJoinInput] = useState(false);
 
   const [currentPhase, setCurrentPhase] = useState<"survey" | "design" | "discuss">("survey");
+  const [aiChatMessages, setAiChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [aiChatInput, setAiChatInput] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [imageHistory, setImageHistory] = useState<{ url: string; prompt: string }[]>([]);
+  const [selectedHistoryIdx, setSelectedHistoryIdx] = useState<number>(-1);
+  const aiChatEndRef = useRef<HTMLDivElement>(null);
+  const groupChatRef = useRef<HTMLDivElement>(null);
 
   const CW = 800;
   const CH = 600;
@@ -215,23 +225,40 @@ export default function ModuleIdeation({ userId }: Props) {
           if (designData.length > 0) {
             const task = designData[0];
             if (task.game_name) setGameName(task.game_name);
-            if (task.game_rules && task.game_rules.length > 0) setRules(task.game_rules);
+            if (task.game_rules && task.game_rules.length > 0) {
+              const r = task.game_rules;
+              setRules([r[0] || "", r[1] || "", r[2] || ""]);
+            }
             if (task.design_reason) {
-              // 解析游戏类型
-              const typeMatch = task.design_reason.match(/游戏类型：(.+)/);
-              if (typeMatch) {
-                const type = typeMatch[1];
-                const predefined = ["接东西", "躲避", "跑酷", "迷宫", "对战"];
-                if (predefined.includes(type)) {
-                  setGameType(type);
-                } else {
-                  setGameType("其他");
-                  setCustomType(type);
+              try {
+                const info = JSON.parse(task.design_reason);
+                if (info.game_type) {
+                  const predefined = ["接东西", "躲避", "跑酷", "迷宫", "对战"];
+                  if (predefined.includes(info.game_type)) setGameType(info.game_type);
+                  else { setGameType("其他"); setCustomType(info.game_type); }
+                }
+                if (info.ai_prompt) {
+                  setAiChatMessages([
+                    { role: "user", content: info.ai_prompt },
+                    { role: "assistant", content: "已为你生成游戏画面，可在右侧查看。如需修改，请继续描述。" },
+                  ]);
+                }
+                if (info.image_history && info.image_history.length > 0) {
+                  setImageHistory(info.image_history);
+                  setSelectedHistoryIdx(info.image_history.length - 1);
+                  setSavedDesignImage(info.image_history[info.image_history.length - 1].url);
+                }
+              } catch {
+                const typeMatch = task.design_reason.match(/游戏类型：(.+)/);
+                if (typeMatch) {
+                  const type = typeMatch[1];
+                  const predefined = ["接东西", "躲避", "跑酷", "迷宫", "对战"];
+                  if (predefined.includes(type)) setGameType(type);
+                  else { setGameType("其他"); setCustomType(type); }
                 }
               }
             }
-            if (task.design_image) {
-              // 保存设计图到状态，用于显示
+            if (task.design_image && !savedDesignImage) {
               setSavedDesignImage(task.design_image);
             }
             if (task.duration_seconds) setDrawTime(task.duration_seconds);
@@ -251,6 +278,22 @@ export default function ModuleIdeation({ userId }: Props) {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [currentPhase]);
+
+  // 小组讨论阶段：定时刷新成员列表和消息（每3秒）
+  useEffect(() => {
+    if (currentPhase !== "discuss" || !groupCode) return;
+    const pollTimer = setInterval(() => {
+      fetchGroupMembers(groupCode);
+    }, 3000);
+    return () => clearInterval(pollTimer);
+  }, [currentPhase, groupCode]);
+
+  // 小组聊天消息自动滚动到底部
+  useEffect(() => {
+    if (groupChatRef.current) {
+      groupChatRef.current.scrollTop = groupChatRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
 
   const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -369,31 +412,22 @@ export default function ModuleIdeation({ userId }: Props) {
 
   const handleMouseUp = (e: React.MouseEvent) => {
     if (mode === "move" && dragging) {
-      // 检查是否在垃圾桶区域释放
-      if (isOverTrash) {
-        saveToHistory();
-        setItems((prev) => prev.filter((_, i) => i !== dragging.index));
+      // 检查鼠标是否在垃圾桶区域释放
+      if (trashRef.current) {
+        const trashRect = trashRef.current.getBoundingClientRect();
+        const isOver = e.clientX >= trashRect.left && e.clientX <= trashRect.right &&
+                       e.clientY >= trashRect.top && e.clientY <= trashRect.bottom;
+        if (isOver) {
+          saveToHistory();
+          setItems((prev) => prev.filter((_, i) => i !== dragging.index));
+        }
       }
       setDragging(null);
-      setIsOverTrash(false);
     } else if (mode === "draw" && currentStroke.length > 0) {
       saveToHistory();
       setStrokes((prev) => [...prev, { color: brushColor, size: brushSize, points: currentStroke }]);
       setCurrentStroke([]);
     }
-  };
-
-  // 检测是否在垃圾桶区域
-  const handleTrashDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsOverTrash(true);
-  };
-  const handleTrashDragLeave = () => setIsOverTrash(false);
-  const handleTrashDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsOverTrash(false);
-    // 从素材库拖入垃圾桶 - 不做任何事（素材库拖出的是新素材）
-    // 从画布拖入垃圾桶 - 通过 handleMouseUp 处理
   };
 
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
@@ -426,14 +460,15 @@ export default function ModuleIdeation({ userId }: Props) {
   };
 
   // 保存当前状态到历史
-  const saveToHistory = () => {
+  const saveToHistory = useCallback(() => {
     setHistory((prev) => {
-      const newHistory = prev.slice(0, historyIndex + 1);
+      const idx = historyIndexRef.current;
+      const newHistory = prev.slice(0, idx + 1);
       newHistory.push({ items: [...items], strokes: [...strokes], bg: canvasBg });
       return newHistory;
     });
     setHistoryIndex((prev) => prev + 1);
-  };
+  }, [items, strokes, canvasBg]);
 
   // 撤销
   const handleUndo = () => {
@@ -487,8 +522,9 @@ export default function ModuleIdeation({ userId }: Props) {
 
   const saveDesign = async () => {
     // 验证游戏名称
-    if (isRandomInput(gameName)) {
-      alert("请认真输入游戏名称，不要乱打键盘哦～");
+    const nameValidation = validateGameName(gameName);
+    if (!nameValidation.valid) {
+      alert(nameValidation.error);
       return;
     }
 
@@ -508,29 +544,122 @@ export default function ModuleIdeation({ userId }: Props) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
+      // 使用AI生成的图片或canvas图片
       const drawCanvas = canvasRef.current;
-      const imageData = drawCanvas ? drawCanvas.toDataURL("image/png") : "";
+      const imageData = savedDesignImage || (drawCanvas ? drawCanvas.toDataURL("image/png") : "");
+      const lastAiPrompt = aiChatMessages.filter(m => m.role === "user").pop()?.content || "";
       await fetch("/api/student/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ task_id: "1-1", design_image: imageData, game_rules: validRules, game_name: gameName, design_reason: `游戏类型：${gameType || customType}`, duration_seconds: drawTime }),
+        body: JSON.stringify({
+          task_id: "1-1",
+          design_image: imageData,
+          game_rules: validRules,
+          game_name: gameName,
+          design_reason: JSON.stringify({
+            game_type: gameType || customType,
+            ai_prompt: lastAiPrompt,
+            image_history: imageHistory.map(h => ({ prompt: h.prompt, url: h.url })),
+          }),
+          duration_seconds: drawTime,
+        }),
       });
       setDesignDone(true);
       setCurrentPhase("discuss");
     } catch { alert("保存失败"); }
   };
 
+  // AI生图（结合规则和对话历史）
+  const generateImage = async (prompt: string) => {
+    if (!prompt.trim()) return;
+    setGenerating(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token; if (!token) return;
+
+      // 将规则融入提示词
+      const validRules = rules.filter((r) => r.trim());
+      const rulesText = validRules.length > 0
+        ? "游戏规则：" + validRules.map((r) => `如果${r}`).join("，") + "。"
+        : "";
+      const fullPrompt = `${prompt.trim()}。${rulesText}这是2D网页游戏的画面，扁平化卡通风格，色彩明快，适合儿童。`;
+
+      const res = await fetch("/api/ai/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ prompt: fullPrompt }),
+      });
+      const data = await res.json();
+      if (res.ok && data.image) {
+        setSavedDesignImage(data.image);
+        setImageHistory((prev) => [...prev, { url: data.image, prompt }]);
+        setSelectedHistoryIdx(imageHistory.length);
+
+        // 自动保存到数据库
+        try {
+          await fetch("/api/student/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              task_id: "1-1",
+              design_image: data.image,
+              game_rules: rules.filter((r) => r.trim()),
+              game_name: gameName,
+              design_reason: JSON.stringify({
+                game_type: gameType || customType,
+                ai_prompt: prompt,
+                image_history: [...imageHistory, { url: data.image, prompt }],
+              }),
+              duration_seconds: drawTime,
+            }),
+          });
+        } catch {}
+      } else {
+        setAiChatMessages((prev) => [...prev, { role: "assistant", content: `生成失败：${data.error || "请重试"}` }]);
+      }
+    } catch (e: any) {
+      setAiChatMessages((prev) => [...prev, { role: "assistant", content: `生成失败：${e.message}` }]);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // AI对话生图
+  const handleAiChatSend = async () => {
+    if (!aiChatInput.trim() || generating) return;
+    const userMsg = aiChatInput.trim();
+    setAiChatInput("");
+    setAiChatMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    await generateImage(userMsg);
+  };
+
+  // 获取小组成员（从group_members表查询）
   const fetchGroupMembers = async (gid: string) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
-      const res = await fetch(`/api/student/group-messages?group_id=${gid}`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) {
-        const msgs = await res.json();
+
+      // 并行获取消息和成员列表
+      const [msgsRes, membersRes] = await Promise.all([
+        fetch(`/api/student/group-messages?group_id=${gid}`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`/api/student/groups?group_id=${gid}`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+
+      if (msgsRes.ok) {
+        const msgs = await msgsRes.json();
         setChatMessages(msgs);
-        const members = new Map<string, any>();
-        for (const m of msgs) if (m.sender && !members.has(m.sender.id)) members.set(m.sender.id, m.sender);
-        setGroupMembers(Array.from(members.values()));
+      }
+
+      if (membersRes.ok) {
+        const members = await membersRes.json();
+        // 提取用户信息，去重
+        const userMap = new Map<string, any>();
+        for (const m of members) {
+          if (m.user && !userMap.has(m.user.id)) {
+            userMap.set(m.user.id, m.user);
+          }
+        }
+        setGroupMembers(Array.from(userMap.values()));
       }
     } catch {}
   };
@@ -540,22 +669,79 @@ export default function ModuleIdeation({ userId }: Props) {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
       const res = await fetch(`/api/student/group-tasks?user_id=${memberId}&task_id=1-1`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) { const task = await res.json(); if (task?.id) { setMemberDesign(task); setSelectedMember(groupMembers.find((m) => m.id === memberId)); } }
+      if (res.ok) {
+        const task = await res.json();
+        if (task?.id) {
+          setMemberDesign(task);
+          setSelectedMember(groupMembers.find((m) => m.id === memberId));
+        } else {
+          alert("该同学还没有完成设计");
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "无法查看该同学的设计");
+      }
     } catch {}
   };
 
   const createGroup = async () => {
     const code = Math.floor(1000 + Math.random() * 9000).toString();
-    setGroupCode(code);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
-      await fetch("/api/student/group-messages", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ group_id: code, content: `小组已创建，口令：${code}`, message_type: "system" }) });
+
+      // 1. 创建小组（API会自动将创建者加入）
+      const createRes = await fetch("/api/student/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ group_id: code, group_name: `小组${code}` }),
+      });
+
+      if (!createRes.ok) {
+        const err = await createRes.json().catch(() => ({}));
+        alert(err.error || "创建小组失败");
+        return;
+      }
+
+      // 2. 发送系统消息
+      await fetch("/api/student/group-messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ group_id: code, content: `小组已创建，口令：${code}`, message_type: "system" }),
+      });
+
+      setGroupCode(code);
       fetchGroupMembers(code);
-    } catch {}
+    } catch (e: any) {
+      alert("创建小组失败：" + e.message);
+    }
   };
 
-  const joinGroup = () => { if (joinCode.length === 4) { setGroupCode(joinCode); fetchGroupMembers(joinCode); } };
+  const joinGroup = async () => {
+    if (joinCode.length !== 4) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token; if (!token) return;
+
+      // 调用加入小组API
+      const res = await fetch("/api/student/groups", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ group_id: joinCode }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "加入小组失败");
+        return;
+      }
+
+      setGroupCode(joinCode);
+      fetchGroupMembers(joinCode);
+    } catch (e: any) {
+      alert("加入小组失败：" + e.message);
+    }
+  };
 
   const sendMessage = async () => {
     if (!chatInput.trim() || !groupCode) return;
@@ -647,143 +833,118 @@ export default function ModuleIdeation({ userId }: Props) {
 
       {/* ========== 个人设计 ========== */}
       {currentPhase === "design" && (
-        <div className="flex-1 flex gap-3 min-h-0">
-          {/* 左侧素材库 */}
-          <div className="w-44 bg-orange-100 rounded-2xl shadow-md p-3 flex flex-col border-4 border-orange-200 overflow-hidden">
-            {/* 选项卡 */}
-            <div className="flex gap-1 mb-2 shrink-0">
-              {([["role", "角色"], ["bg", "背景"], ["prop", "道具"]] as const).map(([key, label]) => (
-                <button key={key} onClick={() => setMaterialTab(key)} className={`flex-1 py-1.5 text-xs font-bold rounded-t-lg transition ${materialTab === key ? "bg-amber-50 text-amber-800 border-2 border-amber-300 border-b-0" : "bg-stone-200 text-stone-500 border-2 border-stone-300 border-b-0"}`}>{label}</button>
+        <div className="flex-1 flex gap-4 min-h-0">
+          {/* 左侧：规则 + AI对话 */}
+          <div className="w-96 bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden">
+            {/* 游戏名称 + 规则 */}
+            <div className="p-4 border-b border-gray-100">
+              <div className="mb-3">
+                <label className="text-base font-bold text-gray-800 mb-1.5 block">  游戏名称</label>
+                <input value={gameName} onChange={(e) => setGameName(e.target.value)} placeholder="给游戏取个名字！" className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-base focus:border-indigo-400 outline-none" />
+              </div>
+              <h3 className="text-base font-bold text-gray-800 mb-2">  游戏规则</h3>
+              {rules.map((rule, i) => (
+                <div key={i} className="mb-2">
+                  <div className="flex gap-2">
+                    <input value={rule} onChange={(e) => { const nr = [...rules]; nr[i] = e.target.value; setRules(nr); }} placeholder="如果...就..." className="flex-1 px-3 py-2 border-2 border-gray-200 rounded-xl text-sm focus:border-indigo-400 outline-none" />
+                    <VoiceButton onResult={(text) => { const nr = [...rules]; nr[i] = text; setRules(nr); }} size="sm" />
+                  </div>
+                </div>
               ))}
             </div>
-            {/* 素材列表 */}
-            <div className="flex-1 bg-amber-50 border-2 border-amber-300 rounded-b-xl p-2 overflow-y-auto">
-              <div className="grid grid-cols-4 gap-2">
-                {MATERIALS[materialTab].map((item, i) => (
-                  <div key={i} draggable
-                    onDragStart={(e) => {
-                      const bgItem = item as any;
-                      const dragData = materialTab === "bg"
-                        ? { type: "bg", bg: bgItem.bg, label: item.label }
-                        : { emoji: bgItem.emoji, size: 40 };
-                      e.dataTransfer.setData("text/plain", JSON.stringify(dragData));
-                      e.dataTransfer.effectAllowed = "copy";
-                    }}
-                    className="flex flex-col items-center p-2 rounded-lg hover:bg-amber-100 cursor-grab active:cursor-grabbing transition select-none"
-                    style={materialTab === "bg" ? { background: (item as any).bg, minHeight: 50, borderRadius: 8 } : {}}>
-                    {materialTab === "bg" ? (
-                      <span className="text-xs text-white font-bold drop-shadow-md">{item.label}</span>
-                    ) : (
-                      <>
-                        <span className="text-2xl leading-none">{(item as any).emoji}</span>
-                        <span className="text-xs text-amber-800 font-bold mt-1">{item.label}</span>
-                      </>
-                    )}
+
+            {/* AI对话生图 */}
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="px-4 py-2 border-b border-gray-100 bg-purple-50">
+                <h3 className="text-sm font-bold text-purple-700">  AI生图助手</h3>
+                <p className="text-[10px] text-purple-500">描述游戏画面，AI帮你生成图片</p>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {aiChatMessages.length === 0 && (
+                  <div className="text-center text-gray-400 py-6">
+                    <p className="text-3xl mb-2"> </p>
+                    <p className="text-sm">描述你想要的游戏画面</p>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 中间画布 */}
-          <div className="flex-1 bg-gray-200 rounded-2xl shadow-inner p-4 flex justify-center items-center border-4 border-gray-300 relative overflow-hidden">
-            <div className="shadow-2xl relative shrink-0" style={{ width: "100%", maxWidth: CW, height: CH, background: canvasBg }}>
-              <canvas ref={canvasRef} className="block absolute top-0 left-0 w-full h-full z-10" style={{ cursor: mode === "draw" ? "crosshair" : "default" }}
-                onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
-                onDragOver={handleDragOver} onDrop={handleDrop} />
-              {/* 垃圾桶（移动模式下显示，用于删除素材） */}
-              {mode === "move" && items.length > 0 && (
-                <div
-                  className={`absolute bottom-16 right-3 w-14 h-14 rounded-full flex items-center justify-center text-2xl transition-all z-30 ${
-                    isOverTrash ? "bg-red-500 text-white scale-125 shadow-lg" : "bg-red-100 text-red-500 hover:bg-red-200"
-                  }`}
-                  onDragOver={handleTrashDragOver}
-                  onDragLeave={handleTrashDragLeave}
-                  onDrop={handleTrashDrop}
-                  title="拖动素材到此处删除"
-                >
-                  ️
-                </div>
-              )}
-              {/* 工具栏 */}
-              <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-white/95 rounded-xl px-4 py-2 shadow-lg border border-gray-200 z-30">
-                <button onClick={() => setMode("move")} className={`text-sm px-3 py-1.5 rounded-lg font-bold transition ${mode === "move" ? "bg-amber-400 text-amber-900" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>  移动</button>
-                <button onClick={() => setMode("draw")} className={`text-sm px-3 py-1.5 rounded-lg font-bold transition ${mode === "draw" ? "bg-amber-400 text-amber-900" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>✏️ 画笔</button>
-                <div className="w-px h-6 bg-gray-200 mx-1" />
-                <button onClick={handleUndo} disabled={historyIndex < 0} className="text-sm px-2 py-1.5 rounded-lg font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-30 transition">↩️</button>
-                <button onClick={handleRedo} disabled={historyIndex >= history.length - 1} className="text-sm px-2 py-1.5 rounded-lg font-bold bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-30 transition">↪️</button>
-                <div className="w-px h-6 bg-gray-200 mx-1" />
-                {COLORS.map((c) => (<button key={c} onClick={() => setBrushColor(c)} className={`w-6 h-6 rounded-full border-2 transition ${brushColor === c ? "border-gray-800 scale-110" : "border-transparent"}`} style={{ backgroundColor: c }} />))}
-                <div className="w-px h-6 bg-gray-200 mx-1" />
-                <span className="text-xs text-gray-500">粗细</span>
-                <input type="range" min={1} max={10} value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))} className="w-20" />
-                <button onClick={clearCanvas} className="text-sm px-3 py-1.5 rounded-lg font-bold bg-red-100 text-red-600 hover:bg-red-200 transition">  清空</button>
-              </div>
-            </div>
-          </div>
-
-          {/* 右侧：游戏类型 + 规则 + 名称 */}
-          <div className="w-72 bg-white rounded-2xl shadow-md border border-gray-100 p-4 overflow-y-auto">
-            {/* 计时器 */}
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-bold text-gray-700">⏱️ {formatTime(drawTime)}</span>
-              {isSaving && <span className="text-xs text-green-500 animate-pulse">保存中...</span>}
-            </div>
-
-            {/* 游戏类型 */}
-            <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-700 mb-2">  游戏类型</h3>
-              <div className="grid grid-cols-3 gap-2">
-                {["接东西", "躲避", "跑酷", "迷宫", "对战", "其他"].map((type) => (
-                  <button key={type} onClick={() => setGameType(type)} className={`py-2 rounded-lg text-sm font-medium transition ${gameType === type ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>{type}</button>
-                ))}
-              </div>
-              {gameType === "其他" && (
-                <input value={customType} onChange={(e) => setCustomType(e.target.value)} placeholder="输入游戏类型" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mt-2 outline-none" />
-              )}
-            </div>
-
-            {/* 游戏规则 */}
-            <div className="mb-4">
-              <h3 className="text-sm font-bold text-gray-700 mb-2">  游戏规则</h3>
-              <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-200 mb-3">
-                <p className="text-xs text-amber-600 mb-1.5">  点击快速填入：</p>
-                {RULE_HINTS.map((hint, i) => (
-                  <button key={i} onClick={() => { const idx = rules.findIndex((r) => !r.trim()); if (idx >= 0) { const nr = [...rules]; nr[idx] = hint; setRules(nr); } }}
-                    className="block w-full text-left text-xs text-amber-700 hover:bg-amber-100 px-2 py-1.5 rounded mb-1">• {hint}</button>
-                ))}
-              </div>
-
-              {/* 规则输入 */}
-              <div className="space-y-4">
-                {rules.map((rule, i) => (
-                  <div key={i}>
-                    <label className="text-base text-gray-700 mb-2 font-medium block">规则：</label>
-                    <div className="flex gap-2">
-                      <textarea value={rule} onChange={(e) => { const nr = [...rules]; nr[i] = e.target.value; setRules(nr); }}
-                        placeholder="如果...就..."
-                        rows={3}
-                        className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-base focus:border-indigo-400 outline-none resize-none" />
-                      <VoiceButton onResult={(text) => { const nr = [...rules]; nr[i] = text; setRules(nr); }} />
+                )}
+                {aiChatMessages.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div className={`max-w-[85%] px-3 py-2 rounded-xl text-sm ${msg.role === "user" ? "bg-purple-500 text-white rounded-br-md" : "bg-gray-100 text-gray-700 rounded-bl-md"}`}>
+                      {msg.content}
                     </div>
                   </div>
                 ))}
+                {generating && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-100 rounded-xl px-3 py-2 text-sm"><span className="animate-pulse">  生成中...</span></div>
+                  </div>
+                )}
+                <div ref={aiChatEndRef} />
+              </div>
+              <div className="p-3 border-t border-gray-100">
+                <div className="flex gap-2">
+                  <input value={aiChatInput} onChange={(e) => setAiChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAiChatSend()} placeholder="描述游戏画面..." className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm focus:border-purple-400 outline-none" disabled={generating} />
+                  <VoiceButton onResult={(text) => setAiChatInput(text)} size="sm" />
+                  <button onClick={handleAiChatSend} disabled={generating || !aiChatInput.trim()} className="px-4 py-2.5 bg-purple-500 hover:bg-purple-600 disabled:bg-gray-200 text-white rounded-xl text-sm font-bold">生成</button>
+                </div>
               </div>
             </div>
 
-            {/* 游戏名称 */}
-            <div className="mb-4">
-              <label className="text-sm text-gray-500 mb-1.5 block">游戏名称</label>
-              <input value={gameName} onChange={(e) => setGameName(e.target.value)}
-                placeholder="给游戏取个名字！"
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:border-indigo-400 outline-none" />
-            </div>
-
             {/* 保存按钮 */}
-            <button onClick={saveDesign} disabled={(!gameType && !customType.trim()) || !gameName.trim()}
-              className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition">
-              保存并进入讨论 →
-            </button>
+            <div className="p-3 border-t border-gray-100">
+              <button onClick={saveDesign} disabled={!gameName.trim()} className="w-full py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition">
+                保存并进入讨论 →
+              </button>
+            </div>
+          </div>
+
+          {/* 右侧：AI生图结果 + 历史版本 */}
+          <div className="flex-1 bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+              <h3 className="text-base font-bold text-gray-800">  游戏画面</h3>
+            </div>
+            {/* 图片区域 */}
+            <div className="flex-1 p-4 flex items-center justify-center min-h-0">
+              {savedDesignImage ? (
+                <img
+                  src={savedDesignImage}
+                  alt="AI生成的游戏画面"
+                  className="max-w-full max-h-full rounded-xl border border-gray-200 shadow-sm object-contain"
+                  onError={(e) => {
+                    // 图片加载失败时显示占位提示
+                    (e.target as HTMLImageElement).style.display = "none";
+                    setSavedDesignImage(null);
+                  }}
+                />
+              ) : (
+                <div className="text-center text-gray-400">
+                  <p className="text-5xl mb-3"> </p>
+                  <p className="text-base font-medium">在左侧描述你的游戏</p>
+                  <p className="text-xs mt-2">AI会为你生成游戏画面</p>
+                </div>
+              )}
+            </div>
+            {/* 历史版本 */}
+            {imageHistory.length > 0 && (
+              <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
+                <h4 className="text-xs font-bold text-gray-600 mb-2">  历史版本</h4>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {imageHistory.map((img, i) => (
+                    <button key={i} onClick={() => { setSelectedHistoryIdx(i); setSavedDesignImage(img.url); }}
+                      className={`flex-shrink-0 w-20 h-14 rounded-lg border-2 overflow-hidden transition ${selectedHistoryIdx === i ? "border-purple-500 ring-2 ring-purple-300" : "border-gray-200 hover:border-purple-300"}`}>
+                      <img
+                        src={img.url}
+                        alt={`v${i + 1}`}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // 图片加载失败时显示占位
+                          (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='56' fill='%23e5e7eb'%3E%3Crect width='80' height='56'/%3E%3Ctext x='40' y='28' text-anchor='middle' dy='.3em' fill='%239ca3af' font-size='10'%3E已过期%3C/text%3E%3C/svg%3E";
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -842,7 +1003,7 @@ export default function ModuleIdeation({ userId }: Props) {
                     <div className="flex-1 flex gap-4 min-h-0">
                       <div className="flex-1 flex flex-col">
                         <h3 className="text-sm font-bold text-gray-700 mb-2">{selectedMember.name} 的设计图</h3>
-                        {memberDesign.design_image ? <img src={memberDesign.design_image} alt="设计图" className="flex-1 object-contain border border-gray-200 rounded-lg bg-white" /> : <div className="flex-1 flex items-center justify-center text-gray-400 border border-dashed border-gray-200 rounded-lg"><p className="text-sm">暂无设计图</p></div>}
+                        {memberDesign.design_image ? <img src={memberDesign.design_image} alt="设计图" className="flex-1 object-contain border border-gray-200 rounded-lg bg-white" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="flex-1 flex items-center justify-center text-gray-400 border border-dashed border-gray-200 rounded-lg"><p className="text-sm">暂无设计图</p></div>}
                       </div>
                       <div className="w-64 flex flex-col">
                         <h3 className="text-sm font-bold text-gray-700 mb-2">  游戏规则</h3>
@@ -860,7 +1021,7 @@ export default function ModuleIdeation({ userId }: Props) {
                     <button onClick={() => setSpeakingAs("me")} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${speakingAs === "me" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-indigo-100 border border-gray-200"}`}>我</button>
                     {groupMembers.map((member) => <button key={member.id} onClick={() => setSpeakingAs(member.id)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${speakingAs === member.id ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-indigo-100 border border-gray-200"}`}>{member.name}</button>)}
                   </div>
-                  <div className="flex-1 overflow-y-auto space-y-2 mb-2 p-3 bg-gray-50 rounded-lg">
+                  <div ref={groupChatRef} className="flex-1 overflow-y-auto space-y-2 mb-2 p-3 bg-gray-50 rounded-lg">
                     {chatMessages.length === 0 ? <p className="text-center text-gray-400 text-sm py-4">开始讨论吧！</p> : chatMessages.map((m) => <div key={m.id} className="bg-white rounded-lg px-3 py-2 shadow-sm"><p className="text-sm font-medium text-indigo-600">{m.sender?.name || "我"}</p><p className="text-sm">{m.message_type === "voice" ? `🎤 ${m.voice_transcript || m.content}` : m.content}</p></div>)}
                   </div>
                   <div className="p-2.5 bg-yellow-50 rounded-lg border border-yellow-200 mb-2"><p className="text-sm text-yellow-800">  提示：你觉得他/她的游戏最有趣的设计是什么？</p></div>

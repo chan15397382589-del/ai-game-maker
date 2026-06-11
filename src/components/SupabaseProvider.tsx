@@ -17,16 +17,16 @@ export default function SupabaseProvider({
   const [session, setSession] = useState<Session | null>(null);
 
   useEffect(() => {
-    // 尝试恢复 session，如果 refresh token 失效则清除并跳转登录
+    // 尝试恢复 session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setSession(session);
       } else {
-        // session 为空 → 清除本地存储的过期数据
+        // session 无效才清除
         clearSupabaseStorage();
       }
     }).catch(() => {
-      // refresh token 失效 → 清除本地存储
+      // 出错时清除
       clearSupabaseStorage();
     });
 

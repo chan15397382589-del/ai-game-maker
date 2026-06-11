@@ -1655,6 +1655,72 @@ function ProjectsReview() {
     projects.filter((p: any) => selectedIds.has(p.id)).forEach((p: any) => downloadHtml(p.html_code, p.game_title));
   };
 
+  // 导出所有项目为ZIP
+  const [exporting, setExporting] = useState(false);
+  const exportAllAsZip = async () => {
+    if (projects.length === 0) return alert("没有可导出的作品");
+    setExporting(true);
+    try {
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+      const folder = zip.folder("学生游戏作品")!;
+      projects.forEach((p: any, i: number) => {
+        const name = p.users?.name || "未知";
+        const title = (p.game_title || "游戏").replace(/[<>:"/\\|?*]/g, "_");
+        const fileName = `${name}_${title}.html`;
+        folder.file(fileName, p.html_code || "<html><body>无代码</body></html>");
+      });
+      // 添加汇总表
+      const summary = projects.map((p: any) =>
+        `${p.id}\t${p.game_title || ""}\t${p.users?.name || ""}\t${p.users?.student_id || ""}\t${p.users?.grade || ""}年级${p.users?.class_num || ""}班\t${new Date(p.created_at).toLocaleString("zh-CN")}`
+      ).join("\n");
+      folder.file("汇总表.txt", `ID\t游戏名称\t作者\t学号\t班级\t上传时间\n${summary}`);
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `学生游戏作品_${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("导出失败:", err);
+      alert("导出失败，请重试");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // 导出汇总为Excel
+  const exportSummaryExcel = async () => {
+    if (projects.length === 0) return alert("没有可导出的作品");
+    setExporting(true);
+    try {
+      const XLSX = await import("xlsx");
+      const data = projects.map((p: any) => ({
+        "ID": p.id,
+        "游戏名称": p.game_title || "",
+        "作者": p.users?.name || "",
+        "学号": p.users?.student_id || "",
+        "年级": p.users?.grade ? `${p.users.grade}年级` : "",
+        "班级": p.users?.class_num ? `${p.users.class_num}班` : "",
+        "代码长度": p.html_code?.length || 0,
+        "上传时间": new Date(p.created_at).toLocaleString("zh-CN"),
+      }));
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "学生作品");
+      XLSX.writeFile(wb, `学生作品汇总_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err) {
+      console.error("导出失败:", err);
+      alert("导出失败，请重试");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const batchDelete = async () => {
     if (selectedIds.size === 0) return;
     if (!confirm(`确定要删除选中的 ${selectedIds.size} 个作品吗？`)) return;
@@ -1742,20 +1808,28 @@ function ProjectsReview() {
             {selectedNode.label}
             <span className="text-sm font-normal text-gray-400 ml-2">({projects.length} 个作品)</span>
           </h2>
-          {selectedIds.size > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">已选 {selectedIds.size} 项</span>
-              <button onClick={batchDownload} className="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition">
-                ⬇️ 批量下载
-              </button>
-              <button onClick={batchDelete} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
-                {deleting ? "删除中..." : "🗑️ 批量删除"}
-              </button>
-              <button onClick={() => setSelectedIds(new Set())} className="text-gray-500 hover:text-gray-700 text-xs px-2 py-1">
-                取消选择
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <button onClick={exportAllAsZip} disabled={exporting || projects.length === 0} className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
+              {exporting ? "导出中..." : "📦 导出全部ZIP"}
+            </button>
+            <button onClick={exportSummaryExcel} disabled={exporting || projects.length === 0} className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
+              {exporting ? "导出中..." : "  导出Excel"}
+            </button>
+            {selectedIds.size > 0 && (
+              <>
+                <span className="text-sm text-gray-500">已选 {selectedIds.size} 项</span>
+                <button onClick={batchDownload} className="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition">
+                  ⬇️ 批量下载
+                </button>
+                <button onClick={batchDelete} disabled={deleting} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
+                  {deleting ? "删除中..." : "🗑️ 批量删除"}
+                </button>
+                <button onClick={() => setSelectedIds(new Set())} className="text-gray-500 hover:text-gray-700 text-xs px-2 py-1">
+                  取消选择
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto">
@@ -2651,32 +2725,52 @@ function TasksDataView() {
           {tasks.length === 0 ? (
             <div className="col-span-2 text-center py-12 text-gray-400">暂无数据</div>
           ) : (
-            tasks.map((task: any) => (
-              <div key={task.id} className="border border-gray-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-sm font-bold text-gray-800">{task.user?.name || "未知"}</span>
-                  <span className="text-xs text-gray-400">{task.user?.student_id}</span>
-                  <span className="text-xs text-gray-400">{task.user?.grade}年级{task.user?.class_num}班</span>
+            tasks.map((task: any) => {
+              let designInfo: any = {};
+              try { designInfo = JSON.parse(task.design_reason || "{}"); } catch { designInfo = { game_type: task.design_reason }; }
+              return (
+                <div key={task.id} className="border border-gray-200 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-sm font-bold text-gray-800">{task.user?.name || "未知"}</span>
+                    <span className="text-xs text-gray-400">{task.user?.student_id}</span>
+                    <span className="text-xs text-gray-400">{task.user?.grade}年级{task.user?.class_num}班</span>
+                  </div>
+                  {task.design_image ? (
+                    <img
+                      src={task.design_image}
+                      alt="设计图"
+                      className="w-full max-w-[300px] border border-gray-200 rounded-lg mb-3"
+                      style={{ aspectRatio: "16/9", objectFit: "contain" }}
+                      onError={(e) => {
+                        // 图片加载失败时替换为占位
+                        const parent = (e.target as HTMLImageElement).parentElement;
+                        if (parent) {
+                          (e.target as HTMLImageElement).style.display = "none";
+                          const placeholder = document.createElement("div");
+                          placeholder.className = "w-full max-w-[300px] h-[170px] bg-gray-50 rounded-lg flex items-center justify-center mb-3";
+                          placeholder.innerHTML = '<span class="text-gray-400 text-sm">图片已过期</span>';
+                          parent.insertBefore(placeholder, (e.target as HTMLImageElement).nextSibling);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full max-w-[300px] h-[170px] bg-gray-50 rounded-lg flex items-center justify-center mb-3">
+                      <span className="text-gray-300">无设计图</span>
+                    </div>
+                  )}
+                  {task.game_name && <p className="text-sm"><strong>游戏名：</strong>{task.game_name}</p>}
+                  {designInfo.ai_prompt && <p className="text-xs text-purple-600 mt-1"><strong>AI描述：</strong>{designInfo.ai_prompt}</p>}
+                  {task.game_rules && task.game_rules.length > 0 && (
+                    <div className="mt-2">
+                      <p className="text-xs font-medium text-gray-500">游戏规则：</p>
+                      {task.game_rules.map((rule: string, i: number) => (
+                        <p key={i} className="text-xs text-gray-600">• 如果{rule}</p>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {task.design_image ? (
-                  <img src={task.design_image} alt="设计图" className="w-full max-w-[300px] border border-gray-200 rounded-lg mb-3" />
-                ) : (
-                  <div className="w-full max-w-[300px] h-[200px] bg-gray-50 rounded-lg flex items-center justify-center mb-3">
-                    <span className="text-gray-300">无设计图</span>
-                  </div>
-                )}
-                {task.game_name && <p className="text-sm"><strong>游戏名：</strong>{task.game_name}</p>}
-                {task.game_rules && task.game_rules.length > 0 && (
-                  <div className="mt-2">
-                    <p className="text-xs font-medium text-gray-500">游戏规则：</p>
-                    {task.game_rules.map((rule: string, i: number) => (
-                      <p key={i} className="text-xs text-gray-600">规则{i + 1}：如果{rule}</p>
-                    ))}
-                  </div>
-                )}
-                {task.design_reason && <p className="text-xs text-gray-500 mt-2">设计理由：{task.design_reason}</p>}
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       ) : (

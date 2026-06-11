@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "未登录" }, { status: 401 });
     }
 
-    // 获取所有对话文档（不包含 html_code，减少响应体积）
+    // 获取所有对话文档
     const { data: conversations, error } = await supabaseAdmin
       .from("conversations")
       .select("id, title, html_code, created_at, updated_at")
@@ -29,25 +29,29 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 获取每个对话的消息数量
-    const result = [];
-    for (const conv of (conversations || [])) {
-      const { count } = await supabaseAdmin
+    // 批量获取每个对话的消息数量（避免 N+1 查询）
+    const convIds = (conversations || []).map((c) => c.id);
+    const countMap: Record<string, number> = {};
+    if (convIds.length > 0) {
+      const { data: msgRows } = await supabaseAdmin
         .from("messages")
-        .select("id", { count: "exact", head: true })
+        .select("session_id")
         .eq("user_id", user.id)
-        .eq("session_id", conv.id);
-
-      result.push({
-        id: conv.id,
-        title: conv.title,
-        has_game: !!conv.html_code,
-        html_code: conv.html_code, // 前端 loadConversation 需要用到
-        message_count: count || 0,
-        created_at: conv.created_at,
-        updated_at: conv.updated_at,
+        .in("session_id", convIds);
+      (msgRows || []).forEach((r: any) => {
+        countMap[r.session_id] = (countMap[r.session_id] || 0) + 1;
       });
     }
+
+    const result = (conversations || []).map((conv) => ({
+      id: conv.id,
+      title: conv.title,
+      has_game: !!conv.html_code,
+      html_code: conv.html_code,
+      message_count: countMap[conv.id] || 0,
+      created_at: conv.created_at,
+      updated_at: conv.updated_at,
+    }));
 
     return NextResponse.json(result);
   } catch (error: any) {

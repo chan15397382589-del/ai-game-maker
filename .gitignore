@@ -16,6 +16,11 @@ out/
 # build
 dist/
 build/
+tsconfig.tsbuildinfo
+
+# logs
+*.log
+server.log
 
 # IDE
 .vscode/
@@ -36,3 +41,36 @@ yarn-error.log*
 .vercel/
 .env.vercel
 nul
+
+# AI assistant tools
+.claude/
+.codebuddy/
+.workbuddy/
+
+# third-party
+opengame/
+
+# backups
+backups/
+
+# test files
+test_mimo_vision.py
+
+# prototypes
+code_artifact.html
+code_artifact.tsx
+
+# load tests
+load-test/
+
+# SQL migration patches (consolidated in supabase/migrations/)
+supabase-*.sql
+supabase-*.md
+
+# Windows launcher scripts
+start.bat
+start-with-opengame.bat
+start-with-opengame.ps1
+
+# implementation snapshot
+实施版本/

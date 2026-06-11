@@ -56,9 +56,5 @@ export function getValidationMessage(text: string, recentMessages?: string[]): s
     return "请输入有意义的内容哦～比如描述你想要的游戏角色、规则或者玩法。";
   }
 
-  if (recentMessages && isDuplicateInput(text, recentMessages)) {
-    return "你刚才已经说过这个了，试试换个不同的想法吧！";
-  }
-
   return null;
 }

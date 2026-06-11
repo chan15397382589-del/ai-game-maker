@@ -23,13 +23,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "认证失败" }, { status: 401 });
     }
 
-    const { user_id, game_title, html_code, reflection } = await req.json();
+    const { game_title, html_code, reflection } = await req.json();
 
-    if (user_id !== user.id) {
-      return NextResponse.json({ error: "无权操作此用户的数据" }, { status: 403 });
-    }
-
-    const insertData: Record<string, any> = { user_id, game_title, html_code, is_published: false };
+    const insertData: Record<string, any> = { user_id: user.id, game_title, html_code, is_published: false };
     if (reflection) insertData.reflection = reflection;
 
     const { data, error } = await db

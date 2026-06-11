@@ -27,19 +27,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const response = await createChatCompletion(messages, currentCode, srlCondition);
+    let response;
+    try {
+      response = await createChatCompletion(messages, currentCode, srlCondition);
+    } catch (apiError: any) {
+      console.error("MIMO API call failed:", apiError.message);
+      return NextResponse.json({ error: "AI服务连接失败：" + apiError.message }, { status: 502 });
+    }
 
     // 创建流式响应
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
         let assistantContent = "";
+        let chunkCount = 0;
 
         try {
           for await (const event of response) {
-            if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+            // 处理文本内容
+            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
               const content = event.delta.text;
               assistantContent += content;
+              chunkCount++;
               const data = `data: ${JSON.stringify({ content })}\n\n`;
               controller.enqueue(encoder.encode(data));
             }
@@ -50,11 +59,14 @@ export async function POST(req: NextRequest) {
             const hasCode = /```html/i.test(assistantContent) || /```[\s\S]*?```/.test(assistantContent);
             const aiSuggestionType = classifyAiSuggestion(assistantContent);
             await saveMessage(userId, "assistant", assistantContent, token, sessionId, undefined, hasCode, aiSuggestionType);
+          } else {
+            console.warn("AI returned empty content after", chunkCount, "chunks. Messages:", JSON.stringify(messages).substring(0, 200));
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI服务暂时无法回复，请稍后重试" })}\n\n`));
           }
         } catch (streamError: any) {
           // 流处理异常，发送错误事件后关闭
-          console.error("Stream error:", streamError);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI 回复中断" })}\n\n`));
+          console.error("Stream error:", streamError.message, streamError.stack);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI回复中断：" + streamError.message })}\n\n`));
         }
 
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));

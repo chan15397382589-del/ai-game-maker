@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import VoiceButton from "@/components/VoiceButton";
+import { isRandomInput } from "@/utils/inputValidation";
 
 interface Props {
   userId: string;
@@ -19,12 +20,17 @@ export default function ModuleReflection({ userId }: Props) {
 
   const handleSave = async () => {
     if (!canSave) return;
+    // 输入验证
+    if (isRandomInput(card1) || isRandomInput(card2) || isRandomInput(card3)) {
+      alert("请认真填写反思内容，不要乱打键盘哦～");
+      return;
+    }
     setSaving(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) return;
-      await fetch("/api/student/sessions", {
+      const res = await fetch("/api/student/sessions", {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -32,9 +38,15 @@ export default function ModuleReflection({ userId }: Props) {
           reflection: JSON.stringify({ card1: card1.trim(), card2: card2.trim(), card3: card3.trim() }),
         }),
       });
-      setSaved(true);
-    } catch {}
-    finally { setSaving(false); }
+      if (res.ok) {
+        setSaved(true);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("保存失败：" + (err.error || "请重试"));
+      }
+    } catch (e: any) {
+      alert("保存异常：" + e.message);
+    } finally { setSaving(false); }
   };
 
   if (saved) {

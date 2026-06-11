@@ -25,14 +25,26 @@ export default function StudentPage() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const { data } = await supabase.auth.getUser();
-        if (!data.user) { router.push("/login"); return; }
-        setUserId(data.user.id);
-        const { data: userData } = await supabase.from("users").select("name, role").eq("id", data.user.id).single();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          router.push("/login");
+          return;
+        }
+        setUserId(session.user.id);
+        const { data: userData } = await supabase.from("users").select("name, role").eq("id", session.user.id).single();
         if (userData?.role === "admin") { router.push("/admin"); return; }
         setUserName(userData?.name || "");
+        // 检查 URL 参数或 localStorage，支持从其他页面跳转到指定模块
+        const params = new URLSearchParams(window.location.search);
+        const moduleParam = params.get("module") || localStorage.getItem("gotoModule");
+        if (moduleParam && ["ideation", "create", "showcase", "reflection"].includes(moduleParam)) {
+          setActiveModule(moduleParam);
+          localStorage.removeItem("gotoModule");
+        }
         setReady(true);
-      } catch { router.push("/login"); }
+      } catch {
+        router.push("/login");
+      }
     };
     checkAuth();
   }, []);
@@ -70,7 +82,7 @@ export default function StudentPage() {
               </button>
             ))}
             <button
-              onClick={() => { supabase.auth.signOut(); router.push("/login?action=switch"); }}
+              onClick={async () => { await supabase.auth.signOut(); router.push("/login?action=switch"); }}
               className="ml-4 text-sm bg-indigo-500 hover:bg-indigo-400 px-3 py-2 rounded-lg transition"
             >
               退出
@@ -79,12 +91,20 @@ export default function StudentPage() {
         </div>
       </nav>
 
-      {/* 模块内容 */}
+      {/* 模块内容 - 所有模块保持挂载，用CSS显示/隐藏 */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {activeModule === "ideation" && <ModuleIdeation userId={userId} />}
-        {activeModule === "create" && <ModuleCreate userId={userId} />}
-        {activeModule === "showcase" && <ModuleShowcase userId={userId} />}
-        {activeModule === "reflection" && <ModuleReflection userId={userId} />}
+        <div style={{ display: activeModule === "ideation" ? "block" : "none" }}>
+          <ModuleIdeation userId={userId} />
+        </div>
+        <div style={{ display: activeModule === "create" ? "block" : "none" }}>
+          <ModuleCreate userId={userId} />
+        </div>
+        <div style={{ display: activeModule === "showcase" ? "block" : "none" }}>
+          <ModuleShowcase userId={userId} />
+        </div>
+        <div style={{ display: activeModule === "reflection" ? "block" : "none" }}>
+          <ModuleReflection userId={userId} />
+        </div>
       </div>
     </div>
   );

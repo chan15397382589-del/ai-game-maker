@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/components/SupabaseProvider";
 import XiaozhiAvatar from "@/components/XiaozhiAvatar";
 import VoiceButton from "@/components/VoiceButton";
@@ -28,7 +29,11 @@ interface DesignData {
   game_rules?: string[];
   design_reason?: string;
   design_image?: string;
+  ai_prompt?: string;
+  image_history?: { url: string; prompt: string }[];
 }
+
+interface Props { userId: string; }
 
 interface Conversation {
   id: string;
@@ -48,8 +53,10 @@ interface GameSnapshot {
 interface Props { userId: string; }
 
 export default function ModuleCreate({ userId }: Props) {
+  const router = useRouter();
   const [designData, setDesignData] = useState<DesignData | null>(null);
   const [designLoaded, setDesignLoaded] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [rawMessages, setRawMessages] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState("");
@@ -84,7 +91,21 @@ export default function ModuleCreate({ userId }: Props) {
           const tasks = await res.json();
           if (tasks.length > 0) {
             const task = tasks[0];
-            setDesignData({ game_name: task.game_name, game_rules: task.game_rules || [], design_reason: task.design_reason, design_image: task.design_image });
+            let aiPrompt = "";
+            let imageHistory: { url: string; prompt: string }[] = [];
+            try {
+              const info = JSON.parse(task.design_reason || "{}");
+              aiPrompt = info.ai_prompt || "";
+              imageHistory = info.image_history || [];
+            } catch {}
+            setDesignData({
+              game_name: task.game_name,
+              game_rules: task.game_rules || [],
+              design_reason: task.design_reason,
+              design_image: task.design_image,
+              ai_prompt: aiPrompt,
+              image_history: imageHistory,
+            });
             if (task.game_name) setGameTitle(task.game_name);
           }
         }
@@ -111,10 +132,19 @@ export default function ModuleCreate({ userId }: Props) {
     if (!designLoaded) return;
     const rulesText = (designData?.game_rules || []).filter(r => r.trim());
     if (designData?.game_name) {
-      const welcome = {
-        role: "assistant",
-        content: `你好！我是小智老师 🤖✨\n\n我看到你在构思阶段设计了一个游戏！\n\n  游戏名称：${designData.game_name}${designData.design_reason ? `\n  类型：${designData.design_reason}` : ""}${rulesText.length > 0 ? `\n\n  你的规则：\n${rulesText.map((r, i) => `规则${i + 1}：如果${r}`).join("\n")}` : ""}\n\n很好！我现在就根据你的设计来制作这个游戏！点击「  自动生成」让我开始吧。`,
-      };
+      // 构建包含设计信息的欢迎消息
+      let welcomeContent = `你好！我是小智老师 🤖✨\n\n我看到你在构思阶段设计了一个游戏！\n\n`;
+      welcomeContent += `  游戏名称：${designData.game_name}\n`;
+      if (rulesText.length > 0) {
+        welcomeContent += `\n  你的规则：\n`;
+        rulesText.forEach((r, i) => { welcomeContent += `规则${i + 1}：如果${r}\n`; });
+      }
+      if (designData.ai_prompt) {
+        welcomeContent += `\n  你描述的画面：${designData.ai_prompt}\n`;
+      }
+      welcomeContent += `\n很好！我现在就根据你的设计来制作这个游戏！点击「  自动生成」让我开始吧。`;
+
+      const welcome = { role: "assistant", content: welcomeContent };
       setMessages([welcome]);
       setRawMessages([welcome]);
     } else {
@@ -178,7 +208,13 @@ export default function ModuleCreate({ userId }: Props) {
       .replace(/\[.*?\]\(.*?\)/g, "")               // 移除链接
       .replace(/<[^>]+>/g, "")                      // 移除HTML标签
       .replace(/\n{3,}/g, "\n\n")                   // 压缩多余空行
+      .replace(/^\s*[\r\n]/gm, "")                  // 移除空行
       .trim();
+  };
+
+  // 检查消息是否包含代码
+  const hasCode = (content: string): boolean => {
+    return /```/.test(content) || /<html|<!DOCTYPE|<canvas|<script/i.test(content);
   };
 
   // 加载对话
@@ -197,16 +233,193 @@ export default function ModuleCreate({ userId }: Props) {
         // 原始消息保留完整内容（用于发送给API）
         setRawMessages(msgs.map((m: any) => ({ role: m.role, content: m.content })));
         setCurrentConvId(conv.id);
+        setGameStarted(false);
         if (conv.html_code) { setHtmlCode(conv.html_code); setLiveCode(conv.html_code); setViewMode("game"); }
+        else { setHtmlCode(""); setLiveCode(""); setViewMode("code"); }
       }
-    } catch {}
+    } catch (err) {
+      console.error("加载对话失败:", err);
+    }
   };
 
-  // 自动发送设计给AI
+  // 自动生成游戏（通过 OpenGame WebSocket）
   const handleAutoGenerate = async () => {
     if (!designData?.game_name || sendingRef.current) return;
-    const rulesText = (designData.game_rules || []).filter(r => r.trim()).map(r => `如果${r}`).join("，");
-    await handleSendWithContent(`我想做一个${designData.design_reason || "游戏"}，游戏叫"${designData.game_name}"。${rulesText ? `规则是：${rulesText}。` : ""}请帮我做出来！`);
+
+    // 构建 OpenGame 提示词
+    const rulesText = (designData.game_rules || []).filter(r => r.trim());
+    let prompt = `做一个${designData.game_name}游戏。`;
+    if (rulesText.length > 0) {
+      prompt += `游戏规则：${rulesText.join("；")}。`;
+    }
+    if (designData.ai_prompt) {
+      prompt += `画面描述：${designData.ai_prompt}。`;
+    }
+    prompt += "用HTML5实现，包含完整的游戏逻辑和视觉效果。";
+
+    sendingRef.current = true;
+    setLoading(true);
+    setViewMode("code");
+    setLiveCode("//   正在连接 OpenGame 服务...\n\n请稍候...");
+    setIsCoding(true);
+
+    // 添加用户消息到聊天
+    setMessages((prev) => [...prev, { role: "user", content: `请帮我制作游戏"${designData.game_name}"` }]);
+
+    try {
+      const ws = new WebSocket("ws://localhost:3001");
+      let taskId = "";
+      let outputBuffer = "";
+
+      ws.onopen = () => {
+        setLiveCode("// ✅ 已连接 OpenGame\n//   正在生成游戏...\n\n请稍候...");
+        ws.send(JSON.stringify({
+          type: "generate",
+          prompt,
+          options: {
+            apiKey: process.env.NEXT_PUBLIC_OPENGAME_API_KEY,
+            apiBaseUrl: process.env.NEXT_PUBLIC_OPENGAME_API_BASE_URL,
+            authType: "anthropic",
+          },
+        }));
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          const data = JSON.parse(event.data);
+
+          switch (data.type) {
+            case "task_started":
+              taskId = data.taskId;
+              setLiveCode("// ✅ 任务已启动\n//   生成中...\n\n请稍候...");
+              break;
+
+            case "output":
+            case "assistant_message":
+              if (data.content) {
+                outputBuffer += data.content;
+                // 显示最后几行输出作为进度
+                const lines = outputBuffer.split("\n").filter((l: string) => l.trim());
+                const preview = lines.slice(-8).join("\n");
+                setLiveCode(`//   OpenGame 生成中...\n\n${preview}`);
+              }
+              break;
+
+            case "task_progress":
+              if (data.message) {
+                setLiveCode(`//   ${data.message}\n\n${outputBuffer.split("\n").slice(-5).join("\n")}`);
+              }
+              break;
+
+            case "task_completed":
+              // 获取生成的游戏 HTML
+              try {
+                const files = data.result?.files || [];
+                const outputFiles = data.result?.outputFiles || [];
+                const allFiles = [...files, ...outputFiles];
+                const htmlFile = allFiles.find((f: string) => f.endsWith(".html"));
+
+                if (htmlFile && taskId) {
+                  const htmlRes = await fetch(`http://localhost:3001/api/tasks/${taskId}/files/${htmlFile}`);
+                  if (htmlRes.ok) {
+                    const htmlCode = await htmlRes.text();
+                    setIsCoding(false);
+                    setHtmlCode(htmlCode);
+                    setLiveCode(htmlCode);
+                    setViewMode("game");
+                    setMessages((prev) => [...prev, { role: "assistant", content: `  游戏"${designData.game_name}"已通过 OpenGame 生成完成！\n\n请在右侧预览区查看。` }]);
+                    setRawMessages((prev) => [...prev, { role: "assistant", content: `\`\`\`html\n${htmlCode}\n\`\`\`` }]);
+                    ws.close();
+                    return;
+                  }
+                }
+                // 如果没有找到 HTML 文件
+                setIsCoding(false);
+                setMessages((prev) => [...prev, { role: "assistant", content: "  OpenGame 生成完成，但未找到 HTML 文件。请重试。" }]);
+              } catch (fetchErr: any) {
+                console.error("获取游戏文件失败:", fetchErr);
+                setIsCoding(false);
+                setMessages((prev) => [...prev, { role: "assistant", content: `  获取游戏文件失败：${fetchErr.message}` }]);
+              }
+              ws.close();
+              break;
+
+            case "task_error":
+              setIsCoding(false);
+              setLiveCode(`// ❌ 生成失败：${data.message}`);
+              setMessages((prev) => [...prev, { role: "assistant", content: `  OpenGame 生成失败：${data.message}` }]);
+              ws.close();
+              break;
+
+            case "task_cancelled":
+              setIsCoding(false);
+              setLiveCode("// ⚠️ 任务已取消");
+              ws.close();
+              break;
+          }
+        } catch {
+          // 非 JSON 消息，忽略
+        }
+      };
+
+      ws.onerror = () => {
+        setIsCoding(false);
+        setLiveCode("// ❌ 无法连接 OpenGame 服务\n// 请确认服务已启动");
+        setMessages((prev) => [...prev, { role: "assistant", content: "  无法连接 OpenGame 服务，请确认服务已启动（运行 start-with-opengame.bat）" }]);
+        sendingRef.current = false;
+        setLoading(false);
+      };
+
+      ws.onclose = () => {
+        sendingRef.current = false;
+        setLoading(false);
+      };
+    } catch (e: any) {
+      setIsCoding(false);
+      setLiveCode(`// ❌ 连接失败：${e.message}`);
+      setMessages((prev) => [...prev, { role: "assistant", content: `  连接 OpenGame 失败：${e.message}` }]);
+      sendingRef.current = false;
+      setLoading(false);
+    }
+  };
+
+  // 图片生代码（使用MIMO图片理解）
+  const handleImageToCode = async () => {
+    const imageUrl = selectedImage || designData?.design_image;
+    if (!imageUrl || sendingRef.current) return;
+
+    sendingRef.current = true;
+    setLoading(true);
+    setMessages((prev) => [...prev, { role: "user", content: "  请根据设计图生成游戏代码" }]);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch("/api/ai/image-to-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ imageUrl }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.code) {
+        setHtmlCode(data.code);
+        setLiveCode(data.code);
+        setViewMode("code");
+        const promptMsg = data.prompt ? `\n\n  图片分析：${data.prompt}` : "";
+        setMessages((prev) => [...prev, { role: "assistant", content: `  已根据设计图生成游戏代码！${promptMsg}\n\n请查看右侧预览区。` }]);
+        setRawMessages((prev) => [...prev, { role: "assistant", content: data.code }]);
+      } else {
+        setMessages((prev) => [...prev, { role: "assistant", content: `生成失败：${data.error || "请重试"}` }]);
+      }
+    } catch (e: any) {
+      setMessages((prev) => [...prev, { role: "assistant", content: `生成失败：${e.message}` }]);
+    } finally {
+      setLoading(false);
+      sendingRef.current = false;
+    }
   };
 
   const handleSendWithContent = async (content: string) => {
@@ -231,14 +444,16 @@ export default function ModuleCreate({ userId }: Props) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
-      if (!currentConvId) {
+      let convId = currentConvId;
+      if (!convId) {
         const convRes = await fetch("/api/student/sessions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ title: designData?.game_name || "新对话" }) });
-        if (convRes.ok) { const conv = await convRes.json(); setCurrentConvId(conv.id); }
+        if (convRes.ok) { const conv = await convRes.json(); convId = conv.id; setCurrentConvId(conv.id); }
       }
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ messages: newRaw.map((m) => ({ role: m.role, content: m.content })), currentCode: htmlCode || undefined, sessionId: currentConvId }),
+        body: JSON.stringify({ messages: newRaw.map((m) => ({ role: m.role, content: m.content })), currentCode: htmlCode || undefined, sessionId: convId }),
+        signal: AbortSignal.timeout(120000), // 2分钟超时
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -248,7 +463,11 @@ export default function ModuleCreate({ userId }: Props) {
       await processStream(res);
     } catch (e: any) {
       console.error("发送失败:", e);
-      alert("发送失败：" + (e.message || "未知错误"));
+      if (e.name === "TimeoutError" || e.name === "AbortError") {
+        alert("AI回复超时，请稍后重试");
+      } else {
+        alert("发送失败：" + (e.message || "未知错误"));
+      }
     } finally { setLoading(false); sendingRef.current = false; }
   };
 
@@ -260,6 +479,7 @@ export default function ModuleCreate({ userId }: Props) {
     let assistantContent = "";
     let fenceCount = 0;
     let lastDisplayLen = 0;
+    let hasError = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -274,6 +494,8 @@ export default function ModuleCreate({ userId }: Props) {
           const parsed = JSON.parse(data);
           if (parsed.error) {
             console.error("AI Error:", parsed.error);
+            setMessages((prev) => [...prev, { role: "assistant", content: `  ${parsed.error}` }]);
+            hasError = true;
             return;
           }
           if (parsed.content) {
@@ -281,24 +503,33 @@ export default function ModuleCreate({ userId }: Props) {
             const fenceMatches = parsed.content.match(/```/g);
             if (fenceMatches) fenceCount += fenceMatches.length;
             const inCodeBlock = fenceCount % 2 !== 0;
-            if (inCodeBlock) { setIsCoding(true); setViewMode("code"); const code = extractHtmlCode(assistantContent); if (code) setLiveCode(code); }
-            // 实时更新显示（降低阈值，更频繁更新）
-            const textOnly = extractTextOnly(assistantContent);
-            if (textOnly && textOnly.length - lastDisplayLen > 20) {
-              lastDisplayLen = textOnly.length;
-              setMessages((prev) => { const msgs = [...prev]; const lastIdx = msgs.length - 1; if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) { msgs[lastIdx] = { role: "assistant", content: textOnly, _s: true } as any; } else { msgs.push({ role: "assistant", content: textOnly, _s: true } as any); } return msgs; });
+            if (inCodeBlock) {
+              // 在代码块内：只更新代码预览，不更新聊天
+              setIsCoding(true);
+              setViewMode("code");
+              const code = extractHtmlCode(assistantContent);
+              if (code) setLiveCode(code);
+            } else {
+              // 在代码块外：更新聊天显示（仅文字）
+              const textOnly = extractTextOnly(assistantContent);
+              if (textOnly && textOnly.length - lastDisplayLen > 20) {
+                lastDisplayLen = textOnly.length;
+                setMessages((prev) => { const msgs = [...prev]; const lastIdx = msgs.length - 1; if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) { msgs[lastIdx] = { role: "assistant", content: textOnly, _s: true } as any; } else { msgs.push({ role: "assistant", content: textOnly, _s: true } as any); } return msgs; });
+              }
             }
           }
         } catch {}
       }
     }
 
+    if (hasError) return;
+
     setIsCoding(false);
     const finalCode = extractHtmlCode(assistantContent);
     const finalText = extractTextOnly(assistantContent);
 
     // 显示最终消息（保留AI的完整回复）
-    const displayText = finalText || (finalCode ? "游戏代码已生成，请查看右侧预览区！" : "AI没有回复，请重试");
+    const displayText = finalText || (finalCode ? "游戏代码已生成，请查看右侧预览区！" : "  AI暂时无法回复，请稍后重试");
     setMessages((prev) => { const msgs = [...prev]; const lastIdx = msgs.length - 1; if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) { msgs[lastIdx] = { role: "assistant", content: displayText }; } else { msgs.push({ role: "assistant", content: displayText }); } return msgs; });
     setRawMessages((prev) => [...prev, { role: "assistant", content: assistantContent }]);
     if (finalCode) {
@@ -330,8 +561,14 @@ export default function ModuleCreate({ userId }: Props) {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
       const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ game_title: gameTitle.trim(), html_code: htmlCode }) });
-      if (res.ok) alert("上传成功！");
-    } catch {} finally { setSaving(false); }
+      if (res.ok) {
+        alert("  上传成功！");
+        window.location.href = "/student?module=reflection";
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("上传失败：" + (err.error || "未知错误"));
+      }
+    } catch (e: any) { alert("上传异常：" + e.message); } finally { setSaving(false); }
   };
 
   const handleDownload = () => {
@@ -340,6 +577,8 @@ export default function ModuleCreate({ userId }: Props) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `${gameTitle || "游戏"}.html`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+    alert("  下载成功！点击确定跳转到反思页面");
+    router.push("/student?module=reflection");
   };
 
   const deleteConversation = async (convId: string) => {
@@ -370,12 +609,6 @@ export default function ModuleCreate({ userId }: Props) {
     <div className="flex h-[calc(100vh-120px)] gap-3">
       {/* 左侧导航栏 */}
       <div className="w-44 bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col flex-shrink-0 overflow-hidden">
-        {/* 任务入口 */}
-        <div className="px-3 py-2 border-b border-gray-100">
-          <button onClick={() => window.location.href = "/student"} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 hover:bg-amber-100 transition">
-            <span> </span><span>任务中心</span>
-          </button>
-        </div>
         <div className="px-3 py-2 flex items-center justify-between">
           <span className="text-xs font-medium text-gray-500">  我的对话</span>
           <button onClick={() => { setCurrentConvId(null); setMessages([]); setRawMessages([]); setHtmlCode(""); setLiveCode(""); setGameStarted(false); }}
@@ -422,27 +655,83 @@ export default function ModuleCreate({ userId }: Props) {
           <button onClick={handleAutoGenerate} disabled={loading || !designData?.game_name} className="ml-auto text-sm bg-white text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition disabled:opacity-50">  自动生成</button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* 设计图展示 */}
-          {designData?.design_image && (
+          {/* 设计图展示 - 始终显示 */}
+          {designLoaded && designData && (designData.design_image || (designData.image_history && designData.image_history.length > 0)) && (
             <div className="flex justify-start">
-              <div className="max-w-[60%] bg-indigo-50 rounded-2xl rounded-bl-md p-3 border border-indigo-200">
-                <p className="text-xs font-bold text-indigo-700 mb-2">  你的设计图</p>
-                <img src={designData.design_image} alt="设计图" className="w-full rounded-lg border border-indigo-200" />
+              <div className="max-w-[85%] bg-indigo-50 rounded-2xl rounded-bl-md p-3 border border-indigo-200">
+                <p className="text-sm font-bold text-indigo-700 mb-2">  你在构思阶段的设计</p>
+                {/* AI生成的图片历史 - 可选择 */}
+                {designData.image_history && designData.image_history.length > 0 && (
+                  <div className="mb-2">
+                    <p className="text-xs text-indigo-600 mb-1.5">点击选择一张作为游戏画面：</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {designData.image_history.map((img: any, i: number) => (
+                        <button key={i} onClick={() => setSelectedImage(img.url)}
+                          className={`flex-shrink-0 w-24 h-16 rounded-lg border-2 overflow-hidden transition ${selectedImage === img.url ? "border-indigo-500 ring-2 ring-indigo-300" : "border-indigo-200 hover:border-indigo-400"}`}>
+                          <img
+                            src={img.url}
+                            alt={`v${i + 1}`}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='64' fill='%23e5e7eb'%3E%3Crect width='96' height='64'/%3E%3Ctext x='48' y='32' text-anchor='middle' dy='.3em' fill='%239ca3af' font-size='11'%3E已过期%3C/text%3E%3C/svg%3E";
+                            }}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* 选中的图片大图 */}
+                {selectedImage && (
+                  <div className="mb-2">
+                    <p className="text-xs text-indigo-600 mb-1">已选择：</p>
+                    <img
+                      src={selectedImage}
+                      alt="选中的设计图"
+                      className="w-full max-w-sm rounded-lg border border-indigo-200"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                        setSelectedImage(null);
+                      }}
+                    />
+                  </div>
+                )}
+                {/* 单张设计图（如果没有历史） */}
+                {!designData.image_history?.length && designData.design_image && (
+                  <img
+                    src={designData.design_image}
+                    alt="设计图"
+                    className="w-full max-w-xs rounded-lg border border-indigo-200 mb-2"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                )}
+                {/* AI描述 */}
+                {designData.ai_prompt && (
+                  <p className="text-xs text-indigo-600 mt-1">  AI描述：{designData.ai_prompt}</p>
+                )}
               </div>
             </div>
           )}
-          {messages.map((msg, i) => (
-            <div key={`${i}-${msg.content.length}`} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              {msg.role === "assistant" && (
-                <div className="w-14 h-14 flex-shrink-0 mr-3 mt-1">
-                  <XiaozhiAvatar state={i === messages.length - 1 && loading ? "thinking" : i === messages.length - 1 && htmlCode ? "success" : "idle"} />
+          {messages.map((msg, i) => {
+            // 助手消息：提取纯文本，跳过空消息
+            const displayContent = msg.role === "assistant" ? extractTextOnly(msg.content) : msg.content;
+            if (msg.role === "assistant" && !displayContent) return null;
+
+            return (
+              <div key={`${i}-${msg.content.length}`} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                {msg.role === "assistant" && (
+                  <div className="w-14 h-14 flex-shrink-0 mr-3 mt-1">
+                    <XiaozhiAvatar state={i === messages.length - 1 && loading ? "thinking" : i === messages.length - 1 && htmlCode ? "success" : "idle"} />
+                  </div>
+                )}
+                <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai max-w-[75%]"}>
+                  {msg.role === "assistant" ? formatAIMessage(displayContent) : displayContent.split("\n").map((line, j) => <p key={j} className={j > 0 ? "mt-1" : ""}>{line}</p>)}
                 </div>
-              )}
-              <div className={msg.role === "user" ? "chat-bubble-user" : "chat-bubble-ai max-w-[75%]"}>
-                {msg.role === "assistant" ? formatAIMessage(extractTextOnly(msg.content)) : msg.content.split("\n").map((line, j) => <p key={j} className={j > 0 ? "mt-1" : ""}>{line}</p>)}
               </div>
-            </div>
-          ))}
+            );
+          })}
           {loading && !isCoding && (
             <div className="flex justify-start">
               <div className="w-14 h-14 flex-shrink-0 mr-3 mt-1"><XiaozhiAvatar state="thinking" /></div>
@@ -462,17 +751,16 @@ export default function ModuleCreate({ userId }: Props) {
 
       {/* 右侧：预览 */}
       <div className="flex-[1.8] flex flex-col bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-100 flex-nowrap overflow-hidden">
-          <h2 className="text-base font-bold text-gray-800 whitespace-nowrap">预览</h2>
+        <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-800 whitespace-nowrap">预览</h2>
           <div className="flex bg-gray-100 rounded-lg p-0.5 flex-shrink-0">
-            <button onClick={() => setViewMode("code")} className={`px-2 py-1 rounded-md text-xs font-medium transition whitespace-nowrap ${viewMode === "code" ? "bg-white shadow" : "text-gray-500"}`}>代码</button>
-            <button onClick={() => setViewMode("game")} className={`px-2 py-1 rounded-md text-xs font-medium transition whitespace-nowrap ${viewMode === "game" ? "bg-white shadow" : "text-gray-500"}`}>游戏</button>
+            <button onClick={() => setViewMode("code")} className={`px-3 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${viewMode === "code" ? "bg-white shadow" : "text-gray-500"}`}>代码</button>
+            <button onClick={() => setViewMode("game")} className={`px-3 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${viewMode === "game" ? "bg-white shadow" : "text-gray-500"}`}>游戏</button>
           </div>
-          <span className="text-xs text-gray-400 flex-shrink-0">{htmlCode ? `${htmlCode.split("\n").length}行` : ""}</span>
-          <div className="flex-1" />
-          <input value={gameTitle} onChange={(e) => setGameTitle(e.target.value)} placeholder="名称" className="w-16 text-xs px-1.5 py-1 border border-gray-200 rounded flex-shrink-0 outline-none" />
-          <button onClick={handleUpload} disabled={!htmlCode || !gameTitle.trim() || saving} className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-1 rounded text-xs font-medium disabled:opacity-50 flex-shrink-0">{saving ? "..." : "上传"}</button>
-          <button onClick={handleDownload} disabled={!htmlCode} className="bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded text-xs font-medium disabled:opacity-50 flex-shrink-0">下载</button>
+          <span className="text-sm text-gray-400 flex-shrink-0">{htmlCode ? `${htmlCode.split("\n").length}行` : ""}</span>
+          <input value={gameTitle} onChange={(e) => setGameTitle(e.target.value)} placeholder="输入游戏名称" className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none" />
+          <button onClick={handleUpload} disabled={!htmlCode || !gameTitle.trim() || saving} className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50 flex-shrink-0">{saving ? "..." : "上传"}</button>
+          <button onClick={handleDownload} disabled={!htmlCode} className="bg-green-500 hover:bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50 flex-shrink-0">下载</button>
         </div>
         <div className="flex-1 overflow-auto">
           {viewMode === "code" ? (
@@ -490,8 +778,29 @@ export default function ModuleCreate({ userId }: Props) {
               ) : <div className="h-full flex items-center justify-center text-gray-400"><p>和AI对话生成游戏代码</p></div>}
             </div>
           ) : (
-            <div className="h-full p-4 flex items-center justify-center">
-              {htmlCode ? (gameStarted ? <iframe srcDoc={htmlCode} className="w-full h-full rounded-2xl" sandbox="allow-scripts" scrolling="no" /> : <div className="w-full h-full rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer" onClick={() => setGameStarted(true)}><div className="text-center"><div className="text-7xl mb-4 animate-bounce">▶️</div><p className="text-2xl font-bold text-indigo-600">先来玩一玩游戏吧！</p><p className="text-sm text-indigo-400">点击开始试玩</p></div></div>) : <div className="text-center text-gray-400"><p className="text-6xl mb-4"> </p><p>生成游戏后在这里预览</p></div>}
+            <div className="h-full flex items-center justify-center p-2 overflow-hidden">
+              {htmlCode ? (gameStarted ? (
+                <iframe
+                  srcDoc={htmlCode}
+                  className="rounded-xl"
+                  sandbox="allow-scripts"
+                  scrolling="no"
+                  style={{ border: 'none', display: 'block', width: '800px', height: '600px', maxWidth: '100%', maxHeight: '100%' }}
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer rounded-xl" onClick={() => setGameStarted(true)}>
+                  <div className="text-center">
+                    <div className="text-7xl mb-4 animate-bounce">▶️</div>
+                    <p className="text-2xl font-bold text-indigo-600">先来玩一玩游戏吧！</p>
+                    <p className="text-sm text-indigo-400">点击开始试玩</p>
+                  </div>
+                </div>
+              )) : (
+                <div className="text-center text-gray-400">
+                  <p className="text-6xl mb-4"> </p>
+                  <p>生成游戏后在这里预览</p>
+                </div>
+              )}
             </div>
           )}
         </div>
