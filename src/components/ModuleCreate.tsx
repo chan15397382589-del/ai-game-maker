@@ -71,6 +71,7 @@ export default function ModuleCreate({ userId }: Props) {
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
+  const [openGameAvailable, setOpenGameAvailable] = useState(false);
 
   // 左侧栏状态
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -126,6 +127,20 @@ export default function ModuleCreate({ userId }: Props) {
   };
 
   useEffect(() => { fetchConversations(); }, []);
+
+  // 检测 OpenGame 服务是否可用
+  useEffect(() => {
+    const checkOpenGame = async () => {
+      try {
+        const res = await fetch("/api/opengame/health");
+        const data = await res.json();
+        setOpenGameAvailable(data.connected);
+      } catch {
+        setOpenGameAvailable(false);
+      }
+    };
+    checkOpenGame();
+  }, []);
 
   // 根据设计数据生成初始消息
   useEffect(() => {
@@ -242,144 +257,141 @@ export default function ModuleCreate({ userId }: Props) {
     }
   };
 
-  // 自动生成游戏（通过 OpenGame WebSocket）
+  // 自动生成游戏（OpenGame 可用时使用，否则回退到 AI 蓝图生成）
   const handleAutoGenerate = async () => {
     if (!designData?.game_name || sendingRef.current) return;
 
-    // 构建 OpenGame 提示词
     const rulesText = (designData.game_rules || []).filter(r => r.trim());
-    let prompt = `做一个${designData.game_name}游戏。`;
-    if (rulesText.length > 0) {
-      prompt += `游戏规则：${rulesText.join("；")}。`;
-    }
-    if (designData.ai_prompt) {
-      prompt += `画面描述：${designData.ai_prompt}。`;
-    }
-    prompt += "用HTML5实现，包含完整的游戏逻辑和视觉效果。";
 
-    sendingRef.current = true;
-    setLoading(true);
-    setViewMode("code");
-    setLiveCode("//   正在连接 OpenGame 服务...\n\n请稍候...");
-    setIsCoding(true);
+    if (openGameAvailable) {
+      // === OpenGame 模式 ===
+      let prompt = `做一个${designData.game_name}游戏。`;
+      if (rulesText.length > 0) prompt += `游戏规则：${rulesText.join("；")}。`;
+      if (designData.ai_prompt) prompt += `画面描述：${designData.ai_prompt}。`;
+      prompt += "用HTML5实现，包含完整的游戏逻辑和视觉效果。";
 
-    // 添加用户消息到聊天
-    setMessages((prev) => [...prev, { role: "user", content: `请帮我制作游戏"${designData.game_name}"` }]);
+      sendingRef.current = true;
+      setLoading(true);
+      setViewMode("code");
+      setLiveCode("//   正在连接 OpenGame 服务...\n\n请稍候...");
+      setIsCoding(true);
+      setMessages((prev) => [...prev, { role: "user", content: `请帮我制作游戏"${designData.game_name}"` }]);
 
-    try {
-      const ws = new WebSocket("ws://localhost:3001");
-      let taskId = "";
-      let outputBuffer = "";
+      try {
+        const ws = new WebSocket("ws://localhost:3001");
+        let taskId = "";
+        let outputBuffer = "";
 
-      ws.onopen = () => {
-        setLiveCode("// ✅ 已连接 OpenGame\n//   正在生成游戏...\n\n请稍候...");
-        ws.send(JSON.stringify({
-          type: "generate",
-          prompt,
-          options: {
-            apiKey: process.env.NEXT_PUBLIC_OPENGAME_API_KEY,
-            apiBaseUrl: process.env.NEXT_PUBLIC_OPENGAME_API_BASE_URL,
-            authType: "anthropic",
-          },
-        }));
-      };
+        ws.onopen = () => {
+          setLiveCode("// ✅ 已连接 OpenGame\n//   正在生成游戏...\n\n请稍候...");
+          ws.send(JSON.stringify({
+            type: "generate",
+            prompt,
+            options: {
+              apiKey: process.env.NEXT_PUBLIC_OPENGAME_API_KEY,
+              apiBaseUrl: process.env.NEXT_PUBLIC_OPENGAME_API_BASE_URL,
+              authType: "anthropic",
+            },
+          }));
+        };
 
-      ws.onmessage = async (event) => {
-        try {
-          const data = JSON.parse(event.data);
-
-          switch (data.type) {
-            case "task_started":
-              taskId = data.taskId;
-              setLiveCode("// ✅ 任务已启动\n//   生成中...\n\n请稍候...");
-              break;
-
-            case "output":
-            case "assistant_message":
-              if (data.content) {
-                outputBuffer += data.content;
-                // 显示最后几行输出作为进度
-                const lines = outputBuffer.split("\n").filter((l: string) => l.trim());
-                const preview = lines.slice(-8).join("\n");
-                setLiveCode(`//   OpenGame 生成中...\n\n${preview}`);
-              }
-              break;
-
-            case "task_progress":
-              if (data.message) {
-                setLiveCode(`//   ${data.message}\n\n${outputBuffer.split("\n").slice(-5).join("\n")}`);
-              }
-              break;
-
-            case "task_completed":
-              // 获取生成的游戏 HTML
-              try {
-                const files = data.result?.files || [];
-                const outputFiles = data.result?.outputFiles || [];
-                const allFiles = [...files, ...outputFiles];
-                const htmlFile = allFiles.find((f: string) => f.endsWith(".html"));
-
-                if (htmlFile && taskId) {
-                  const htmlRes = await fetch(`http://localhost:3001/api/tasks/${taskId}/files/${htmlFile}`);
-                  if (htmlRes.ok) {
-                    const htmlCode = await htmlRes.text();
-                    setIsCoding(false);
-                    setHtmlCode(htmlCode);
-                    setLiveCode(htmlCode);
-                    setViewMode("game");
-                    setMessages((prev) => [...prev, { role: "assistant", content: `  游戏"${designData.game_name}"已通过 OpenGame 生成完成！\n\n请在右侧预览区查看。` }]);
-                    setRawMessages((prev) => [...prev, { role: "assistant", content: `\`\`\`html\n${htmlCode}\n\`\`\`` }]);
-                    ws.close();
-                    return;
-                  }
+        ws.onmessage = async (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            switch (data.type) {
+              case "task_started":
+                taskId = data.taskId;
+                setLiveCode("// ✅ 任务已启动\n//   生成中...\n\n请稍候...");
+                break;
+              case "output":
+              case "assistant_message":
+                if (data.content) {
+                  outputBuffer += data.content;
+                  const lines = outputBuffer.split("\n").filter((l: string) => l.trim());
+                  setLiveCode(`//   OpenGame 生成中...\n\n${lines.slice(-8).join("\n")}`);
                 }
-                // 如果没有找到 HTML 文件
-                setIsCoding(false);
-                setMessages((prev) => [...prev, { role: "assistant", content: "  OpenGame 生成完成，但未找到 HTML 文件。请重试。" }]);
-              } catch (fetchErr: any) {
-                console.error("获取游戏文件失败:", fetchErr);
-                setIsCoding(false);
-                setMessages((prev) => [...prev, { role: "assistant", content: `  获取游戏文件失败：${fetchErr.message}` }]);
-              }
-              ws.close();
-              break;
+                break;
+              case "task_progress":
+                if (data.message) setLiveCode(`//   ${data.message}\n\n${outputBuffer.split("\n").slice(-5).join("\n")}`);
+                break;
+              case "task_completed":
+                try {
+                  const allFiles = [...(data.result?.files || []), ...(data.result?.outputFiles || [])];
+                  const htmlFile = allFiles.find((f: string) => f.endsWith(".html"));
+                  if (htmlFile && taskId) {
+                    const htmlRes = await fetch(`http://localhost:3001/api/tasks/${taskId}/files/${htmlFile}`);
+                    if (htmlRes.ok) {
+                      const code = await htmlRes.text();
+                      setIsCoding(false); setHtmlCode(code); setLiveCode(code); setViewMode("game");
+                      setMessages((prev) => [...prev, { role: "assistant", content: `  游戏"${designData.game_name}"已通过 OpenGame 生成完成！\n\n请在右侧预览区查看。` }]);
+                      setRawMessages((prev) => [...prev, { role: "assistant", content: `\`\`\`html\n${code}\n\`\`\`` }]);
+                      ws.close(); return;
+                    }
+                  }
+                  setIsCoding(false);
+                  setMessages((prev) => [...prev, { role: "assistant", content: "  OpenGame 生成完成，但未找到 HTML 文件。请重试。" }]);
+                } catch (e: any) {
+                  setIsCoding(false);
+                  setMessages((prev) => [...prev, { role: "assistant", content: `  获取游戏文件失败：${e.message}` }]);
+                }
+                ws.close(); break;
+              case "task_error":
+                setIsCoding(false); setLiveCode(`// ❌ 生成失败：${data.message}`);
+                setMessages((prev) => [...prev, { role: "assistant", content: `  OpenGame 生成失败：${data.message}` }]);
+                ws.close(); break;
+              case "task_cancelled":
+                setIsCoding(false); setLiveCode("// ⚠️ 任务已取消"); ws.close(); break;
+            }
+          } catch {}
+        };
+        ws.onerror = () => {
+          setIsCoding(false); setLiveCode("// ❌ 无法连接 OpenGame 服务");
+          setMessages((prev) => [...prev, { role: "assistant", content: "  无法连接 OpenGame 服务" }]);
+          sendingRef.current = false; setLoading(false);
+        };
+        ws.onclose = () => { sendingRef.current = false; setLoading(false); };
+      } catch (e: any) {
+        setIsCoding(false); setLiveCode(`// ❌ 连接失败：${e.message}`);
+        sendingRef.current = false; setLoading(false);
+      }
+    } else {
+      // === 回退：AI 蓝图生成 ===
+      const imageUrl = selectedImage || designData?.design_image;
+      if (!imageUrl) { alert("请先在构思阶段用AI生成图片"); return; }
 
-            case "task_error":
-              setIsCoding(false);
-              setLiveCode(`// ❌ 生成失败：${data.message}`);
-              setMessages((prev) => [...prev, { role: "assistant", content: `  OpenGame 生成失败：${data.message}` }]);
-              ws.close();
-              break;
+      sendingRef.current = true;
+      setLoading(true);
+      setViewMode("code");
+      setLiveCode("//   正在分析设计图...\n// 生成视觉蓝图中...\n\n请稍候...");
+      setIsCoding(true);
 
-            case "task_cancelled":
-              setIsCoding(false);
-              setLiveCode("// ⚠️ 任务已取消");
-              ws.close();
-              break;
-          }
-        } catch {
-          // 非 JSON 消息，忽略
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+
+        const res = await fetch("/api/ai/blueprint-generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ imageUrl, gameName: designData.game_name, rules: designData.game_rules }),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.code) {
+          setIsCoding(false); setHtmlCode(data.code); setLiveCode(data.code); setViewMode("game");
+          setMessages((prev) => [...prev, { role: "user", content: `请帮我制作游戏"${designData.game_name}"` }]);
+          setMessages((prev) => [...prev, { role: "assistant", content: `  游戏已生成完成！\n\n请在右侧预览区查看。` }]);
+          setRawMessages((prev) => [...prev, { role: "assistant", content: data.code }]);
+        } else {
+          setIsCoding(false); setLiveCode(`// 生成失败：${data.error || "请重试"}`);
+          setMessages((prev) => [...prev, { role: "user", content: `请帮我制作游戏"${designData.game_name}"` }]);
+          setMessages((prev) => [...prev, { role: "assistant", content: `  生成失败：${data.error || "请重试"}` }]);
         }
-      };
-
-      ws.onerror = () => {
-        setIsCoding(false);
-        setLiveCode("// ❌ 无法连接 OpenGame 服务\n// 请确认服务已启动");
-        setMessages((prev) => [...prev, { role: "assistant", content: "  无法连接 OpenGame 服务，请确认服务已启动（运行 start-with-opengame.bat）" }]);
-        sendingRef.current = false;
-        setLoading(false);
-      };
-
-      ws.onclose = () => {
-        sendingRef.current = false;
-        setLoading(false);
-      };
-    } catch (e: any) {
-      setIsCoding(false);
-      setLiveCode(`// ❌ 连接失败：${e.message}`);
-      setMessages((prev) => [...prev, { role: "assistant", content: `  连接 OpenGame 失败：${e.message}` }]);
-      sendingRef.current = false;
-      setLoading(false);
+      } catch (e: any) {
+        setIsCoding(false); setLiveCode(`// 生成失败：${e.message}`);
+      } finally {
+        setLoading(false); sendingRef.current = false;
+      }
     }
   };
 
@@ -652,7 +664,7 @@ export default function ModuleCreate({ userId }: Props) {
         <div className="flex items-center gap-3 p-4 border-b border-gray-100 bg-indigo-600 text-white">
           <h1 className="text-lg font-bold">  游戏设计</h1>
           {designData?.game_name && <span className="text-sm bg-white/20 px-2 py-0.5 rounded">正在做：{designData.game_name}</span>}
-          <button onClick={handleAutoGenerate} disabled={loading || !designData?.game_name} className="ml-auto text-sm bg-white text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition disabled:opacity-50">  自动生成</button>
+          <button onClick={handleAutoGenerate} disabled={loading || !designData?.game_name} className="ml-auto text-sm bg-white text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition disabled:opacity-50">{openGameAvailable ? "  OpenGame" : "  自动生成"}</button>
         </div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* 设计图展示 - 始终显示 */}
