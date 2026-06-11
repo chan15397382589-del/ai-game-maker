@@ -46,22 +46,22 @@ export async function POST(req: NextRequest) {
 ${rulesText ? `游戏规则：${rulesText}` : ""}
 
 要求：
-1. 直接输出完整HTML代码，用\`\`\`html包裹
-2. 画布尺寸：Canvas使用固定尺寸（如800x600）或动态计算，body设置margin:0;padding:0;overflow:hidden
+1. 直接输出完整HTML代码，用\`\`\`html包裹，以</html>结尾
+2. Canvas使用固定尺寸800x600，body设置margin:0;padding:0;overflow:hidden
 3. 使用HTML5 Canvas绘制所有图形（不依赖图片文件）
 4. 颜色风格匹配图片（扁平化、卡通、明快）
 5. 实现基本物理效果（重力、碰撞、反弹）
 6. 实现游戏规则（计分、胜负判定）
-7. 添加Play/Pause控制
+7. **必须有游戏循环**：function gameLoop() { ctx.clearRect(); 更新状态(); 绘制(); requestAnimationFrame(gameLoop); }，并在游戏开始时调用requestAnimationFrame(gameLoop)
 8. **输入事件绑定（必须遵守）**：
-   - 键盘：document.addEventListener('keydown'/'keyup')，用e.code判断按键（如'ArrowLeft'、'Space'）
+   - 键盘：document.addEventListener('keydown')，用e.code判断按键
    - 鼠标点击：canvas.addEventListener('click')
-   - 触摸：canvas.addEventListener('touchstart', (e) => { e.preventDefault(); ... }, { passive: false })
-   - 鼠标移动：canvas.addEventListener('mousemove')，用e.offsetX/e.offsetY获取坐标
-   - 游戏必须同时支持键盘和触摸操作
+   - 触摸：canvas.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false })
+   - 事件绑定放在脚本顶层，不要延迟绑定
 9. 添加中文注释
 10. 代码在iframe中能正常运行（不用localStorage、fetch）
 11. 不使用任何外部资源
+12. HTML结构必须完整：<!DOCTYPE html>开头，<html><head><body><canvas><script>齐全
 
 先分析图片中的视觉元素（颜色、位置、尺寸），然后直接生成代码。`
             }
