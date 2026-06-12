@@ -7,28 +7,20 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_AUTH_TOKEN || "placeholder",
 });
 
-// Supabase 服务端客户端单例（延迟初始化，确保运行时环境变量已加载）
-let _supabaseAdmin: ReturnType<typeof createClient> | null = null;
-
-export function getSupabaseAdmin() {
-  if (!_supabaseAdmin) {
-    _supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+// Supabase 服务端客户端单例
+export const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder",
+  {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { "x-my-app": "ai-game-classroom-server" } },
   }
-  return _supabaseAdmin;
-}
+);
 
-// 兼容旧代码：运行时通过 getter 延迟初始化
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const supabaseAdmin: any = new Proxy({} as any, {
-  get(_, prop) {
-    const client = getSupabaseAdmin();
-    const value = (client as any)[prop];
-    return typeof value === "function" ? value.bind(client) : value;
-  },
-});
+// 兼容旧代码
+export function getSupabaseAdmin() {
+  return supabaseAdmin;
+}
 
 // 小学信息技术教师人设的 System Prompt
 export const TEACHER_SYSTEM_PROMPT = `你是"小智老师"，一位亲切、耐心的小学信息技术教师，也是学生的"游戏设计教练"。
