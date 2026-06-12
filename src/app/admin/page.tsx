@@ -1376,6 +1376,9 @@ function MessagesAudit() {
               if (!token) { alert("未登录"); setExporting(false); return; }
               const wb = XLSX.utils.book_new();
 
+              // 截断超长文本（Excel 单元格限制 32767 字符）
+              const trunc = (s: string, max = 32000) => s && s.length > max ? s.substring(0, max) + "...[截断]" : s;
+
               // 1. 对话记录
               const convRes = await fetch("/api/admin/messages/export", { headers: { Authorization: `Bearer ${token}` } });
               if (!convRes.ok) { const err = await convRes.json().catch(() => ({})); console.error("对话记录导出失败:", err); }
@@ -1383,11 +1386,13 @@ function MessagesAudit() {
                 const students = await convRes.json();
                 let maxTurns = 0;
                 students.forEach((s: any) => { if (s.turns.length > maxTurns) maxTurns = s.turns.length; });
+                // 限制最大轮数，防止列数过多
+                maxTurns = Math.min(maxTurns, 50);
                 const headers = ["时间", "年级", "班级", "学生姓名", "学号"];
                 for (let i = 0; i < maxTurns; i++) headers.push(`第${i + 1}轮`);
                 const rows = students.map((s: any) => {
                   const row: any = { "时间": s.first_time, "年级": s.grade ? `${s.grade}年级` : "", "班级": s.class_num ? `${s.class_num}班` : "", "学生姓名": s.student_name, "学号": s.student_id };
-                  for (let i = 0; i < maxTurns; i++) { const turn = s.turns[i]; row[`第${i + 1}轮`] = turn ? `[${turn.role}] ${turn.content}` : ""; }
+                  for (let i = 0; i < maxTurns; i++) { const turn = s.turns[i]; row[`第${i + 1}轮`] = turn ? trunc(`[${turn.role}] ${turn.content}`) : ""; }
                   return row;
                 });
                 const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
@@ -1427,7 +1432,7 @@ function MessagesAudit() {
                     "年级": r.grade, "班级": r.class_num, "SRL分组": r.srl_condition,
                     "会话ID": r.session_id?.slice(0, 8) || "", "轮次": r.turn_id, "时间": r.timestamp,
                     "输入方式": r.input_method === "voice" ? "语音" : r.input_method === "text" ? "文字" : "",
-                    "学生发言": r.student_text, "AI回复摘要": r.ai_text, "AI行为码": r.ai_code,
+                    "学生发言": trunc(r.student_text), "AI回复摘要": trunc(r.ai_text), "AI行为码": r.ai_code,
                     "学生主码": r.student_primary_code, "学生辅码1": r.student_aux_code_1, "学生辅码2": r.student_aux_code_2,
                     "CT实践": r.ct_mapping, "备注": r.notes,
                   }));
