@@ -244,8 +244,16 @@ export default function ModuleIdeation({ userId }: Props) {
                 }
               }
             }
-            if (task.design_image && !savedDesignImage) {
-              setSavedDesignImage(task.design_image);
+            // 从 design_image 字段加载图片（兼容旧数据）
+            if (task.design_image) {
+              if (!savedDesignImage) {
+                setSavedDesignImage(task.design_image);
+              }
+              // 如果 imageHistory 为空，将 design_image 加入历史
+              if (imageHistory.length === 0 && task.design_image.startsWith("data:")) {
+                setImageHistory([{ url: task.design_image, prompt: "设计图" }]);
+                setSelectedHistoryIdx(0);
+              }
             }
             if (task.duration_seconds) setDrawTime(task.duration_seconds);
             setDesignDone(true);
