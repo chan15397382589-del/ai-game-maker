@@ -169,27 +169,13 @@ export default function ModuleIdeation({ userId }: Props) {
   const historyIndexRef = useRef(-1);
   useEffect(() => { historyIndexRef.current = historyIndex; }, [historyIndex]);
 
-  // 小组讨论
-  const [groupCode, setGroupCode] = useState<string | null>(null);
-  const [joinCode, setJoinCode] = useState("");
-  const [chatMessages, setChatMessages] = useState<any[]>([]);
-  const [chatInput, setChatInput] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const recognitionRef = useRef<any>(null);
-  const [groupMembers, setGroupMembers] = useState<any[]>([]);
-  const [selectedMember, setSelectedMember] = useState<any>(null);
-  const [memberDesign, setMemberDesign] = useState<any>(null);
-  const [speakingAs, setSpeakingAs] = useState<string>("me");
-  const [showJoinInput, setShowJoinInput] = useState(false);
-
-  const [currentPhase, setCurrentPhase] = useState<"survey" | "design" | "discuss">("survey");
+  const [currentPhase, setCurrentPhase] = useState<"survey" | "design">("survey");
   const [aiChatMessages, setAiChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [aiChatInput, setAiChatInput] = useState("");
   const [generating, setGenerating] = useState(false);
   const [imageHistory, setImageHistory] = useState<{ url: string; prompt: string }[]>([]);
   const [selectedHistoryIdx, setSelectedHistoryIdx] = useState<number>(-1);
   const aiChatEndRef = useRef<HTMLDivElement>(null);
-  const groupChatRef = useRef<HTMLDivElement>(null);
 
   const CW = 800;
   const CH = 600;
@@ -278,22 +264,6 @@ export default function ModuleIdeation({ userId }: Props) {
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [currentPhase]);
-
-  // 小组讨论阶段：定时刷新成员列表和消息（每3秒）
-  useEffect(() => {
-    if (currentPhase !== "discuss" || !groupCode) return;
-    const pollTimer = setInterval(() => {
-      fetchGroupMembers(groupCode);
-    }, 3000);
-    return () => clearInterval(pollTimer);
-  }, [currentPhase, groupCode]);
-
-  // 小组聊天消息自动滚动到底部
-  useEffect(() => {
-    if (groupChatRef.current) {
-      groupChatRef.current.scrollTop = groupChatRef.current.scrollHeight;
-    }
-  }, [chatMessages]);
 
   const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
@@ -634,159 +604,6 @@ export default function ModuleIdeation({ userId }: Props) {
     setAiChatInput("");
     setAiChatMessages((prev) => [...prev, { role: "user", content: userMsg }]);
     await generateImage(userMsg);
-  };
-
-  // 获取小组成员（从group_members表查询）
-  const fetchGroupMembers = async (gid: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token; if (!token) return;
-
-      // 并行获取消息和成员列表
-      const [msgsRes, membersRes] = await Promise.all([
-        fetch(`/api/student/group-messages?group_id=${gid}`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`/api/student/groups?group_id=${gid}`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-
-      if (msgsRes.ok) {
-        const msgs = await msgsRes.json();
-        setChatMessages(msgs);
-      }
-
-      if (membersRes.ok) {
-        const members = await membersRes.json();
-        // 提取用户信息，去重
-        const userMap = new Map<string, any>();
-        for (const m of members) {
-          if (m.user && !userMap.has(m.user.id)) {
-            userMap.set(m.user.id, m.user);
-          }
-        }
-        setGroupMembers(Array.from(userMap.values()));
-      }
-    } catch {}
-  };
-
-  const viewMemberDesign = async (memberId: string) => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token; if (!token) return;
-      const res = await fetch(`/api/student/group-tasks?user_id=${memberId}&task_id=1-1`, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) {
-        const task = await res.json();
-        if (task?.id) {
-          setMemberDesign(task);
-          setSelectedMember(groupMembers.find((m) => m.id === memberId));
-        } else {
-          alert("该同学还没有完成设计");
-        }
-      } else {
-        const err = await res.json().catch(() => ({}));
-        alert(err.error || "无法查看该同学的设计");
-      }
-    } catch {}
-  };
-
-  const createGroup = async () => {
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token; if (!token) return;
-
-      // 1. 创建小组（API会自动将创建者加入）
-      const createRes = await fetch("/api/student/groups", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ group_id: code, group_name: `小组${code}` }),
-      });
-
-      if (!createRes.ok) {
-        const err = await createRes.json().catch(() => ({}));
-        alert(err.error || "创建小组失败");
-        return;
-      }
-
-      // 2. 发送系统消息
-      await fetch("/api/student/group-messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ group_id: code, content: `小组已创建，口令：${code}`, message_type: "system" }),
-      });
-
-      setGroupCode(code);
-      fetchGroupMembers(code);
-    } catch (e: any) {
-      alert("创建小组失败：" + e.message);
-    }
-  };
-
-  const joinGroup = async () => {
-    if (joinCode.length !== 4) return;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token; if (!token) return;
-
-      // 调用加入小组API
-      const res = await fetch("/api/student/groups", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ group_id: joinCode }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert(err.error || "加入小组失败");
-        return;
-      }
-
-      setGroupCode(joinCode);
-      fetchGroupMembers(joinCode);
-    } catch (e: any) {
-      alert("加入小组失败：" + e.message);
-    }
-  };
-
-  const sendMessage = async () => {
-    if (!chatInput.trim() || !groupCode) return;
-
-    // 输入验证
-    if (isRandomInput(chatInput)) {
-      alert("请认真发言，不要乱打键盘哦～");
-      return;
-    }
-
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token; if (!token) return;
-      const speakerName = speakingAs === "me" ? "" : groupMembers.find((m) => m.id === speakingAs)?.name || "";
-      const content = speakerName ? `[${speakerName}] ${chatInput.trim()}` : chatInput.trim();
-      const res = await fetch("/api/student/group-messages", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ group_id: groupCode, content, message_type: "text" }) });
-      if (res.ok) { const m = await res.json(); if (speakingAs !== "me") m.sender = { ...m.sender, name: speakerName }; setChatMessages((p) => [...p, m]); setChatInput(""); fetchGroupMembers(groupCode); }
-    } catch {}
-  };
-
-  const toggleVoice = () => {
-    if (isRecording) { recognitionRef.current?.stop(); setIsRecording(false); return; }
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { alert("不支持语音"); return; }
-    const r = new SR(); r.lang = "zh-CN"; r.continuous = false;
-    let final = "";
-    r.onresult = (e: any) => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) final += e.results[i][0].transcript; setChatInput(final); };
-    r.onend = () => { setIsRecording(false); if (final && groupCode) sendVoice(final); };
-    r.onerror = () => setIsRecording(false);
-    recognitionRef.current = r; setIsRecording(true); r.start();
-  };
-
-  const sendVoice = async (text: string) => {
-    if (!groupCode) return;
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token; if (!token) return;
-      const speakerName = speakingAs === "me" ? "" : groupMembers.find((m) => m.id === speakingAs)?.name || "";
-      const content = speakerName ? `[${speakerName}] ${text}` : text;
-      const res = await fetch("/api/student/group-messages", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ group_id: groupCode, content, message_type: "voice", voice_transcript: content }) });
-      if (res.ok) { const m = await res.json(); if (speakingAs !== "me") m.sender = { ...m.sender, name: speakerName }; setChatMessages((p) => [...p, m]); }
-    } catch {}
   };
 
   return (
