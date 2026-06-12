@@ -523,9 +523,14 @@ export default function ModuleIdeation({ userId }: Props) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
-      // 使用AI生成的图片或canvas图片
-      const drawCanvas = canvasRef.current;
-      const imageData = savedDesignImage || (drawCanvas ? drawCanvas.toDataURL("image/png") : "");
+      // 优先使用AI生成的图片，避免canvas导出慢
+      let imageData = savedDesignImage || "";
+      if (!imageData) {
+        const drawCanvas = canvasRef.current;
+        if (drawCanvas && (strokes.length > 0 || items.length > 0)) {
+          imageData = drawCanvas.toDataURL("image/png");
+        }
+      }
       const lastAiPrompt = aiChatMessages.filter(m => m.role === "user").pop()?.content || "";
       await fetch("/api/student/tasks", {
         method: "POST",
@@ -544,8 +549,8 @@ export default function ModuleIdeation({ userId }: Props) {
         }),
       });
       setDesignDone(true);
-      // 保存成功后通知游戏设计模块刷新数据，然后跳转
-      window.dispatchEvent(new CustomEvent("design-saved"));
+      // 保存时间戳，让游戏设计模块知道有新数据
+      localStorage.setItem("designUpdatedAt", Date.now().toString());
       localStorage.setItem("gotoModule", "create");
       window.location.href = "/student?module=create";
     } catch { alert("保存失败"); }

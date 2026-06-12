@@ -114,16 +114,18 @@ export default function ModuleCreate({ userId }: Props) {
   };
 
   // 当组件挂载时加载设计数据
-  useEffect(() => { loadDesign(); }, []);
-
-  // 监听设计保存事件，重新加载数据
   useEffect(() => {
-    const handleDesignSaved = () => {
-      designLoadingRef.current = false; // 重置锁，允许重新加载
-      loadDesign();
-    };
-    window.addEventListener("design-saved", handleDesignSaved);
-    return () => window.removeEventListener("design-saved", handleDesignSaved);
+    loadDesign();
+    // 检查是否有新保存的设计数据
+    const designUpdatedAt = localStorage.getItem("designUpdatedAt");
+    if (designUpdatedAt) {
+      localStorage.removeItem("designUpdatedAt");
+      // 延迟重新加载，确保数据库已更新
+      setTimeout(() => {
+        designLoadingRef.current = false;
+        loadDesign();
+      }, 500);
+    }
   }, []);
 
   // 加载对话列表（带请求去重）
