@@ -252,7 +252,7 @@ export default function ModuleCreate({ userId }: Props) {
     }
   };
 
-  // 自动生成游戏（MIMO 蓝图生成 - 流式）
+  // 自动生成游戏（MIMO 蓝图生成 - 模拟流式显示）
   const handleAutoGenerate = async () => {
     if (!designData?.game_name || sendingRef.current) return;
 
@@ -279,64 +279,29 @@ export default function ModuleCreate({ userId }: Props) {
         body: JSON.stringify({ imageUrl, gameName: designData.game_name, rules: designData.game_rules }),
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `HTTP ${res.status}`);
-      }
+      const data = await res.json();
 
-      // 处理流式响应
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let fullText = "";
-      let finalCode = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const data = line.slice(6);
-          if (data === "[DONE]") continue;
-
-          try {
-            const parsed = JSON.parse(data);
-
-            if (parsed.type === "chunk") {
-              fullText += parsed.content;
-              // 实时更新代码预览 - 提取 HTML 代码部分
-              const codeInprogress = extractHtmlFromText(fullText);
-              if (codeInprogress) {
-                setLiveCode(codeInprogress);
-              } else {
-                // 显示原始文本作为进度
-                const lines = fullText.split("\n").filter((l: string) => l.trim());
-                setLiveCode(`//   AI 生成中...\n\n${lines.slice(-15).join("\n")}`);
-              }
-            } else if (parsed.type === "done") {
-              finalCode = parsed.code;
-              setLiveCode(finalCode);
-            } else if (parsed.type === "error") {
-              throw new Error(parsed.error);
-            }
-          } catch (parseErr: any) {
-            if (parseErr.message && !parseErr.message.includes("JSON")) throw parseErr;
+      if (res.ok && data.code) {
+        // 模拟流式显示：逐行显示代码
+        const codeLines = data.code.split("\n");
+        let displayed = "";
+        for (let i = 0; i < codeLines.length; i++) {
+          displayed += (i > 0 ? "\n" : "") + codeLines[i];
+          setLiveCode(displayed);
+          // 每 3 行暂停一下，营造流式效果
+          if (i % 3 === 0 && i < codeLines.length - 1) {
+            await new Promise(r => setTimeout(r, 30));
           }
         }
-      }
 
-      if (finalCode) {
         setIsCoding(false);
-        setHtmlCode(finalCode);
-        setLiveCode(finalCode);
+        setHtmlCode(data.code);
+        setLiveCode(data.code);
         setViewMode("game");
         setMessages((prev) => [...prev, { role: "assistant", content: `  游戏"${designData.game_name}"已生成完成！\n\n请在右侧预览区查看。` }]);
-        setRawMessages((prev) => [...prev, { role: "assistant", content: `\`\`\`html\n${finalCode}\n\`\`\`` }]);
+        setRawMessages((prev) => [...prev, { role: "assistant", content: `\`\`\`html\n${data.code}\n\`\`\`` }]);
       } else {
-        throw new Error("未能生成代码");
+        throw new Error(data.error || "未能生成代码");
       }
     } catch (e: any) {
       setIsCoding(false);
@@ -345,27 +310,6 @@ export default function ModuleCreate({ userId }: Props) {
     } finally {
       setLoading(false); sendingRef.current = false;
     }
-  };
-
-  // 从文本中提取 HTML 代码
-  const extractHtmlFromText = (text: string): string | null => {
-    // 匹配 ```html ... ```
-    const htmlFence = /```html\s*\n([\s\S]*?)```/i;
-    let match = text.match(htmlFence);
-    if (match) return match[1].trim();
-
-    // 匹配未闭合的 ```html（流式传输中）
-    const unclosedHtml = /```html\s*\n([\s\S]*)/i;
-    match = text.match(unclosedHtml);
-    if (match && match[1].length > 50) return match[1].trim();
-
-    // 匹配 <!DOCTYPE html> 开始的内容
-    if (text.includes("<!DOCTYPE")) {
-      const start = text.indexOf("<!DOCTYPE");
-      return text.substring(start).trim();
-    }
-
-    return null;
   };
 
   // 图片生代码（使用MIMO图片理解）
