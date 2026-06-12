@@ -1373,11 +1373,12 @@ function MessagesAudit() {
             setExporting(true);
             try {
               const token = await getAuthToken();
-              if (!token) return;
+              if (!token) { alert("未登录"); setExporting(false); return; }
               const wb = XLSX.utils.book_new();
 
               // 1. 对话记录
               const convRes = await fetch("/api/admin/messages/export", { headers: { Authorization: `Bearer ${token}` } });
+              if (!convRes.ok) { const err = await convRes.json().catch(() => ({})); console.error("对话记录导出失败:", err); }
               if (convRes.ok) {
                 const students = await convRes.json();
                 let maxTurns = 0;
@@ -1396,6 +1397,7 @@ function MessagesAudit() {
 
               // 2. 学生反馈
               const fbRes = await fetch("/api/admin/conversations?all=1", { headers: { Authorization: `Bearer ${token}` } });
+              if (!fbRes.ok) { const err = await fbRes.json().catch(() => ({})); console.error("学生反馈导出失败:", err); }
               if (fbRes.ok) {
                 const data = await fbRes.json();
                 const fbRows = data.map((c: any) => {
@@ -1416,6 +1418,7 @@ function MessagesAudit() {
 
               // 3. 编码表
               const codeRes = await fetch("/api/admin/coding-export", { headers: { Authorization: `Bearer ${token}` } });
+              if (!codeRes.ok) { const err = await codeRes.json().catch(() => ({})); console.error("编码表导出失败:", err); }
               if (codeRes.ok) {
                 const rows = await codeRes.json();
                 if (rows.length > 0) {
@@ -1434,8 +1437,9 @@ function MessagesAudit() {
                 }
               }
 
+              if (wb.SheetNames.length === 0) { alert("没有数据可导出"); return; }
               XLSX.writeFile(wb, `全部数据_${new Date().toISOString().slice(0, 10)}.xlsx`);
-            } catch { alert("导出失败，请重试"); }
+            } catch (err: any) { console.error("导出失败:", err); alert("导出失败：" + (err.message || "请重试")); }
             finally { setExporting(false); }
           }}
           disabled={exporting}
