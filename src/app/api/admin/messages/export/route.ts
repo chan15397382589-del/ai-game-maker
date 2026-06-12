@@ -21,19 +21,36 @@ export async function GET(req: NextRequest) {
     const studentMap = new Map<string, any>();
     (students || []).forEach((s: any) => studentMap.set(s.id, s));
 
-    // 获取消息（限制数量，避免资源耗尽）
-    let query = supabaseAdmin
-      .from("messages")
-      .select("user_id, role, content, session_id, created_at")
-      .order("created_at", { ascending: true })
-      .limit(5000);
+    // 分页获取所有消息（避免单次查询过大）
+    let allMessages: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
 
-    if (userId) {
-      query = query.eq("user_id", userId);
+    while (hasMore && page < 50) { // 最多50页 = 50000条
+      let query = supabaseAdmin
+        .from("messages")
+        .select("user_id, role, content, session_id, created_at")
+        .order("created_at", { ascending: true })
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      if (userId) {
+        query = query.eq("user_id", userId);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        allMessages.push(...data);
+        hasMore = data.length === pageSize;
+        page++;
+      } else {
+        hasMore = false;
+      }
     }
 
-    const { data: messages, error } = await query;
-    if (error) throw error;
+    const messages = allMessages;
 
     const stripHtmlCode = (content: string): string => {
       return content
