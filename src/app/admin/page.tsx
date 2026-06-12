@@ -1369,91 +1369,78 @@ function MessagesAudit() {
               ))}
             </select>
           </div>
-          <button onClick={() => exportToExcel(true)} disabled={exporting}
-            className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
-            {exporting ? "导出中..." : "📊 导出对话记录"}
-          </button>
-          <span className="text-xs text-gray-300 mx-1">|</span>
           <button onClick={async () => {
             setExporting(true);
             try {
               const token = await getAuthToken();
               if (!token) return;
-              const res = await fetch("/api/admin/conversations?all=1", { headers: { Authorization: `Bearer ${token}` } });
-              if (!res.ok) { alert("导出失败"); return; }
-              const data = await res.json();
-              const rows = data.map((c: any) => {
-                let ref: any = {};
-                try { ref = typeof c.reflection === "string" ? JSON.parse(c.reflection) : c.reflection; } catch {}
-                return {
-                  "学生姓名": c.student_name, "学号": c.student_id,
-                  "年级": c.grade ? `${c.grade}年级` : "", "班级": c.class_num ? `${c.class_num}班` : "",
-                  "对话标题": c.title,
-                  "卡片1-说说你的游戏": ref.card1 || "", "卡片2-最得意的设计": ref.card2 || "", "卡片3-下次想加什么": ref.card3 || "",
-                  "更新时间": new Date(c.updated_at).toLocaleString("zh-CN"),
-                };
-              });
-              const ws = XLSX.utils.json_to_sheet(rows);
-              ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 16 }, { wch: 45 }, { wch: 45 }, { wch: 45 }, { wch: 20 }];
               const wb = XLSX.utils.book_new();
-              XLSX.utils.book_append_sheet(wb, ws, "学生反馈");
-              XLSX.writeFile(wb, `学生反馈_${new Date().toISOString().slice(0, 10)}.xlsx`);
-            } catch { alert("导出失败"); }
+
+              // 1. 对话记录
+              const convRes = await fetch("/api/admin/messages/export", { headers: { Authorization: `Bearer ${token}` } });
+              if (convRes.ok) {
+                const students = await convRes.json();
+                let maxTurns = 0;
+                students.forEach((s: any) => { if (s.turns.length > maxTurns) maxTurns = s.turns.length; });
+                const headers = ["时间", "年级", "班级", "学生姓名", "学号"];
+                for (let i = 0; i < maxTurns; i++) headers.push(`第${i + 1}轮`);
+                const rows = students.map((s: any) => {
+                  const row: any = { "时间": s.first_time, "年级": s.grade ? `${s.grade}年级` : "", "班级": s.class_num ? `${s.class_num}班` : "", "学生姓名": s.student_name, "学号": s.student_id };
+                  for (let i = 0; i < maxTurns; i++) { const turn = s.turns[i]; row[`第${i + 1}轮`] = turn ? `[${turn.role}] ${turn.content}` : ""; }
+                  return row;
+                });
+                const ws = XLSX.utils.json_to_sheet(rows, { header: headers });
+                ws["!cols"] = headers.map((h) => h === "学生姓名" ? { wch: 10 } : h.includes("第") ? { wch: 35 } : { wch: 10 });
+                XLSX.utils.book_append_sheet(wb, ws, "对话记录");
+              }
+
+              // 2. 学生反馈
+              const fbRes = await fetch("/api/admin/conversations?all=1", { headers: { Authorization: `Bearer ${token}` } });
+              if (fbRes.ok) {
+                const data = await fbRes.json();
+                const fbRows = data.map((c: any) => {
+                  let ref: any = {};
+                  try { ref = typeof c.reflection === "string" ? JSON.parse(c.reflection) : c.reflection; } catch {}
+                  return {
+                    "学生姓名": c.student_name, "学号": c.student_id,
+                    "年级": c.grade ? `${c.grade}年级` : "", "班级": c.class_num ? `${c.class_num}班` : "",
+                    "对话标题": c.title,
+                    "卡片1-说说你的游戏": ref.card1 || "", "卡片2-最得意的设计": ref.card2 || "", "卡片3-下次想加什么": ref.card3 || "",
+                    "更新时间": new Date(c.updated_at).toLocaleString("zh-CN"),
+                  };
+                });
+                const ws2 = XLSX.utils.json_to_sheet(fbRows);
+                ws2["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 16 }, { wch: 45 }, { wch: 45 }, { wch: 45 }, { wch: 20 }];
+                XLSX.utils.book_append_sheet(wb, ws2, "学生反馈");
+              }
+
+              // 3. 编码表
+              const codeRes = await fetch("/api/admin/coding-export", { headers: { Authorization: `Bearer ${token}` } });
+              if (codeRes.ok) {
+                const rows = await codeRes.json();
+                if (rows.length > 0) {
+                  const codeRows = rows.map((r: any) => ({
+                    "编码员": r.coder_id, "学号": r.student_id, "姓名": r.student_name,
+                    "年级": r.grade, "班级": r.class_num, "SRL分组": r.srl_condition,
+                    "会话ID": r.session_id?.slice(0, 8) || "", "轮次": r.turn_id, "时间": r.timestamp,
+                    "输入方式": r.input_method === "voice" ? "语音" : r.input_method === "text" ? "文字" : "",
+                    "学生发言": r.student_text, "AI回复摘要": r.ai_text, "AI行为码": r.ai_code,
+                    "学生主码": r.student_primary_code, "学生辅码1": r.student_aux_code_1, "学生辅码2": r.student_aux_code_2,
+                    "CT实践": r.ct_mapping, "备注": r.notes,
+                  }));
+                  const ws3 = XLSX.utils.json_to_sheet(codeRows);
+                  ws3["!cols"] = [{ wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 6 }, { wch: 6 }, { wch: 12 }, { wch: 10 }, { wch: 6 }, { wch: 18 }, { wch: 6 }, { wch: 50 }, { wch: 50 }, { wch: 8 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 20 }];
+                  XLSX.utils.book_append_sheet(wb, ws3, "行为编码表");
+                }
+              }
+
+              XLSX.writeFile(wb, `全部数据_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            } catch { alert("导出失败，请重试"); }
             finally { setExporting(false); }
           }}
           disabled={exporting}
-          className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
-            {exporting ? "导出中..." : "📊 导出学生反馈"}
-          </button>
-          <span className="text-xs text-gray-300 mx-1">|</span>
-          <button onClick={async () => {
-            setExporting(true);
-            try {
-              const token = await getAuthToken();
-              if (!token) return;
-              const url = selectedStudent
-                ? `/api/admin/coding-export?user_id=${encodeURIComponent(selectedStudent)}`
-                : "/api/admin/coding-export";
-              const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-              if (!res.ok) { alert("导出失败"); return; }
-              const rows = await res.json();
-              if (!rows.length) { alert("暂无对话数据"); return; }
-              const excelRows = rows.map((r: any) => ({
-                "编码员": r.coder_id,
-                "学号": r.student_id,
-                "姓名": r.student_name,
-                "年级": r.grade,
-                "班级": r.class_num,
-                "SRL分组": r.srl_condition,
-                "会话ID": r.session_id?.slice(0, 8) || "",
-                "轮次": r.turn_id,
-                "时间": r.timestamp,
-                "输入方式": r.input_method === "voice" ? "语音" : r.input_method === "text" ? "文字" : "",
-                "学生发言": r.student_text,
-                "AI回复摘要": r.ai_text,
-                "AI行为码": r.ai_code,
-                "学生主码": r.student_primary_code,
-                "学生辅码1": r.student_aux_code_1,
-                "学生辅码2": r.student_aux_code_2,
-                "CT实践": r.ct_mapping,
-                "备注": r.notes,
-              }));
-              const ws = XLSX.utils.json_to_sheet(excelRows);
-              ws["!cols"] = [
-                { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 6 }, { wch: 6 },
-                { wch: 12 }, { wch: 10 }, { wch: 6 }, { wch: 18 }, { wch: 6 },
-                { wch: 50 }, { wch: 50 }, { wch: 8 },
-                { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 18 }, { wch: 20 },
-              ];
-              const wb = XLSX.utils.book_new();
-              XLSX.utils.book_append_sheet(wb, ws, "行为编码表");
-              XLSX.writeFile(wb, `行为编码表_${new Date().toISOString().slice(0, 10)}.xlsx`);
-            } catch { alert("导出失败"); }
-            finally { setExporting(false); }
-          }}
-          disabled={exporting}
-          className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
-            {exporting ? "导出中..." : "  导出编码表"}
+          className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition disabled:opacity-50">
+            {exporting ? "导出中..." : "📊 导出全部数据"}
           </button>
         </div>
 
