@@ -269,7 +269,7 @@ export default function ModuleShowcase({ userId }: Props) {
             <p className="text-xs text-gray-500">认真看看同学的建议，继续改进你的游戏！</p>
           </div>
         </div>
-        <button onClick={() => { localStorage.setItem("gotoModule", "create"); window.location.href = "/student?module=create"; }} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium transition">  继续修改游戏</button>
+        <button onClick={() => { localStorage.setItem("gotoModule", "revise"); window.location.href = "/student?module=revise"; }} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium transition">  继续修改游戏</button>
       </div>
 
       {myReviews.length === 0 ? (
