@@ -81,37 +81,47 @@ export default function ModuleCreate({ userId }: Props) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // 加载设计数据
-  useEffect(() => {
-    const loadDesign = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token; if (!token) return;
-        const res = await fetch("/api/student/tasks?task_id=1-1", { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok) {
-          const tasks = await res.json();
-          if (tasks.length > 0) {
-            const task = tasks[0];
-            let aiPrompt = "";
-            let imageHistory: { url: string; prompt: string }[] = [];
-            try {
-              const info = JSON.parse(task.design_reason || "{}");
-              aiPrompt = info.ai_prompt || "";
-              imageHistory = info.image_history || [];
-            } catch {}
-            setDesignData({
-              game_name: task.game_name,
-              game_rules: task.game_rules || [],
-              design_reason: task.design_reason,
-              design_image: task.design_image,
-              ai_prompt: aiPrompt,
-              image_history: imageHistory,
-            });
-            if (task.game_name) setGameTitle(task.game_name);
-          }
+  const loadDesign = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token; if (!token) return;
+      const res = await fetch("/api/student/tasks?task_id=1-1", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const tasks = await res.json();
+        if (tasks.length > 0) {
+          const task = tasks[0];
+          let aiPrompt = "";
+          let imageHistory: { url: string; prompt: string }[] = [];
+          try {
+            const info = JSON.parse(task.design_reason || "{}");
+            aiPrompt = info.ai_prompt || "";
+            imageHistory = info.image_history || [];
+          } catch {}
+          setDesignData({
+            game_name: task.game_name,
+            game_rules: task.game_rules || [],
+            design_reason: task.design_reason,
+            design_image: task.design_image,
+            ai_prompt: aiPrompt,
+            image_history: imageHistory,
+          });
+          if (task.game_name) setGameTitle(task.game_name);
         }
-      } catch {} finally { setDesignLoaded(true); }
+      }
+    } catch {} finally { setDesignLoaded(true); }
+  };
+
+  useEffect(() => { loadDesign(); }, []);
+
+  // 当组件变为可见时重新加载设计数据（从构思阶段切换过来时）
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loadDesign();
+      }
     };
-    loadDesign();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
   // 加载对话列表
