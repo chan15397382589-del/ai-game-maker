@@ -186,7 +186,7 @@ export default function LoginPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">密码</label>
                 <input
-                  type="text"
+                  type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="请输入密码"

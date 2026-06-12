@@ -50,8 +50,6 @@ interface GameSnapshot {
   created_at: string;
 }
 
-interface Props { userId: string; }
-
 export default function ModuleCreate({ userId }: Props) {
   const router = useRouter();
   const [designData, setDesignData] = useState<DesignData | null>(null);
