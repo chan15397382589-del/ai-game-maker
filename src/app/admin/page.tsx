@@ -2161,17 +2161,18 @@ function PriorKnowledgeView() {
               "学号": d.student_id,
               "年级": d.grade ? `${d.grade}年级` : "",
               "班级": d.class_num ? `${d.class_num}班` : "",
-              "Q1:玩过什么游戏": d.skipped ? "（跳过）" : (d.q1_gaming || ""),
-              "Q2:学过编程吗": d.skipped ? "（跳过）" : (d.q2_programming || ""),
-              "Q3:喜欢什么游戏": d.skipped ? "（跳过）" : (d.q3_favorite || ""),
-              "是否跳过": d.skipped ? "是" : "否",
+              "Q1:玩过游戏吗": d.q1_gaming || "",
+              "Q2:玩过哪些游戏": d.q2_programming || "",
+              "Q3:接触过编程吗": d.q3_favorite || "",
+              "Q4:设计过游戏吗": d.q4_design || "",
+              "Q5:好游戏最重要的是": d.q5_good_game || "",
               "提交时间": d.created_at ? new Date(d.created_at).toLocaleString("zh-CN") : "",
             }));
             const ws = XLSX.utils.json_to_sheet(rows);
             ws["!cols"] = [
               { wch: 10 }, { wch: 12 }, { wch: 6 }, { wch: 6 },
-              { wch: 40 }, { wch: 30 }, { wch: 40 },
-              { wch: 8 }, { wch: 16 },
+              { wch: 30 }, { wch: 30 }, { wch: 30 }, { wch: 30 }, { wch: 30 },
+              { wch: 16 },
             ];
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "学生前测");
@@ -2214,10 +2215,11 @@ function PriorKnowledgeView() {
                   <th className="px-4 py-3 text-left font-medium text-gray-600">姓名</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">学号</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">年级班级</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">玩过什么游戏</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">学过编程吗</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">喜欢什么游戏</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-600">状态</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">玩过游戏吗</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">玩过哪些游戏</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">接触过编程吗</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">设计过游戏吗</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">好游戏最重要</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">时间</th>
                 </tr>
               </thead>
@@ -2229,21 +2231,23 @@ function PriorKnowledgeView() {
                     <td className="px-4 py-3 text-gray-600">
                       {d.grade ? `${d.grade}年级` : ""}{d.class_num ? `${d.class_num}班` : ""}
                     </td>
-                    <td className="px-4 py-3 text-gray-600 max-w-[200px]">
-                      {d.skipped ? <span className="text-gray-400">—</span> : <span className="line-clamp-2">{d.q1_gaming || "—"}</span>}
+                    <td className="px-4 py-3 text-gray-600 max-w-[150px]">
+                      <span className="line-clamp-2">{d.q1_gaming || "—"}</span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 max-w-[200px]">
-                      {d.skipped ? <span className="text-gray-400">—</span> : <span className="line-clamp-2">{d.q2_programming || "—"}</span>}
+                    <td className="px-4 py-3 text-gray-600 max-w-[150px]">
+                      <span className="line-clamp-2">{d.q2_programming || "—"}</span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 max-w-[200px]">
-                      {d.skipped ? <span className="text-gray-400">—</span> : <span className="line-clamp-2">{d.q3_favorite || "—"}</span>}
+                    <td className="px-4 py-3 text-gray-600 max-w-[150px]">
+                      <span className="line-clamp-2">{d.q3_favorite || "—"}</span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 max-w-[150px]">
+                      <span className="line-clamp-2">{d.q4_design || "—"}</span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 max-w-[150px]">
+                      <span className="line-clamp-2">{d.q5_good_game || "—"}</span>
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {d.skipped ? (
-                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-500">跳过</span>
-                      ) : (
-                        <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">已答</span>
-                      )}
+                      <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">已答</span>
                     </td>
                     <td className="px-4 py-3 text-gray-400 text-xs">
                       {d.created_at ? new Date(d.created_at).toLocaleString("zh-CN") : ""}
