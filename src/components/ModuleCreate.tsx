@@ -237,6 +237,7 @@ export default function ModuleCreate({ userId }: Props) {
   // 加载对话
   const loadConversation = async (conv: Conversation) => {
     try {
+      trackEvent("load_conversation", conv.id, { title: conv.title, hasGame: conv.has_game });
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
       const res = await fetch(`/api/student/messages?session_id=${conv.id}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -271,6 +272,7 @@ export default function ModuleCreate({ userId }: Props) {
     setViewMode("code");
     setLiveCode("//   正在分析设计图...\n// 生成视觉蓝图中...\n\n请稍候...");
     setIsCoding(true);
+    trackEvent("auto_generate_start", currentConvId || undefined, { gameName: designData.game_name });
 
     // 添加用户消息
     setMessages((prev) => [...prev, { role: "user", content: `请帮我制作游戏"${designData.game_name}"` }]);
@@ -387,7 +389,7 @@ export default function ModuleCreate({ userId }: Props) {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ messages: newRaw.map((m) => ({ role: m.role, content: m.content })), currentCode: htmlCode || undefined, sessionId: convId }),
+        body: JSON.stringify({ messages: newRaw.map((m) => ({ role: m.role, content: m.content })), currentCode: htmlCode || undefined, sessionId: convId, inputMethod: "text" }),
         signal: AbortSignal.timeout(120000), // 2分钟超时
       });
       if (!res.ok) {

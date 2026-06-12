@@ -4,6 +4,7 @@ import { useState } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import VoiceButton from "@/components/VoiceButton";
 import { isRandomInput } from "@/utils/inputValidation";
+import { trackEvent } from "@/utils/trackEvent";
 
 interface Props {
   userId: string;
@@ -52,6 +53,7 @@ export default function ModuleReflection({ userId }: Props) {
         }),
       });
       if (res.ok) {
+        trackEvent("reflection_submit", latestConvId, { card1Length: card1.trim().length, card2Length: card2.trim().length, card3Length: card3.trim().length });
         setSaved(true);
       } else {
         const err = await res.json().catch(() => ({}));

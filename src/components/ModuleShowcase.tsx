@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import XiaozhiAvatar from "@/components/XiaozhiAvatar";
 import VoiceButton from "@/components/VoiceButton";
+import { trackEvent } from "@/utils/trackEvent";
 
 interface Props {
   userId: string;
@@ -74,6 +75,7 @@ export default function ModuleShowcase({ userId }: Props) {
 
   const fetchMyReviews = async () => {
     try {
+      trackEvent("view_my_reviews", undefined);
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) return;
@@ -116,6 +118,7 @@ export default function ModuleShowcase({ userId }: Props) {
       });
 
       if (res.ok) {
+        trackEvent("peer_review_submit", undefined, { revieweeId: task.user_id, itemId: task.id });
         // 清空表单
         setQ1(""); setQ2(""); setQ3(""); setGameStarted(false);
 
@@ -210,7 +213,7 @@ export default function ModuleShowcase({ userId }: Props) {
                   style={{ border: "none" }}
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => setGameStarted(true)}>
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => { setGameStarted(true); trackEvent("review_game_start", undefined, { itemId: current.id }); }}>
                   <div className="text-center">
                     <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
                       <span className="text-4xl ml-1">▶️</span>
