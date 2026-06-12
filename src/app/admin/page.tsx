@@ -1411,8 +1411,8 @@ function MessagesAudit() {
                   return {
                     "学生姓名": c.student_name, "学号": c.student_id,
                     "年级": c.grade ? `${c.grade}年级` : "", "班级": c.class_num ? `${c.class_num}班` : "",
-                    "对话标题": c.title,
-                    "卡片1-说说你的游戏": ref.card1 || "", "卡片2-最得意的设计": ref.card2 || "", "卡片3-下次想加什么": ref.card3 || "",
+                    "对话标题": trunc(c.title),
+                    "卡片1-说说你的游戏": trunc(ref.card1 || ""), "卡片2-最得意的设计": trunc(ref.card2 || ""), "卡片3-下次想加什么": trunc(ref.card3 || ""),
                     "更新时间": new Date(c.updated_at).toLocaleString("zh-CN"),
                   };
                 });
