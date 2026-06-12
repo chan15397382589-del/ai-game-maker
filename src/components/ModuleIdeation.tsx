@@ -565,7 +565,9 @@ export default function ModuleIdeation({ userId }: Props) {
         }),
       });
       setDesignDone(true);
-      setCurrentPhase("discuss");
+      // 保存成功后跳转到游戏设计模块
+      localStorage.setItem("gotoModule", "create");
+      window.location.href = "/student?module=create";
     } catch { alert("保存失败"); }
   };
 
@@ -790,11 +792,11 @@ export default function ModuleIdeation({ userId }: Props) {
     <div className="h-[calc(100vh-80px)] flex flex-col">
       {/* 阶段指示器 */}
       <div className="flex items-center gap-3 mb-3">
-        {[{ id: "survey", label: "基础情况", icon: " " }, { id: "design", label: "个人设计", icon: "✏️" }, { id: "discuss", label: "小组讨论", icon: " " }].map((phase, i) => (
+        {[{ id: "survey", label: "基础情况", icon: " " }, { id: "design", label: "个人设计", icon: "✏️" }].map((phase, i) => (
           <div key={phase.id} className="flex items-center gap-2">
-            <button onClick={() => { if (phase.id === "survey") setCurrentPhase("survey"); if (phase.id === "design" && surveyDone) setCurrentPhase("design"); if (phase.id === "discuss" && designDone) setCurrentPhase("discuss"); }}
+            <button onClick={() => { if (phase.id === "survey") setCurrentPhase("survey"); if (phase.id === "design" && surveyDone) setCurrentPhase("design"); }}
               className={`px-4 py-2 rounded-xl text-sm font-medium transition ${currentPhase === phase.id ? "bg-indigo-500 text-white shadow-md" : "bg-white text-gray-500"}`}>{phase.icon} {phase.label}</button>
-            {i < 2 && <div className="w-6 h-0.5 bg-gray-200" />}
+            {i < 1 && <div className="w-6 h-0.5 bg-gray-200" />}
           </div>
         ))}
       </div>
@@ -949,93 +951,6 @@ export default function ModuleIdeation({ userId }: Props) {
         </div>
       )}
 
-      {/* ========== 小组讨论 ========== */}
-      {currentPhase === "discuss" && (
-        <div className="flex-1 flex flex-col min-h-0">
-          {!groupCode ? (
-            <div className="flex-1 bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col items-center justify-center p-8">
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">  加入小组讨论</h2>
-              <p className="text-base text-gray-500 mb-10">选择你的身份，开始小组讨论</p>
-              <div className="flex gap-8 w-full max-w-lg">
-                <button onClick={createGroup} className="flex-1 bg-indigo-50 hover:bg-indigo-100 border-2 border-indigo-200 rounded-2xl p-6 flex flex-col items-center transition">
-                  <span className="text-5xl mb-3"> </span><span className="text-lg font-bold text-indigo-700 mb-2">我是组长</span><span className="text-sm text-indigo-500">创建小组，获取口令</span>
-                </button>
-                <div className="flex-1">
-                  {!showJoinInput ? (
-                    <button onClick={() => setShowJoinInput(true)} className="w-full h-full bg-green-50 hover:bg-green-100 border-2 border-green-200 rounded-2xl p-6 flex flex-col items-center transition">
-                      <span className="text-5xl mb-3"> </span><span className="text-lg font-bold text-green-700 mb-2">我是组员</span><span className="text-sm text-green-500">输入口令，加入小组</span>
-                    </button>
-                  ) : (
-                    <div className="w-full h-full bg-green-50 border-2 border-green-200 rounded-2xl p-6 flex flex-col items-center justify-center">
-                      <span className="text-4xl mb-3"> </span><p className="text-base font-bold text-green-700 mb-4">输入4位口令</p>
-                      <input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="____" maxLength={4} className="w-40 text-center text-2xl font-mono font-bold px-4 py-3 border-2 border-green-300 rounded-xl outline-none focus:border-green-500 tracking-[0.5em]" />
-                      <div className="flex gap-3 mt-4">
-                        <button onClick={() => setShowJoinInput(false)} className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">返回</button>
-                        <button onClick={joinGroup} disabled={joinCode.length !== 4} className="px-6 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-200 text-white rounded-lg text-sm font-medium transition">加入小组</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex-1 bg-white rounded-2xl shadow-md border border-gray-100 p-4 flex flex-col min-h-0">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <button onClick={() => { setGroupCode(null); setChatMessages([]); setGroupMembers([]); setShowJoinInput(false); }}
-                    className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm text-gray-600 transition">
-                    ← 返回
-                  </button>
-                  <h2 className="text-base font-bold text-gray-800">  小组讨论</h2>
-                </div>
-                <div className="flex items-center gap-2"><span className="text-sm text-gray-500">口令：</span><span className="text-lg font-mono font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-lg">{groupCode}</span></div>
-              </div>
-              <div className="flex-1 flex gap-4 min-h-0">
-                {/* 左侧：成员设计展示 */}
-                <div className="flex-[2] flex flex-col bg-gray-50 rounded-xl p-4">
-                  <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    <span className="text-sm font-bold text-gray-700">  查看设计：</span>
-                    {groupMembers.length === 0 ? <span className="text-sm text-gray-400">等待成员加入...</span> : groupMembers.map((member) => (
-                      <button key={member.id} onClick={() => viewMemberDesign(member.id)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${selectedMember?.id === member.id ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-indigo-50 border border-gray-200"}`}>{member.name}</button>
-                    ))}
-                  </div>
-                  {selectedMember && memberDesign ? (
-                    <div className="flex-1 flex gap-4 min-h-0">
-                      <div className="flex-1 flex flex-col">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">{selectedMember.name} 的设计图</h3>
-                        {memberDesign.design_image ? <img src={memberDesign.design_image} alt="设计图" className="flex-1 object-contain border border-gray-200 rounded-lg bg-white" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} /> : <div className="flex-1 flex items-center justify-center text-gray-400 border border-dashed border-gray-200 rounded-lg"><p className="text-sm">暂无设计图</p></div>}
-                      </div>
-                      <div className="w-64 flex flex-col">
-                        <h3 className="text-sm font-bold text-gray-700 mb-2">  游戏规则</h3>
-                        {memberDesign.game_name && <div className="mb-3 p-2.5 bg-white rounded-lg border border-gray-200"><p className="text-xs text-gray-500">游戏名称</p><p className="text-base font-bold text-gray-800">{memberDesign.game_name}</p></div>}
-                        {memberDesign.game_rules?.length > 0 && <div className="flex-1 p-2.5 bg-white rounded-lg border border-gray-200 overflow-y-auto"><p className="text-xs text-gray-500 mb-2">规则列表</p>{memberDesign.game_rules.map((r: string, i: number) => <p key={i} className="text-sm text-gray-700 mb-1.5">• {r}</p>)}</div>}
-                      </div>
-                    </div>
-                  ) : <div className="flex-1 flex items-center justify-center"><div className="text-center text-gray-400"><p className="text-5xl mb-3"> </p><p className="text-base">点击上方成员名字查看设计</p></div></div>}
-                </div>
-
-                {/* 右侧：聊天室 */}
-                <div className="flex-1 flex flex-col min-h-0">
-                  <div className="flex items-center gap-2 mb-2 p-2.5 bg-indigo-50 rounded-lg border border-indigo-200">
-                    <span className="text-sm font-bold text-indigo-700">谁在说话：</span>
-                    <button onClick={() => setSpeakingAs("me")} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${speakingAs === "me" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-indigo-100 border border-gray-200"}`}>我</button>
-                    {groupMembers.map((member) => <button key={member.id} onClick={() => setSpeakingAs(member.id)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${speakingAs === member.id ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-indigo-100 border border-gray-200"}`}>{member.name}</button>)}
-                  </div>
-                  <div ref={groupChatRef} className="flex-1 overflow-y-auto space-y-2 mb-2 p-3 bg-gray-50 rounded-lg">
-                    {chatMessages.length === 0 ? <p className="text-center text-gray-400 text-sm py-4">开始讨论吧！</p> : chatMessages.map((m) => <div key={m.id} className="bg-white rounded-lg px-3 py-2 shadow-sm"><p className="text-sm font-medium text-indigo-600">{m.sender?.name || "我"}</p><p className="text-sm">{m.message_type === "voice" ? `🎤 ${m.voice_transcript || m.content}` : m.content}</p></div>)}
-                  </div>
-                  <div className="p-2.5 bg-yellow-50 rounded-lg border border-yellow-200 mb-2"><p className="text-sm text-yellow-800">  提示：你觉得他/她的游戏最有趣的设计是什么？</p></div>
-                  <div className="flex gap-2">
-                    <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendMessage()} placeholder="说说你的想法..." className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg text-sm outline-none" />
-                    <button onClick={sendMessage} className="px-5 py-2.5 bg-indigo-500 text-white rounded-lg text-sm font-medium">发送</button>
-                    <button onClick={toggleVoice} className={`px-3 py-2.5 rounded-lg text-sm ${isRecording ? "bg-red-500 text-white animate-pulse" : "bg-gray-200 text-gray-700"}`}>{isRecording ? "⏹" : "🎤"}</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
