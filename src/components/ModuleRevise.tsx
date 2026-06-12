@@ -181,7 +181,10 @@ export default function ModuleRevise({ userId }: Props) {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-120px)]">
-        <p className="text-gray-400 animate-pulse">加载中...</p>
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-500">正在加载...</p>
+        </div>
       </div>
     );
   }
@@ -189,16 +192,16 @@ export default function ModuleRevise({ userId }: Props) {
   return (
     <div className="flex h-[calc(100vh-120px)] gap-3">
       {/* 左侧：同学评价 + 聊天 */}
-      <div className="w-96 bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden">
+      <div className="w-96 bg-white rounded-2xl shadow-lg border border-gray-100 flex flex-col overflow-hidden">
         {/* 评价摘要 */}
-        <div className="p-3 border-b border-gray-100 bg-amber-50">
-          <h3 className="text-sm font-bold text-amber-700 mb-2">  同学评价</h3>
+        <div className="p-3 border-b border-gray-100 bg-gradient-to-r from-amber-500 to-orange-500">
+          <h3 className="text-sm font-bold text-white mb-2">  同学评价</h3>
           {reviews.length === 0 ? (
-            <p className="text-xs text-amber-600">暂无评价</p>
+            <p className="text-xs text-amber-100">暂无评价</p>
           ) : (
             <div className="space-y-2 max-h-40 overflow-y-auto">
               {reviews.map((r, i) => (
-                <div key={r.id} className="text-xs p-2 bg-white rounded-lg border border-amber-100">
+                <div key={r.id} className="text-xs p-2.5 bg-white/90 rounded-lg backdrop-blur-sm">
                   <p className="font-bold text-gray-700 mb-1">{r.reviewer?.name || "匿名"}</p>
                   <p className="text-green-700">  {r.q1_enjoy}</p>
                   <p className="text-blue-700">  {r.q2_suggestion}</p>
@@ -212,7 +215,7 @@ export default function ModuleRevise({ userId }: Props) {
         {/* 聊天区 */}
         <div className="flex-1 flex flex-col min-h-0">
           <div className="px-3 py-2 border-b border-gray-100 bg-purple-50 flex items-center gap-2">
-            <XiaozhiAvatar state={sending ? "thinking" : "idle"} />
+            <div className="w-8 h-8"><XiaozhiAvatar state={sending ? "thinking" : "idle"} /></div>
             <div>
               <p className="text-xs font-bold text-purple-700">小智老师</p>
               <p className="text-[10px] text-purple-500">根据同学建议修改游戏</p>
@@ -249,14 +252,14 @@ export default function ModuleRevise({ userId }: Props) {
       </div>
 
       {/* 右侧：游戏预览 */}
-      <div className="flex-1 bg-white rounded-2xl shadow-md border border-gray-100 flex flex-col overflow-hidden">
-        <div className="px-4 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-          <h3 className="text-sm font-bold text-gray-800">  {gameTitle || "游戏预览"}</h3>
-          <button onClick={() => setGameStarted(!gameStarted)} className="px-3 py-1 bg-indigo-500 text-white rounded-lg text-xs font-medium">
+      <div className="flex-1 bg-white rounded-2xl shadow-lg border border-gray-100 flex flex-col overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-white">  {gameTitle || "游戏预览"}</h3>
+          <button onClick={() => setGameStarted(!gameStarted)} className="px-4 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-lg text-xs font-bold transition backdrop-blur-sm">
             {gameStarted ? "  重新开始" : "▶️ 开始游戏"}
           </button>
         </div>
-        <div className="flex-1 relative">
+        <div className="flex-1 relative bg-gray-900">
           {htmlCode ? (
             gameStarted ? (
               <iframe
@@ -267,10 +270,13 @@ export default function ModuleRevise({ userId }: Props) {
                 style={{ border: "none" }}
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50 cursor-pointer" onClick={() => setGameStarted(true)}>
+              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => setGameStarted(true)}>
                 <div className="text-center">
-                  <div className="text-7xl mb-4 animate-bounce">▶️</div>
-                  <p className="text-2xl font-bold text-indigo-600">点击试玩你的游戏</p>
+                  <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
+                    <span className="text-4xl ml-1">▶️</span>
+                  </div>
+                  <p className="text-xl font-bold text-white">点击试玩你的游戏</p>
+                  <p className="text-sm text-indigo-200 mt-1">修改后可以实时预览</p>
                 </div>
               </div>
             )
