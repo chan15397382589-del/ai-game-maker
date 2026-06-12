@@ -80,8 +80,11 @@ export default function ModuleCreate({ userId }: Props) {
   const [renameValue, setRenameValue] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // 加载设计数据
+  // 加载设计数据（带请求去重）
+  const designLoadingRef = useRef(false);
   const loadDesign = async () => {
+    if (designLoadingRef.current) return;
+    designLoadingRef.current = true;
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
@@ -108,21 +111,24 @@ export default function ModuleCreate({ userId }: Props) {
           if (task.game_name) setGameTitle(task.game_name);
         }
       }
-    } catch {} finally { setDesignLoaded(true); }
+    } catch {} finally { setDesignLoaded(true); designLoadingRef.current = false; }
   };
 
   // 当组件挂载时加载设计数据
   useEffect(() => { loadDesign(); }, []);
 
-  // 加载对话列表
+  // 加载对话列表（带请求去重）
+  const convsLoadingRef = useRef(false);
   const fetchConversations = async () => {
+    if (convsLoadingRef.current) return;
+    convsLoadingRef.current = true;
     setLoadingHistory(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
       const res = await fetch("/api/student/sessions", { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setConversations(await res.json() || []);
-    } catch (err) { console.error("加载对话列表失败:", err); } finally { setLoadingHistory(false); }
+    } catch (err) { console.error("加载对话列表失败:", err); } finally { setLoadingHistory(false); convsLoadingRef.current = false; }
   };
 
   useEffect(() => { fetchConversations(); }, []);
