@@ -51,23 +51,46 @@ export async function GET(req: NextRequest) {
 
     const reviewedIds = (myReviews || []).map((r: any) => r.reviewee_id);
 
-    // 3. 获取同班同学分享的游戏（排除自己和已评价的）
-    let query = db
+    // 3. 获取同班同学分享的游戏（排除自己）
+    const { data: items, error } = await db
       .from("shared_items")
       .select("*, author:users!shared_items_user_id_fkey(name, student_id)")
       .eq("grade", myInfo.grade)
       .eq("class_num", myInfo.class_num)
       .neq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(20);
+      .order("created_at", { ascending: false });
 
-    const { data: items, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    // 4. 过滤已评价的，随机选3个
+    // 4. 获取每个同学收到的评价数量，优先选评价少的
+    const revieweeIds = [...new Set((items || []).map((i: any) => i.user_id))];
+    const { data: allReviews } = await db
+      .from("peer_reviews")
+      .select("reviewee_id")
+      .in("reviewee_id", revieweeIds);
+
+    const reviewCountMap: Record<string, number> = {};
+    (allReviews || []).forEach((r: any) => {
+      reviewCountMap[r.reviewee_id] = (reviewCountMap[r.reviewee_id] || 0) + 1;
+    });
+
+    // 5. 过滤已评价的，按收到评价数排序（优先分配给评价少的同学）
     const available = (items || []).filter((i: any) => !reviewedIds.includes(i.user_id));
-    const shuffled = available.sort(() => Math.random() - 0.5);
-    const selected = shuffled.slice(0, 3);
+    available.sort((a: any, b: any) => {
+      const countA = reviewCountMap[a.user_id] || 0;
+      const countB = reviewCountMap[b.user_id] || 0;
+      return countA - countB;
+    });
+
+    // 6. 去重（同一同学只保留最新的一条），取前3个
+    const seen = new Set<string>();
+    const selected: any[] = [];
+    for (const item of available) {
+      if (!seen.has(item.user_id) && selected.length < 3) {
+        seen.add(item.user_id);
+        selected.push(item);
+      }
+    }
 
     return NextResponse.json({
       tasks: selected,
