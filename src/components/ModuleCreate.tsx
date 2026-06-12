@@ -111,18 +111,8 @@ export default function ModuleCreate({ userId }: Props) {
     } catch {} finally { setDesignLoaded(true); }
   };
 
+  // 当组件挂载时加载设计数据
   useEffect(() => { loadDesign(); }, []);
-
-  // 当组件变为可见时重新加载设计数据（从构思阶段切换过来时）
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        loadDesign();
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, []);
 
   // 加载对话列表
   const fetchConversations = async () => {
@@ -282,15 +272,14 @@ export default function ModuleCreate({ userId }: Props) {
       const data = await res.json();
 
       if (res.ok && data.code) {
-        // 模拟流式显示：逐行显示代码
+        // 模拟流式显示：分块显示代码（每 10 行一块，减少重渲染）
         const codeLines = data.code.split("\n");
-        let displayed = "";
-        for (let i = 0; i < codeLines.length; i++) {
-          displayed += (i > 0 ? "\n" : "") + codeLines[i];
-          setLiveCode(displayed);
-          // 每 3 行暂停一下，营造流式效果
-          if (i % 3 === 0 && i < codeLines.length - 1) {
-            await new Promise(r => setTimeout(r, 30));
+        const chunkSize = 10;
+        for (let i = 0; i < codeLines.length; i += chunkSize) {
+          const chunk = codeLines.slice(0, i + chunkSize).join("\n");
+          setLiveCode(chunk);
+          if (i + chunkSize < codeLines.length) {
+            await new Promise(r => setTimeout(r, 50));
           }
         }
 
