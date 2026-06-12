@@ -565,7 +565,8 @@ export default function ModuleIdeation({ userId }: Props) {
         }),
       });
       setDesignDone(true);
-      // 保存成功后跳转到游戏设计模块
+      // 保存成功后通知游戏设计模块刷新数据，然后跳转
+      window.dispatchEvent(new CustomEvent("design-saved"));
       localStorage.setItem("gotoModule", "create");
       window.location.href = "/student?module=create";
     } catch { alert("保存失败"); }

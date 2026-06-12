@@ -115,6 +115,16 @@ export default function ModuleCreate({ userId }: Props) {
   // 当组件挂载时加载设计数据
   useEffect(() => { loadDesign(); }, []);
 
+  // 监听设计保存事件，重新加载数据
+  useEffect(() => {
+    const handleDesignSaved = () => {
+      designLoadingRef.current = false; // 重置锁，允许重新加载
+      loadDesign();
+    };
+    window.addEventListener("design-saved", handleDesignSaved);
+    return () => window.removeEventListener("design-saved", handleDesignSaved);
+  }, []);
+
   // 加载对话列表（带请求去重）
   const convsLoadingRef = useRef(false);
   const fetchConversations = async () => {
