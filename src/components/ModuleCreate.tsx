@@ -6,6 +6,7 @@ import { supabase } from "@/components/SupabaseProvider";
 import XiaozhiAvatar from "@/components/XiaozhiAvatar";
 import VoiceButton from "@/components/VoiceButton";
 import { getValidationMessage } from "@/utils/inputValidation";
+import { trackEvent } from "@/utils/trackEvent";
 
 function formatAIMessage(text: string): ReactNode[] {
   const lines = text.split("\n");
@@ -494,6 +495,7 @@ export default function ModuleCreate({ userId }: Props) {
       const token = session?.access_token; if (!token) return;
       const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ game_title: gameTitle.trim(), html_code: htmlCode }) });
       if (res.ok) {
+        trackEvent("game_upload", currentConvId || undefined, { title: gameTitle, codeLength: htmlCode.length });
         alert("  上传成功！");
         window.location.href = "/student?module=reflection";
       } else {
@@ -505,6 +507,7 @@ export default function ModuleCreate({ userId }: Props) {
 
   const handleDownload = () => {
     if (!htmlCode) return;
+    trackEvent("game_download", currentConvId || undefined, { title: gameTitle, codeLength: htmlCode.length });
     const blob = new Blob([htmlCode], { type: "text/html;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `${gameTitle || "游戏"}.html`;
@@ -686,8 +689,8 @@ export default function ModuleCreate({ userId }: Props) {
         <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-100">
           <h2 className="text-lg font-bold text-gray-800 whitespace-nowrap">预览</h2>
           <div className="flex bg-gray-100 rounded-lg p-0.5 flex-shrink-0">
-            <button onClick={() => setViewMode("code")} className={`px-3 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${viewMode === "code" ? "bg-white shadow" : "text-gray-500"}`}>代码</button>
-            <button onClick={() => setViewMode("game")} className={`px-3 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${viewMode === "game" ? "bg-white shadow" : "text-gray-500"}`}>游戏</button>
+            <button onClick={() => { setViewMode("code"); trackEvent("view_code", currentConvId || undefined, { codeLength: htmlCode.length }); }} className={`px-3 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${viewMode === "code" ? "bg-white shadow" : "text-gray-500"}`}>代码</button>
+            <button onClick={() => { setViewMode("game"); trackEvent("view_game", currentConvId || undefined); }} className={`px-3 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${viewMode === "game" ? "bg-white shadow" : "text-gray-500"}`}>游戏</button>
           </div>
           <span className="text-sm text-gray-400 flex-shrink-0">{htmlCode ? `${htmlCode.split("\n").length}行` : ""}</span>
           <div className="flex-1 flex items-center gap-1">
@@ -742,7 +745,7 @@ export default function ModuleCreate({ userId }: Props) {
                   </div>
                 </div>
               ) : (
-                <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer rounded-xl" onClick={() => setGameStarted(true)}>
+                <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer rounded-xl" onClick={() => { setGameStarted(true); trackEvent("game_start", currentConvId || undefined); }}>
                   <div className="text-center">
                     <div className="text-7xl mb-4 animate-bounce">▶️</div>
                     <p className="text-2xl font-bold text-indigo-600">先来玩一玩游戏吧！</p>
