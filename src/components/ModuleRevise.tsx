@@ -202,7 +202,7 @@ export default function ModuleRevise({ userId }: Props) {
             <div className="space-y-2 max-h-40 overflow-y-auto">
               {reviews.map((r, i) => (
                 <div key={r.id} className="text-xs p-2.5 bg-white/90 rounded-lg backdrop-blur-sm">
-                  <p className="font-bold text-gray-700 mb-1">{r.reviewer?.name || "匿名"}</p>
+                  <p className="font-bold text-gray-700 mb-1">同学 {i + 1}</p>
                   <p className="text-green-700">  {r.q1_enjoy}</p>
                   <p className="text-blue-700">  {r.q2_suggestion}</p>
                   {r.q3_bug && <p className="text-orange-700">  {r.q3_bug}</p>}

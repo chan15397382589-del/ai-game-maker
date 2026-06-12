@@ -306,8 +306,7 @@ export default function ModuleShowcase({ userId }: Props) {
             <div key={review.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
               <div className="flex items-center gap-3 px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-100">
                 <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-sm font-bold">{idx + 1}</div>
-                <span className="text-sm font-bold text-gray-800">{review.reviewer?.name || "匿名"}</span>
-                <span className="text-xs text-gray-400">{review.reviewer?.student_id}</span>
+                <span className="text-sm font-bold text-gray-800">同学 {idx + 1}</span>
                 <span className="text-xs text-gray-400 ml-auto">{new Date(review.created_at).toLocaleString("zh-CN")}</span>
               </div>
               <div className="p-5 space-y-3">
