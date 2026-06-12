@@ -28,8 +28,8 @@ export async function POST(req: NextRequest) {
     const base64Data = await imageUrlToBase64(imageUrl);
     const rulesText = (rules || []).filter((r: string) => r.trim()).map((r: string) => `如果${r}`).join("；");
 
-    // 单次API调用：分析图片 + 生成代码
-    const response = await mimo.messages.create({
+    // 流式API调用：分析图片 + 生成代码
+    const response = mimo.messages.stream({
       model: "mimo-v2.5",
       max_tokens: 8192,
       temperature: 0.3,
@@ -70,41 +70,75 @@ ${rulesText ? `游戏规则：${rulesText}` : ""}
       ]
     });
 
-    const text = response.content[0].type === "text" ? response.content[0].text : "";
+    // 创建流式响应
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        let fullText = "";
 
-    // 提取代码 - 多种格式兼容
-    // 1. 匹配 ```html ... ```
-    const codeMatch = text.match(/```html\s*\n([\s\S]*?)```/);
-    if (codeMatch) {
-      return NextResponse.json({ code: codeMatch[1].trim() });
-    }
+        try {
+          for await (const event of response) {
+            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+              const content = event.delta.text;
+              fullText += content;
+              // 实时发送每个文本块
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "chunk", content })}\n\n`));
+            }
+          }
 
-    // 2. 匹配 ``` ... ``` (包含HTML标签)
-    const anyFence = text.match(/```\s*\n([\s\S]*?)```/);
-    if (anyFence && anyFence[1].includes("<")) {
-      return NextResponse.json({ code: anyFence[1].trim() });
-    }
+          // 流结束后，提取完整代码
+          const code = extractCode(fullText);
+          if (code) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "done", code })}\n\n`));
+          } else {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: "未能生成代码", debug: fullText.substring(0, 500) })}\n\n`));
+          }
+        } catch (err: any) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "error", error: err.message })}\n\n`));
+        }
 
-    // 3. 匹配 <!DOCTYPE html> 到 </html>
-    if (text.includes("<!DOCTYPE") || text.includes("<html")) {
-      const start = text.indexOf("<!DOCTYPE") !== -1 ? text.indexOf("<!DOCTYPE") : text.indexOf("<html");
-      const end = text.lastIndexOf("</html>");
-      if (start !== -1 && end !== -1) {
-        return NextResponse.json({ code: text.substring(start, end + 7).trim() });
-      }
-    }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    });
 
-    // 4. 匹配 <html 到 </html>（没有 DOCTYPE）
-    const htmlMatch = text.match(/<html[\s\S]*<\/html>/i);
-    if (htmlMatch) {
-      return NextResponse.json({ code: htmlMatch[0].trim() });
-    }
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+  } catch (err: any) {
+    console.error("Blueprint generate error:", err);
+    return NextResponse.json({ error: err.message || "生成失败" }, { status: 500 });
+  }
+}
 
-    // 5. 匹配包含 <canvas 或 <script 的代码块
-    const canvasMatch = text.match(/<(?:canvas|script)[\s\S]*<\/(?:canvas|script)>/i);
-    if (canvasMatch) {
-      // 包装成完整HTML
-      const wrappedCode = `<!DOCTYPE html>
+function extractCode(text: string): string | null {
+  // 1. 匹配 ```html ... ```
+  const codeMatch = text.match(/```html\s*\n([\s\S]*?)```/);
+  if (codeMatch) return codeMatch[1].trim();
+
+  // 2. 匹配 ``` ... ``` (包含HTML标签)
+  const anyFence = text.match(/```\s*\n([\s\S]*?)```/);
+  if (anyFence && anyFence[1].includes("<")) return anyFence[1].trim();
+
+  // 3. 匹配 <!DOCTYPE html> 到 </html>
+  if (text.includes("<!DOCTYPE") || text.includes("<html")) {
+    const start = text.indexOf("<!DOCTYPE") !== -1 ? text.indexOf("<!DOCTYPE") : text.indexOf("<html");
+    const end = text.lastIndexOf("</html>");
+    if (start !== -1 && end !== -1) return text.substring(start, end + 7).trim();
+  }
+
+  // 4. 匹配 <html 到 </html>（没有 DOCTYPE）
+  const htmlMatch = text.match(/<html[\s\S]*<\/html>/i);
+  if (htmlMatch) return htmlMatch[0].trim();
+
+  // 5. 匹配包含 <canvas 或 <script 的代码块
+  const canvasMatch = text.match(/<(?:canvas|script)[\s\S]*<\/(?:canvas|script)>/i);
+  if (canvasMatch) {
+    return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -120,12 +154,7 @@ canvas { display: block; }
 ${canvasMatch[0]}
 </body>
 </html>`;
-      return NextResponse.json({ code: wrappedCode });
-    }
-
-    return NextResponse.json({ error: "未能生成代码，请重试", debug: text.substring(0, 500) }, { status: 500 });
-  } catch (err: any) {
-    console.error("Blueprint generate error:", err);
-    return NextResponse.json({ error: err.message || "生成失败" }, { status: 500 });
   }
+
+  return null;
 }
