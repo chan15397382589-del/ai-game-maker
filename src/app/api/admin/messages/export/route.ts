@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
       .from("messages")
       .select("user_id, role, content, session_id, created_at")
       .order("created_at", { ascending: true })
-      .limit(50000); // 限制最多50000条消息
+      .limit(5000);
 
     if (userId) {
       query = query.eq("user_id", userId);

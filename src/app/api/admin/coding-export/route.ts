@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
       .from("messages")
       .select("user_id, role, content, session_id, created_at, input_method")
       .order("created_at", { ascending: true })
-      .limit(50000);
+      .limit(5000);
 
     if (userId) msgQuery = msgQuery.eq("user_id", userId);
 
@@ -100,7 +100,7 @@ export async function GET(req: NextRequest) {
     let evtQuery = supabaseAdmin
       .from("interaction_events")
       .select("user_id, session_id, event_type, metadata, created_at")
-      .limit(50000);
+      .limit(5000);
 
     if (userId) evtQuery = evtQuery.eq("user_id", userId);
 

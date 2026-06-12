@@ -64,29 +64,57 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 获取每个分享的点赞数、当前用户是否点赞、评论数、作者名
-    const enriched = await Promise.all(
-      (items || []).map(async (item: any) => {
-        const [{ count: likeCount }, { data: myLike }, { count: commentCount }, { data: authorData }] =
-          await Promise.all([
-            db.from("likes").select("*", { count: "exact", head: true }).eq("shared_item_id", item.id),
-            db.from("likes").select("id").eq("shared_item_id", item.id).eq("user_id", user.id).maybeSingle(),
-            db.from("comments").select("*", { count: "exact", head: true }).eq("shared_item_id", item.id),
-            db.from("users").select("name, grade, class_num").eq("id", item.user_id).single(),
-          ]);
+    if (!items || items.length === 0) {
+      return NextResponse.json([]);
+    }
 
-        return {
-          ...item,
-          like_count: likeCount || 0,
-          liked_by_me: !!myLike,
-          comment_count: commentCount || 0,
-          author_name: authorData?.name || "未知",
-          author_grade: authorData?.grade,
-          author_class_num: authorData?.class_num,
-          is_mine: item.user_id === user.id,
-        };
-      })
-    );
+    // 批量获取所有需要的数据（避免 N+1 查询）
+    const itemIds = items.map((i: any) => i.id);
+    const userIds = [...new Set(items.map((i: any) => i.user_id))];
+
+    const [likesResult, myLikesResult, commentsResult, authorsResult] = await Promise.all([
+      // 批量获取点赞数
+      db.from("likes").select("shared_item_id").in("shared_item_id", itemIds),
+      // 批量获取当前用户的点赞
+      db.from("likes").select("shared_item_id").in("shared_item_id", itemIds).eq("user_id", user.id),
+      // 批量获取评论数
+      db.from("comments").select("shared_item_id").in("shared_item_id", itemIds),
+      // 批量获取作者信息
+      db.from("users").select("id, name, grade, class_num").in("id", userIds),
+    ]);
+
+    // 构建查找 Map
+    const likeCountMap: Record<number, number> = {};
+    (likesResult.data || []).forEach((l: any) => {
+      likeCountMap[l.shared_item_id] = (likeCountMap[l.shared_item_id] || 0) + 1;
+    });
+
+    const myLikeSet = new Set((myLikesResult.data || []).map((l: any) => l.shared_item_id));
+
+    const commentCountMap: Record<number, number> = {};
+    (commentsResult.data || []).forEach((c: any) => {
+      commentCountMap[c.shared_item_id] = (commentCountMap[c.shared_item_id] || 0) + 1;
+    });
+
+    const authorMap: Record<string, any> = {};
+    (authorsResult.data || []).forEach((a: any) => {
+      authorMap[a.id] = a;
+    });
+
+    // 组装结果
+    const enriched = items.map((item: any) => {
+      const author = authorMap[item.user_id];
+      return {
+        ...item,
+        like_count: likeCountMap[item.id] || 0,
+        liked_by_me: myLikeSet.has(item.id),
+        comment_count: commentCountMap[item.id] || 0,
+        author_name: author?.name || "未知",
+        author_grade: author?.grade,
+        author_class_num: author?.class_num,
+        is_mine: item.user_id === user.id,
+      };
+    });
 
     return NextResponse.json(enriched);
   } catch (error: any) {
