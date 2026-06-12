@@ -659,7 +659,10 @@ export default function ModuleCreate({ userId }: Props) {
             <button onClick={() => setViewMode("game")} className={`px-3 py-1.5 rounded-md text-sm font-medium transition whitespace-nowrap ${viewMode === "game" ? "bg-white shadow" : "text-gray-500"}`}>游戏</button>
           </div>
           <span className="text-sm text-gray-400 flex-shrink-0">{htmlCode ? `${htmlCode.split("\n").length}行` : ""}</span>
-          <input value={gameTitle} onChange={(e) => setGameTitle(e.target.value)} placeholder="输入游戏名称" className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none" />
+          <div className="flex-1 flex items-center gap-1">
+            <input value={gameTitle} onChange={(e) => setGameTitle(e.target.value)} placeholder="输入游戏名称" className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm outline-none" />
+            <VoiceButton onResult={(text) => setGameTitle((prev) => prev + text)} />
+          </div>
           <button onClick={handleUpload} disabled={!htmlCode || !gameTitle.trim() || saving} className="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50 flex-shrink-0">{saving ? "..." : "上传"}</button>
           <button onClick={handleDownload} disabled={!htmlCode} className="bg-green-500 hover:bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium disabled:opacity-50 flex-shrink-0">下载</button>
         </div>
