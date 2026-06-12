@@ -59,15 +59,14 @@ export default function SupabaseProvider({
   useEffect(() => {
     const client = getSupabase();
 
-    // 尝试恢复 session
-    client.auth.getSession().then(({ error }) => {
-      if (error) {
-        console.warn("[Supabase] Session 恢复失败:", error.message);
+    // 监听认证状态变化
+    const { data: { subscription } } = client.auth.onAuthStateChange((event) => {
+      // 登出时清除本地存储
+      if (event === "SIGNED_OUT") {
         clearSupabaseStorage();
       }
-    }).catch(() => clearSupabaseStorage());
+    });
 
-    const { data: { subscription } } = client.auth.onAuthStateChange(() => {});
     return () => subscription.unsubscribe();
   }, []);
 
