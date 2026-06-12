@@ -7,6 +7,7 @@ import ModuleIdeation from "@/components/ModuleIdeation";
 import ModuleCreate from "@/components/ModuleCreate";
 import ModuleShowcase from "@/components/ModuleShowcase";
 import ModuleRevise from "@/components/ModuleRevise";
+import ModuleGallery from "@/components/ModuleGallery";
 import ModuleReflection from "@/components/ModuleReflection";
 
 const MODULES = [
@@ -14,6 +15,7 @@ const MODULES = [
   { id: "create", label: "  游戏设计", desc: "和小智老师一起创作" },
   { id: "showcase", label: "  同伴互评", desc: "评价同学作品" },
   { id: "revise", label: "  同伴建议", desc: "根据评价改进游戏" },
+  { id: "gallery", label: "  班级作品", desc: "浏览同学游戏" },
   { id: "reflection", label: "  我的反思", desc: "回顾创作过程" },
 ];
 
@@ -39,7 +41,7 @@ export default function StudentPage() {
         // 检查 URL 参数或 localStorage，支持从其他页面跳转到指定模块
         const params = new URLSearchParams(window.location.search);
         const moduleParam = params.get("module") || localStorage.getItem("gotoModule");
-        if (moduleParam && ["ideation", "create", "showcase", "revise", "reflection"].includes(moduleParam)) {
+        if (moduleParam && ["ideation", "create", "showcase", "revise", "gallery", "reflection"].includes(moduleParam)) {
           setActiveModule(moduleParam);
           localStorage.removeItem("gotoModule");
         }
@@ -106,6 +108,9 @@ export default function StudentPage() {
         </div>
         <div style={{ display: activeModule === "revise" ? "block" : "none" }}>
           <ModuleRevise userId={userId} />
+        </div>
+        <div style={{ display: activeModule === "gallery" ? "block" : "none" }}>
+          <ModuleGallery userId={userId} />
         </div>
         <div style={{ display: activeModule === "reflection" ? "block" : "none" }}>
           <ModuleReflection userId={userId} />
