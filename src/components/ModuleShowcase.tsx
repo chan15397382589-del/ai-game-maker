@@ -70,7 +70,7 @@ export default function ModuleShowcase({ userId }: Props) {
           fetchMyReviews();
         }
       }
-    } catch {} finally { setLoading(false); }
+    } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   const fetchMyReviews = async () => {
@@ -87,7 +87,7 @@ export default function ModuleShowcase({ userId }: Props) {
         setMyReviews(await res.json());
         setPhase("viewing");
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const handleSubmitReview = async () => {

@@ -98,7 +98,7 @@ export default function ModuleCreate({ userId }: Props) {
             const info = JSON.parse(task.design_reason || "{}");
             aiPrompt = info.ai_prompt || "";
             imageHistory = info.image_history || [];
-          } catch {}
+          } catch (err) { console.error(err); }
           setDesignData({
             game_name: task.game_name,
             game_rules: task.game_rules || [],
@@ -110,7 +110,7 @@ export default function ModuleCreate({ userId }: Props) {
           if (task.game_name) setGameTitle(task.game_name);
         }
       }
-    } catch {} finally { setDesignLoaded(true); designLoadingRef.current = false; }
+    } catch (err) { console.error(err); } finally { setDesignLoaded(true); designLoadingRef.current = false; }
   };
 
   // 当组件挂载时加载设计数据
@@ -455,7 +455,7 @@ export default function ModuleCreate({ userId }: Props) {
               }
             }
           }
-        } catch {}
+        } catch (err) { console.error(err); }
       }
     }
 
@@ -486,7 +486,7 @@ export default function ModuleCreate({ userId }: Props) {
               body: JSON.stringify({ id: currentConvId, html_code: finalCode }),
             });
           }
-        } catch {}
+        } catch (err) { console.error(err); }
       }
     }
   };
@@ -547,7 +547,7 @@ export default function ModuleCreate({ userId }: Props) {
       await fetch("/api/student/sessions", { method: "DELETE", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ id: convId }) });
       setConversations((prev) => prev.filter((c) => c.id !== convId));
       if (convId === currentConvId) { setCurrentConvId(null); setMessages([]); setRawMessages([]); setHtmlCode(""); }
-    } catch {} finally { setDeletingId(null); }
+    } catch (err) { console.error(err); } finally { setDeletingId(null); }
   };
 
   const handleRename = async (convId: string) => {
@@ -557,7 +557,7 @@ export default function ModuleCreate({ userId }: Props) {
       const token = session?.access_token; if (!token) return;
       await fetch("/api/student/sessions", { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ id: convId, title: renameValue.trim() }) });
       setConversations((prev) => prev.map((c) => c.id === convId ? { ...c, title: renameValue.trim() } : c));
-    } catch {} finally { setRenamingId(null); }
+    } catch (err) { console.error(err); } finally { setRenamingId(null); }
   };
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);

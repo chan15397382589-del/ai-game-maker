@@ -42,7 +42,7 @@ export default function ModuleGallery({ userId }: Props) {
         const data = await res.json();
         setItems(data || []);
       }
-    } catch {} finally { setLoading(false); }
+    } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   if (loading) {

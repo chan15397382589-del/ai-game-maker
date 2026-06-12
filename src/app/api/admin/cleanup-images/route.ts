@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
               needsUpdate = true;
             }
           }
-        } catch {}
+        } catch (err) { console.error(err); }
       }
 
       if (needsUpdate) {
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
               .eq("id", task.id);
           }
         }
-      } catch {}
+      } catch (err) { console.error(err); }
     }
 
     return NextResponse.json({

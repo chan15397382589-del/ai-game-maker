@@ -1193,7 +1193,7 @@ function MessagesAudit() {
         const allConvs = await convRes.json();
         setReflections(allConvs.filter((c: any) => c.reflection));
       }
-    } catch {}
+    } catch (err) { console.error(err); }
     setLoadingReflections(false);
   };
 
@@ -1407,7 +1407,7 @@ function MessagesAudit() {
                 const data = await fbRes.json();
                 const fbRows = data.map((c: any) => {
                   let ref: any = {};
-                  try { ref = typeof c.reflection === "string" ? JSON.parse(c.reflection) : c.reflection; } catch {}
+                  try { ref = typeof c.reflection === "string" ? JSON.parse(c.reflection) : c.reflection; } catch (err) { console.error(err); }
                   return {
                     "学生姓名": c.student_name, "学号": c.student_id,
                     "年级": c.grade ? `${c.grade}年级` : "", "班级": c.class_num ? `${c.class_num}班` : "",
@@ -1522,7 +1522,7 @@ function MessagesAudit() {
               <div className="space-y-3">
                 {reflections.map((conv: any) => {
                   let refData: any = null;
-                  try { refData = typeof conv.reflection === "string" ? JSON.parse(conv.reflection) : conv.reflection; } catch {}
+                  try { refData = typeof conv.reflection === "string" ? JSON.parse(conv.reflection) : conv.reflection; } catch (err) { console.error(err); }
                   if (!refData) return null;
                   return (
                     <div key={conv.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
@@ -2526,7 +2526,7 @@ function TasksDataView() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setTasks(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
     finally { setLoading(false); }
   }, [selectedTaskId, selectedGrade, selectedClass]);
 
@@ -2538,7 +2538,7 @@ function TasksDataView() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setGroupMessages(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   }, []);
 
   useEffect(() => { fetchTasks(); fetchGroupMessages(); }, [fetchTasks, fetchGroupMessages]);
@@ -2698,7 +2698,7 @@ function TasksDataView() {
               <tbody>
                 {tasks.map((task: any) => {
                   let answers: any = {};
-                  try { answers = JSON.parse(task.design_reason || "{}"); } catch {}
+                  try { answers = JSON.parse(task.design_reason || "{}"); } catch (err) { console.error(err); }
                   return (
                     <tr key={task.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-4 py-3 font-medium">{task.user?.name || "未知"}</td>
@@ -2900,7 +2900,7 @@ function GameMaker() {
         setCurrent((prev) => ({ ...prev, convId: id }));
         return id;
       }
-    } catch {}
+    } catch (err) { console.error(err); }
     return null;
   };
 
@@ -2987,7 +2987,7 @@ function GameMaker() {
                 });
               }
             }
-          } catch {}
+          } catch (err) { console.error(err); }
         }
       }
 

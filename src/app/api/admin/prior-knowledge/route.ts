@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
     const formatted = (data || []).map((c: any) => {
       let answers: any = {};
-      try { answers = JSON.parse(c.design_reason || "{}"); } catch {}
+      try { answers = JSON.parse(c.design_reason || "{}"); } catch (err) { console.error(err); }
       return {
         id: c.id,
         user_id: c.user_id,

@@ -14,7 +14,8 @@ export async function GET(req: NextRequest) {
     const { data, error } = await db
       .from("student_classifications")
       .select("*, users!inner(name, student_id, grade, class_num)")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(500);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

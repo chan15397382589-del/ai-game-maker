@@ -201,7 +201,7 @@ export default function ModuleIdeation({ userId }: Props) {
               if (answers.q4) setQ4(answers.q4);
               if (answers.q5) setQ5(answers.q5);
               setSurveyDone(true);
-            } catch {}
+            } catch (err) { console.error(err); }
           }
         }
 
@@ -261,7 +261,7 @@ export default function ModuleIdeation({ userId }: Props) {
             setCurrentPhase("design");
           }
         }
-      } catch {}
+      } catch (err) { console.error(err); }
     };
     loadExistingData();
   }, []);
@@ -427,7 +427,7 @@ export default function ModuleIdeation({ userId }: Props) {
         saveToHistory();
         setItems((prev) => [...prev, { emoji: data.emoji, x, y, size: data.size || 40 }]);
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const clearCanvas = () => {
@@ -485,7 +485,7 @@ export default function ModuleIdeation({ userId }: Props) {
           body: JSON.stringify({ task_id: "1-1", design_image: imageData, game_rules: rules.filter((r) => r.trim()), game_name: gameName, design_reason: `游戏类型：${gameType || customType}`, duration_seconds: drawTime }),
         });
         lastSaveRef.current = Date.now();
-      } catch {} finally {
+      } catch (err) { console.error(err); } finally {
         setIsSaving(false);
       }
     }, 3000);
@@ -600,7 +600,7 @@ export default function ModuleIdeation({ userId }: Props) {
               duration_seconds: drawTime,
             }),
           });
-        } catch {}
+        } catch (err) { console.error(err); }
       } else {
         setAiChatMessages((prev) => [...prev, { role: "assistant", content: `生成失败：${data.error || "请重试"}` }]);
       }
@@ -677,7 +677,7 @@ export default function ModuleIdeation({ userId }: Props) {
                   }),
                 });
               }
-            } catch {}
+            } catch (err) { console.error(err); }
             setSurveyDone(true);
             setCurrentPhase("design");
           }} className="w-full py-3.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-base font-medium transition mt-4">提交并进入设计 →</button>

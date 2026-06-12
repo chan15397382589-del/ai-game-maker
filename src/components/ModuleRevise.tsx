@@ -78,7 +78,7 @@ export default function ModuleRevise({ userId }: Props) {
         role: "assistant",
         content: "你好！我已经看到了同学给你的评价。你想根据哪些建议来修改游戏呢？告诉我你的想法吧！",
       }]);
-    } catch {} finally { setLoading(false); }
+    } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   const handleSend = async () => {
@@ -139,7 +139,7 @@ export default function ModuleRevise({ userId }: Props) {
           try {
             const parsed = JSON.parse(data);
             if (parsed.content) fullContent += parsed.content;
-          } catch {}
+          } catch (err) { console.error(err); }
         }
       }
 
