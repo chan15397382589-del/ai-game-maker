@@ -495,13 +495,31 @@ export default function ModuleCreate({ userId }: Props) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token; if (!token) return;
-      const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ game_title: gameTitle.trim(), html_code: htmlCode }) });
-      if (res.ok) {
+
+      // 保存到 projects 表
+      const projRes = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ game_title: gameTitle.trim(), html_code: htmlCode }) });
+
+      // 同时分享到 shared_items 表（供同伴互评）
+      let sharedItemId = null;
+      if (currentConvId) {
+        const shareRes = await fetch("/api/reviews", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ conversation_id: currentConvId, game_title: gameTitle.trim(), html_code: htmlCode }),
+        });
+        if (shareRes.ok) {
+          const shareData = await shareRes.json();
+          sharedItemId = shareData.id;
+        }
+      }
+
+      if (projRes.ok) {
         trackEvent("game_upload", currentConvId || undefined, { title: gameTitle, codeLength: htmlCode.length });
-        alert("  上传成功！");
-        window.location.href = "/student?module=reflection";
+        // 跳转到同伴互评
+        localStorage.setItem("gotoModule", "showcase");
+        window.location.href = "/student?module=showcase";
       } else {
-        const err = await res.json().catch(() => ({}));
+        const err = await projRes.json().catch(() => ({}));
         alert("上传失败：" + (err.error || "未知错误"));
       }
     } catch (e: any) { alert("上传异常：" + e.message); } finally { setSaving(false); }

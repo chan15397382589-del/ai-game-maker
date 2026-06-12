@@ -11,7 +11,7 @@ import ModuleReflection from "@/components/ModuleReflection";
 const MODULES = [
   { id: "ideation", label: "  游戏构思", desc: "设计你的游戏" },
   { id: "create", label: "  游戏设计", desc: "和小智老师一起创作" },
-  { id: "showcase", label: "  作品展示", desc: "展示和评价作品" },
+  { id: "showcase", label: "  同伴互评", desc: "评价同学作品" },
   { id: "reflection", label: "  我的反思", desc: "回顾创作过程" },
 ];
 
