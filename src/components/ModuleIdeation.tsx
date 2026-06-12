@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import VoiceButton from "@/components/VoiceButton";
+import XiaozhiAvatar from "@/components/XiaozhiAvatar";
 import { isRandomInput } from "@/utils/inputValidation";
 import { validateGameName } from "@/lib/profanity";
 
@@ -630,6 +631,14 @@ export default function ModuleIdeation({ userId }: Props) {
       {/* ========== 基础情况 ========== */}
       {currentPhase === "survey" && (
         <div className="flex-1 bg-white rounded-2xl shadow-md border border-gray-100 p-6 flex flex-col justify-between">
+          {/* 小智老师提示 */}
+          <div className="flex items-start gap-3 mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
+            <div className="w-12 h-12 flex-shrink-0"><XiaozhiAvatar state="idle" /></div>
+            <div>
+              <p className="text-sm font-bold text-indigo-700">小智老师</p>
+              <p className="text-xs text-indigo-600">同学你好！先回答几个小问题，帮助我了解你～</p>
+            </div>
+          </div>
           <div className="space-y-4">
             <div><label className="block text-base font-medium text-gray-700 mb-1.5">1. 你平时玩过游戏吗？</label><div className="flex gap-2"><input value={q1} onChange={(e) => setQ1(e.target.value)} placeholder="比如：经常玩、偶尔玩、没怎么玩过..." className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-base focus:border-indigo-400 outline-none" /><VoiceButton onResult={(text) => setQ1(text)} /></div></div>
             <div><label className="block text-base font-medium text-gray-700 mb-1.5">2. 你玩过哪些游戏？最喜欢哪个？</label><div className="flex gap-2"><input value={q2} onChange={(e) => setQ2(e.target.value)} placeholder="比如：我的世界、王者荣耀、植物大战僵尸..." className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-base focus:border-indigo-400 outline-none" /><VoiceButton onResult={(text) => setQ2(text)} /></div></div>
@@ -638,6 +647,17 @@ export default function ModuleIdeation({ userId }: Props) {
             <div><label className="block text-base font-medium text-gray-700 mb-1.5">5. 你觉得做一个好游戏最重要的是什么？</label><div className="flex gap-2"><input value={q5} onChange={(e) => setQ5(e.target.value)} placeholder="比如：好玩、画面好看、有挑战性、能和朋友一起玩..." className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-base focus:border-indigo-400 outline-none" /><VoiceButton onResult={(text) => setQ5(text)} /></div></div>
           </div>
           <button onClick={async () => {
+            // 检查哪些没填
+            const missing: string[] = [];
+            if (!q1.trim()) missing.push("第1题");
+            if (!q2.trim()) missing.push("第2题");
+            if (!q3.trim()) missing.push("第3题");
+            if (!q4.trim()) missing.push("第4题");
+            if (!q5.trim()) missing.push("第5题");
+            if (missing.length > 0) {
+              alert(`请先填写：${missing.join("、")}`);
+              return;
+            }
             // 保存基础情况数据
             try {
               const { data: { session } } = await supabase.auth.getSession();
@@ -655,7 +675,7 @@ export default function ModuleIdeation({ userId }: Props) {
             } catch {}
             setSurveyDone(true);
             setCurrentPhase("design");
-          }} disabled={!q1.trim() || !q2.trim() || !q3.trim() || !q4.trim() || !q5.trim()} className="w-full py-3.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-base font-medium transition mt-4">提交并进入设计 →</button>
+          }} className="w-full py-3.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-base font-medium transition mt-4">提交并进入设计 →</button>
         </div>
       )}
 
@@ -668,7 +688,10 @@ export default function ModuleIdeation({ userId }: Props) {
             <div className="p-4 border-b border-gray-100">
               <div className="mb-3">
                 <label className="text-base font-bold text-gray-800 mb-1.5 block">  游戏名称</label>
-                <input value={gameName} onChange={(e) => setGameName(e.target.value)} placeholder="给游戏取个名字！" className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl text-base focus:border-indigo-400 outline-none" />
+                <div className="flex gap-2">
+                  <input value={gameName} onChange={(e) => setGameName(e.target.value)} placeholder="给游戏取个名字！" className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-base focus:border-indigo-400 outline-none" />
+                  <VoiceButton onResult={(text) => setGameName((prev) => prev + text)} />
+                </div>
               </div>
               <h3 className="text-base font-bold text-gray-800 mb-2">  游戏规则</h3>
               {rules.map((rule, i) => (
@@ -683,9 +706,12 @@ export default function ModuleIdeation({ userId }: Props) {
 
             {/* AI对话生图 */}
             <div className="flex-1 flex flex-col min-h-0">
-              <div className="px-4 py-2 border-b border-gray-100 bg-purple-50">
-                <h3 className="text-sm font-bold text-purple-700">  AI生图助手</h3>
-                <p className="text-[10px] text-purple-500">描述游戏画面，AI帮你生成图片</p>
+              <div className="px-4 py-2 border-b border-gray-100 bg-purple-50 flex items-center gap-2">
+                <div className="w-8 h-8 flex-shrink-0"><XiaozhiAvatar state={generating ? "thinking" : "idle"} /></div>
+                <div>
+                  <h3 className="text-sm font-bold text-purple-700">  AI生图助手</h3>
+                  <p className="text-[10px] text-purple-500">描述游戏画面，AI帮你生成图片</p>
+                </div>
               </div>
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
                 {aiChatMessages.length === 0 && (
@@ -720,7 +746,7 @@ export default function ModuleIdeation({ userId }: Props) {
             {/* 保存按钮 */}
             <div className="p-3 border-t border-gray-100">
               <button onClick={saveDesign} disabled={!gameName.trim()} className="w-full py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition">
-                保存并进入讨论 →
+                保存并进入游戏设计 →
               </button>
             </div>
           </div>
