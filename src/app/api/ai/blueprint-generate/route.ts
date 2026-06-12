@@ -72,21 +72,58 @@ ${rulesText ? `游戏规则：${rulesText}` : ""}
 
     const text = response.content[0].type === "text" ? response.content[0].text : "";
 
-    // 提取代码
+    // 提取代码 - 多种格式兼容
+    // 1. 匹配 ```html ... ```
     const codeMatch = text.match(/```html\s*\n([\s\S]*?)```/);
     if (codeMatch) {
       return NextResponse.json({ code: codeMatch[1].trim() });
     }
 
+    // 2. 匹配 ``` ... ``` (包含HTML标签)
+    const anyFence = text.match(/```\s*\n([\s\S]*?)```/);
+    if (anyFence && anyFence[1].includes("<")) {
+      return NextResponse.json({ code: anyFence[1].trim() });
+    }
+
+    // 3. 匹配 <!DOCTYPE html> 到 </html>
     if (text.includes("<!DOCTYPE") || text.includes("<html")) {
       const start = text.indexOf("<!DOCTYPE") !== -1 ? text.indexOf("<!DOCTYPE") : text.indexOf("<html");
       const end = text.lastIndexOf("</html>");
       if (start !== -1 && end !== -1) {
-        return NextResponse.json({ code: text.substring(start, end + 7) });
+        return NextResponse.json({ code: text.substring(start, end + 7).trim() });
       }
     }
 
-    return NextResponse.json({ error: "未能生成代码，请重试" }, { status: 500 });
+    // 4. 匹配 <html 到 </html>（没有 DOCTYPE）
+    const htmlMatch = text.match(/<html[\s\S]*<\/html>/i);
+    if (htmlMatch) {
+      return NextResponse.json({ code: htmlMatch[0].trim() });
+    }
+
+    // 5. 匹配包含 <canvas 或 <script 的代码块
+    const canvasMatch = text.match(/<(?:canvas|script)[\s\S]*<\/(?:canvas|script)>/i);
+    if (canvasMatch) {
+      // 包装成完整HTML
+      const wrappedCode = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>游戏</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #1a1a2e; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+${canvasMatch[0]}
+</body>
+</html>`;
+      return NextResponse.json({ code: wrappedCode });
+    }
+
+    return NextResponse.json({ error: "未能生成代码，请重试", debug: text.substring(0, 500) }, { status: 500 });
   } catch (err: any) {
     console.error("Blueprint generate error:", err);
     return NextResponse.json({ error: err.message || "生成失败" }, { status: 500 });
