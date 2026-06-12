@@ -101,7 +101,7 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState("");
   const [ready, setReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "classifications" | "prior_knowledge" | "data_tracking" | "game_maker" | "tasks">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "prior_knowledge" | "data_tracking" | "game_maker" | "tasks">("students");
   const router = useRouter();
 
   useEffect(() => { checkUser(); }, []);
@@ -159,7 +159,6 @@ export default function AdminDashboard() {
             { key: "students", label: "👥 学生管理" },
             { key: "messages", label: "💬 对话记录" },
             { key: "projects", label: "🎮 作品审核" },
-            { key: "classifications", label: "📊 学生分类" },
             { key: "prior_knowledge", label: "📝 学生前测" },
             { key: "data_tracking", label: "  数据采集" },
             { key: "tasks", label: "  任务数据" },
@@ -184,8 +183,6 @@ export default function AdminDashboard() {
         ) : (
           activeTab === "students" ? (
             <StudentsManagement />
-          ) : activeTab === "classifications" ? (
-            <ClassificationsView />
           ) : activeTab === "prior_knowledge" ? (
             <PriorKnowledgeView />
           ) : activeTab === "data_tracking" ? (
