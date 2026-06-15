@@ -347,7 +347,7 @@ ${currentCode}
     model: "mimo-v2.5",
     system: systemPrompt,
     messages,
-    max_tokens: 4096,
+    max_tokens: 8192,
     temperature: 0.7,
   });
 
