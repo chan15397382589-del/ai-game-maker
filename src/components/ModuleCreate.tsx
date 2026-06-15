@@ -264,8 +264,7 @@ export default function ModuleCreate({ userId }: Props) {
   const handleAutoGenerate = async () => {
     if (!designData?.game_name || sendingRef.current) return;
 
-    const imageUrl = selectedImage || designData?.design_image;
-    if (!imageUrl) { alert("请先在构思阶段用AI生成图片"); return; }
+    const imageUrl = selectedImage || designData?.design_image || null;
 
     sendingRef.current = true;
     setLoading(true);

@@ -52,11 +52,10 @@ export async function POST(req: NextRequest) {
     if (authError || !user) return NextResponse.json({ error: "认证失败" }, { status: 401 });
 
     const { imageUrl, gameName, rules } = await req.json();
-    if (!imageUrl) return NextResponse.json({ error: "请提供图片" }, { status: 400 });
 
     const rulesText = (rules || []).filter((r: string) => r.trim()).map((r: string) => `如果${r}`).join("；");
 
-    // 构建文本提示词
+    // 构建文本提示词（图片可选）
     let prompt = `生成一个"${gameName || "游戏"}"的完整HTML5网页游戏代码。`;
     if (rulesText) prompt += `游戏规则：${rulesText}。`;
     prompt += `
