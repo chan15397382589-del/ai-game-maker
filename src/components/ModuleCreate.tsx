@@ -172,22 +172,31 @@ export default function ModuleCreate({ userId }: Props) {
   }, [designLoaded, designData]);
 
   const extractHtmlCode = (content: string): string => {
-    // 1. 匹配 ```html ... ```
-    const htmlFence = /```html\s*\n([\s\S]*?)```/i;
-    let match = content.match(htmlFence);
-    if (match) return match[1].trim();
+    // 1. 匹配 ```html ... ```（贪婪匹配最大的代码块）
+    const htmlFence = /```html\s*\n([\s\S]*?)```/gi;
+    const allMatches: string[] = [];
+    let m;
+    while ((m = htmlFence.exec(content)) !== null) {
+      if (m[1].trim().length > 50) allMatches.push(m[1].trim());
+    }
+    // 取最长的代码块（最可能是完整游戏代码）
+    if (allMatches.length > 0) {
+      allMatches.sort((a, b) => b.length - a.length);
+      return allMatches[0];
+    }
 
     // 2. 匹配 ``` ... ``` (包含HTML标签)
-    const anyFence = /```\s*\n([\s\S]*?)```/;
-    match = content.match(anyFence);
-    if (match && match[1].includes("<")) return match[1].trim();
+    const anyFence = /```\s*\n([\s\S]*?)```/g;
+    while ((m = anyFence.exec(content)) !== null) {
+      if (m[1].includes("<") && m[1].trim().length > 50) return m[1].trim();
+    }
 
     // 3. 匹配没有闭合的 ```html (流式传输中可能未闭合)
     const unclosedHtml = /```html\s*\n([\s\S]*)/i;
-    match = content.match(unclosedHtml);
-    if (match && match[1].length > 100) return match[1].trim();
+    m = content.match(unclosedHtml);
+    if (m && m[1].length > 100) return m[1].trim();
 
-    // 4. 相DOCTYPE或<html
+    // 4. 匹配 <!DOCTYPE 或 <html 到 </html>
     if (content.includes("<!DOCTYPE") || content.includes("<html")) {
       const start = content.indexOf("<!DOCTYPE") !== -1 ? content.indexOf("<!DOCTYPE") : content.indexOf("<html");
       const end = content.lastIndexOf("</html>");
