@@ -479,10 +479,22 @@ export default function ModuleIdeation({ userId }: Props) {
         const token = session?.access_token; if (!token) return;
         const drawCanvas = canvasRef.current;
         const imageData = drawCanvas ? drawCanvas.toDataURL("image/png") : "";
+        const lastAiPrompt = aiChatMessages.filter(m => m.role === "user").pop()?.content || "";
         await fetch("/api/student/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ task_id: "1-1", design_image: imageData, game_rules: rules.filter((r) => r.trim()), game_name: gameName, design_reason: `游戏类型：${gameType || customType}`, duration_seconds: drawTime }),
+          body: JSON.stringify({
+            task_id: "1-1",
+            design_image: imageData,
+            game_rules: rules.filter((r) => r.trim()),
+            game_name: gameName,
+            design_reason: JSON.stringify({
+              game_type: gameType || customType,
+              ai_prompt: lastAiPrompt,
+              image_history: imageHistory.map(h => ({ prompt: h.prompt, url: h.url })),
+            }),
+            duration_seconds: drawTime,
+          }),
         });
         lastSaveRef.current = Date.now();
       } catch (err) { console.error(err); } finally {

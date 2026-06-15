@@ -7,7 +7,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_AUTH_TOKEN || "placeholder",
 });
 
-// Supabase 服务端客户端单例（带连接池优化）
+// Supabase 服务端客户端单例
 export const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co",
   process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder",
@@ -16,13 +16,6 @@ export const supabaseAdmin = createClient(
     db: { schema: "public" },
     global: {
       headers: { "x-my-app": "ai-game-classroom-server" },
-      fetch: (url, options = {}) => {
-        // 添加超时控制，避免连接长时间占用
-        return fetch(url, {
-          ...options,
-          signal: AbortSignal.timeout(10000),
-        });
-      },
     },
   }
 );
