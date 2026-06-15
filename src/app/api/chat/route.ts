@@ -52,6 +52,11 @@ export async function POST(req: NextRequest) {
               const data = `data: ${JSON.stringify({ content })}\n\n`;
               controller.enqueue(encoder.encode(data));
             }
+            // 也处理 thinking 内容（如果只有 thinking 没有 text，也记录）
+            if (event.type === "content_block_delta" && event.delta?.type === "thinking_delta") {
+              // thinking 内容不发送给前端，但计入 chunkCount 避免误判为空
+              chunkCount++;
+            }
           }
 
           // 流结束后，保存完整的 AI 回复到数据库
@@ -59,6 +64,12 @@ export async function POST(req: NextRequest) {
             const hasCode = /```html/i.test(assistantContent) || /```[\s\S]*?```/.test(assistantContent);
             const aiSuggestionType = classifyAiSuggestion(assistantContent);
             await saveMessage(userId, "assistant", assistantContent, token, sessionId, undefined, hasCode, aiSuggestionType);
+          } else if (chunkCount > 0) {
+            // 有 thinking 内容但没有 text 内容，AI 可能在内部推理但没输出
+            // 发送一个默认回复而不是错误
+            const fallbackContent = "  让我想想...请再说一次你的想法？";
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: fallbackContent })}\n\n`));
+            await saveMessage(userId, "assistant", fallbackContent, token, sessionId);
           } else {
             console.warn("AI returned empty content after", chunkCount, "chunks. Messages:", JSON.stringify(messages).substring(0, 200));
             controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI服务暂时无法回复，请稍后重试" })}\n\n`));
