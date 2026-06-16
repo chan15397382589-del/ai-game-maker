@@ -14,7 +14,8 @@ export async function POST(req: NextRequest) {
       .from("messages")
       .select("id, content")
       .eq("role", "assistant")
-      .like("content", "%```%");
+      .like("content", "%```%")
+      .limit(1000);
 
     if (fetchError) {
       return NextResponse.json({ error: fetchError.message }, { status: 500 });

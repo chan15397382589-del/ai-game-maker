@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     if (grade) query = query.eq("grade", parseInt(grade));
     if (class_num) query = query.eq("class_num", parseInt(class_num));
 
-    const { data: students, error } = await query.order("grade").order("class_num");
+    const { data: students, error } = await query.order("grade").order("class_num").limit(500);
 
     if (error) throw error;
     if (!students || students.length === 0) {

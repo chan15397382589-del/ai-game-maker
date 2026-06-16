@@ -127,7 +127,7 @@ export default function ModuleCreate({ userId }: Props) {
           const info = JSON.parse(task.design_reason || "{}");
           aiPrompt = info.ai_prompt || "";
           imageHistory = info.image_history || [];
-        } catch {}
+        } catch (err) { console.error(err); }
         setDesignData({
           game_name: task.game_name,
           game_rules: task.game_rules || [],
@@ -140,7 +140,7 @@ export default function ModuleCreate({ userId }: Props) {
         setDesignLoaded(true);
         localStorage.removeItem("designData");
         return; // 跳过 API 调用
-      } catch {}
+      } catch (err) { console.error(err); }
     }
     // 否则从 API 加载
     loadDesign();
@@ -311,7 +311,7 @@ export default function ModuleCreate({ userId }: Props) {
           setLiveCode(`//   排队中...\n// 前方还有 ${queueLength} 人等待\n// 正在生成 ${running} 个游戏\n\n请耐心等待`);
         }
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   // 自动生成游戏（MIMO 蓝图生成 - 带排队提示）

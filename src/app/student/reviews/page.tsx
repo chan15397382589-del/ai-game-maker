@@ -115,7 +115,7 @@ export default function ReviewsPage() {
       if (res.ok) {
         setConversations((await res.json()) || []);
       }
-    } catch {} finally { setLoadingConvs(false); }
+    } catch (err) { console.error(err); } finally { setLoadingConvs(false); }
   };
 
   const handleShare = async () => {

@@ -83,7 +83,7 @@ export default function TasksPage() {
           setGroupMessages(msgs);
           if (msgs.length > 0) setMyGroupId(msgs[0].group_id);
         }
-      } catch {}
+      } catch (err) { console.error(err); }
     };
     fetchGroupMessages();
     // 每5秒刷新一次
@@ -114,7 +114,7 @@ export default function TasksPage() {
           undo_count: data.undoCount,
         }),
       });
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   // 保存任务数据
@@ -153,7 +153,7 @@ export default function TasksPage() {
         setGroupMessages((prev) => [...prev, newMsg]);
         setChatInput("");
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   // 语音输入
@@ -224,7 +224,7 @@ export default function TasksPage() {
         setGroupMessages((prev) => [...prev, newMsg]);
         setChatInput("");
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   return (

@@ -13,7 +13,8 @@ export async function POST(req: NextRequest) {
     const { data: tasks, error: fetchError } = await supabaseAdmin
       .from("student_tasks")
       .select("id, design_image, design_reason")
-      .like("design_image", "http%");
+      .like("design_image", "http%")
+      .limit(200);
 
     if (fetchError) {
       return NextResponse.json({ error: fetchError.message }, { status: 500 });
