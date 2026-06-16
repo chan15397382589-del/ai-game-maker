@@ -8,6 +8,23 @@ import VoiceButton from "@/components/VoiceButton";
 import { getValidationMessage } from "@/utils/inputValidation";
 import { trackEvent } from "@/utils/trackEvent";
 
+// 注入全屏 CSS 让游戏填满 iframe
+function injectFullscreenCSS(html: string): string {
+  const fullscreenCSS = `<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; background: transparent !important; }
+    canvas { display: block !important; width: 100vw !important; height: 100vh !important; }
+  </style>`;
+
+  if (html.includes('<head>')) {
+    return html.replace('<head>', `<head>${fullscreenCSS}`);
+  } else if (html.includes('<html>')) {
+    return html.replace('<html>', `<html><head>${fullscreenCSS}</head>`);
+  } else {
+    return `<!DOCTYPE html><html><head>${fullscreenCSS}</head><body>${html}</body></html>`;
+  }
+}
+
 function formatAIMessage(text: string): ReactNode[] {
   const lines = text.split("\n");
   return lines.map((line, i) => {
@@ -769,31 +786,14 @@ export default function ModuleCreate({ userId }: Props) {
           ) : (
             <div className="h-full flex items-center justify-center p-2 overflow-hidden bg-gray-900">
               {htmlCode ? (gameStarted ? (
-                <div className="relative w-full h-full flex items-center justify-center">
-                  <div style={{ width: '800px', height: '600px', transform: 'scale(var(--game-scale, 1))', transformOrigin: 'center center' }}>
-                    <iframe
-                      ref={(el) => {
-                        if (el) {
-                          // 计算缩放比例使游戏适应容器
-                          const container = el.closest('.relative');
-                          if (container) {
-                            const cw = container.clientWidth - 16;
-                            const ch = container.clientHeight - 16;
-                            const scaleX = cw / 800;
-                            const scaleY = ch / 600;
-                            const scale = Math.min(scaleX, scaleY, 1);
-                            el.parentElement?.style.setProperty('--game-scale', String(scale));
-                          }
-                        }
-                      }}
-                      srcDoc={htmlCode}
-                      width="800"
-                      height="600"
-                      sandbox="allow-scripts allow-same-origin"
-                      scrolling="no"
-                      style={{ border: 'none', display: 'block', width: '800px', height: '600px', borderRadius: '12px' }}
-                    />
-                  </div>
+                <div className="relative w-full h-full overflow-hidden rounded-xl">
+                  <iframe
+                    srcDoc={injectFullscreenCSS(htmlCode)}
+                    className="absolute inset-0 w-full h-full"
+                    sandbox="allow-scripts allow-same-origin"
+                    scrolling="no"
+                    style={{ border: "none" }}
+                  />
                 </div>
               ) : (
                 <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer rounded-xl" onClick={() => { setGameStarted(true); trackEvent("game_start", currentConvId || undefined); }}>

@@ -1,0 +1,286 @@
+[
+  {
+    "index": 0,
+    "studentId": "3220105",
+    "status": "OK",
+    "length": 69,
+    "chunks": 17,
+    "time": 7512
+  },
+  {
+    "index": 1,
+    "studentId": "3220037",
+    "status": "OK",
+    "length": 56,
+    "chunks": 10,
+    "time": 14343
+  },
+  {
+    "index": 2,
+    "studentId": "3220036",
+    "status": "OK",
+    "length": 58,
+    "chunks": 20,
+    "time": 16476
+  },
+  {
+    "index": 3,
+    "studentId": "11",
+    "status": "OK",
+    "length": 45,
+    "chunks": 12,
+    "time": 8765
+  },
+  {
+    "index": 4,
+    "studentId": "3220053",
+    "status": "OK",
+    "length": 69,
+    "chunks": 23,
+    "time": 11161
+  },
+  {
+    "index": 5,
+    "studentId": "3220052",
+    "status": "OK",
+    "length": 176,
+    "chunks": 52,
+    "time": 17732
+  },
+  {
+    "index": 6,
+    "studentId": "3220055",
+    "status": "OK",
+    "length": 139,
+    "chunks": 40,
+    "time": 11916
+  },
+  {
+    "index": 7,
+    "studentId": "3220057",
+    "status": "OK",
+    "length": 57,
+    "chunks": 14,
+    "time": 10843
+  },
+  {
+    "index": 8,
+    "studentId": "3220058",
+    "status": "OK",
+    "length": 65,
+    "chunks": 13,
+    "time": 12734
+  },
+  {
+    "index": 9,
+    "studentId": "3220054",
+    "status": "OK",
+    "length": 99,
+    "chunks": 29,
+    "time": 9071
+  },
+  {
+    "index": 10,
+    "studentId": "3220059",
+    "status": "OK",
+    "length": 58,
+    "chunks": 16,
+    "time": 8223
+  },
+  {
+    "index": 11,
+    "studentId": "3219932",
+    "status": "OK",
+    "length": 56,
+    "chunks": 11,
+    "time": 7304
+  },
+  {
+    "index": 12,
+    "studentId": "3219934",
+    "status": "OK",
+    "length": 36,
+    "chunks": 7,
+    "time": 15007
+  },
+  {
+    "index": 13,
+    "studentId": "3219975",
+    "status": "OK",
+    "length": 95,
+    "chunks": 24,
+    "time": 9010
+  },
+  {
+    "index": 14,
+    "studentId": "3219976",
+    "status": "OK",
+    "length": 119,
+    "chunks": 31,
+    "time": 10511
+  },
+  {
+    "index": 15,
+    "studentId": "3219974",
+    "status": "OK",
+    "length": 38,
+    "chunks": 9,
+    "time": 6828
+  },
+  {
+    "index": 16,
+    "studentId": "3219977",
+    "status": "OK",
+    "length": 52,
+    "chunks": 14,
+    "time": 17193
+  },
+  {
+    "index": 17,
+    "studentId": "3219980",
+    "status": "OK",
+    "length": 87,
+    "chunks": 25,
+    "time": 8849
+  },
+  {
+    "index": 18,
+    "studentId": "3219984",
+    "status": "OK",
+    "length": 94,
+    "chunks": 24,
+    "time": 10879
+  },
+  {
+    "index": 19,
+    "studentId": "3219990",
+    "status": "OK",
+    "length": 151,
+    "chunks": 45,
+    "time": 11562
+  },
+  {
+    "index": 20,
+    "studentId": "3220002",
+    "status": "CHAT_ERROR",
+    "error": "AI回复中断：429 {\"error\":{\"code\":\"429\",\"message\":\"Too many requests\",\"type\":\"limitation\"}}",
+    "time": 4574
+  },
+  {
+    "index": 21,
+    "studentId": "3220003",
+    "status": "CHAT_ERROR",
+    "error": "AI回复中断：429 {\"error\":{\"code\":\"429\",\"message\":\"Too many requests\",\"type\":\"limitation\"}}",
+    "time": 4399
+  },
+  {
+    "index": 22,
+    "studentId": "3220004",
+    "status": "CHAT_ERROR",
+    "error": "AI回复中断：429 {\"error\":{\"code\":\"429\",\"message\":\"Too many requests\",\"type\":\"limitation\"}}",
+    "time": 4584
+  },
+  {
+    "index": 23,
+    "studentId": "3220005",
+    "status": "CHAT_ERROR",
+    "error": "AI回复中断：429 {\"error\":{\"code\":\"429\",\"message\":\"Too many requests\",\"type\":\"limitation\"}}",
+    "time": 4866
+  },
+  {
+    "index": 24,
+    "studentId": "3220006",
+    "status": "LOGIN_FAILED",
+    "time": 199
+  },
+  {
+    "index": 25,
+    "studentId": "3220007",
+    "status": "LOGIN_FAILED",
+    "time": 245
+  },
+  {
+    "index": 26,
+    "studentId": "3220008",
+    "status": "LOGIN_FAILED",
+    "time": 243
+  },
+  {
+    "index": 27,
+    "studentId": "3220009",
+    "status": "LOGIN_FAILED",
+    "time": 242
+  },
+  {
+    "index": 28,
+    "studentId": "3220010",
+    "status": "LOGIN_FAILED",
+    "time": 245
+  },
+  {
+    "index": 29,
+    "studentId": "3220011",
+    "status": "LOGIN_FAILED",
+    "time": 243
+  },
+  {
+    "index": 30,
+    "studentId": "3220012",
+    "status": "LOGIN_FAILED",
+    "time": 315
+  },
+  {
+    "index": 31,
+    "studentId": "3220013",
+    "status": "LOGIN_FAILED",
+    "time": 298
+  },
+  {
+    "index": 32,
+    "studentId": "3220014",
+    "status": "LOGIN_FAILED",
+    "time": 314
+  },
+  {
+    "index": 33,
+    "studentId": "3220015",
+    "status": "LOGIN_FAILED",
+    "time": 297
+  },
+  {
+    "index": 34,
+    "studentId": "3220016",
+    "status": "LOGIN_FAILED",
+    "time": 312
+  },
+  {
+    "index": 35,
+    "studentId": "3220017",
+    "status": "LOGIN_FAILED",
+    "time": 297
+  },
+  {
+    "index": 36,
+    "studentId": "3220018",
+    "status": "LOGIN_FAILED",
+    "time": 313
+  },
+  {
+    "index": 37,
+    "studentId": "3220019",
+    "status": "LOGIN_FAILED",
+    "time": 296
+  },
+  {
+    "index": 38,
+    "studentId": "3220020",
+    "status": "LOGIN_FAILED",
+    "time": 295
+  },
+  {
+    "index": 39,
+    "studentId": "3220021",
+    "status": "LOGIN_FAILED",
+    "time": 295
+  }
+]
