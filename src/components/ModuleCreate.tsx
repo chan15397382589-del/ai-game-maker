@@ -517,18 +517,11 @@ export default function ModuleCreate({ userId }: Props) {
       const projRes = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ game_title: gameTitle.trim(), html_code: htmlCode }) });
 
       // 同时分享到 shared_items 表（供同伴互评）
-      let sharedItemId = null;
-      if (currentConvId) {
-        const shareRes = await fetch("/api/reviews", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ conversation_id: currentConvId, game_title: gameTitle.trim(), html_code: htmlCode }),
-        });
-        if (shareRes.ok) {
-          const shareData = await shareRes.json();
-          sharedItemId = shareData.id;
-        }
-      }
+      const shareRes = await fetch("/api/reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ conversation_id: currentConvId || null, game_title: gameTitle.trim(), html_code: htmlCode }),
+      });
 
       if (projRes.ok) {
         trackEvent("game_upload", currentConvId || undefined, { title: gameTitle, codeLength: htmlCode.length });
