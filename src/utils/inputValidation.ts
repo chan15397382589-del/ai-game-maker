@@ -4,8 +4,8 @@
 export function isRandomInput(text: string): boolean {
   if (!text || text.trim().length === 0) return true;
 
-  // 太短的输入（少于2个字）
-  if (text.trim().length < 2) return true;
+  // 单个字符：允许数字选择（如 "1"、"2"）和单个有意义的字
+  if (text.trim().length === 1) return false;
 
   // 检测重复字符（如 "aaaaaa", "啊啊啊啊"）
   const uniqueChars = new Set(text.replace(/\s/g, "")).size;
