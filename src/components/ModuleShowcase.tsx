@@ -250,15 +250,27 @@ export default function ModuleShowcase({ userId }: Props) {
               <p className="text-sm font-bold text-white">{current.game_title || "未命名游戏"}</p>
               <p className="text-xs text-indigo-100">作者：{current.author?.name || "未知"}</p>
             </div>
-            <div className="flex-1 relative bg-gray-900">
+            <div className="flex-1 relative bg-gray-900 overflow-hidden">
               {gameStarted ? (
-                <iframe
-                  srcDoc={current.html_code}
-                  className="w-full h-full"
-                  sandbox="allow-scripts allow-same-origin"
-                  scrolling="no"
-                  style={{ border: "none" }}
-                />
+                <div className="w-full h-full flex items-center justify-center">
+                  <iframe
+                    srcDoc={current.html_code}
+                    sandbox="allow-scripts allow-same-origin"
+                    scrolling="no"
+                    style={{ border: "none", width: "800px", height: "600px", maxWidth: "100%", maxHeight: "100%", transform: "scale(var(--game-scale, 1))", transformOrigin: "center center" }}
+                    ref={(el) => {
+                      if (el) {
+                        const container = el.closest('.flex');
+                        if (container) {
+                          const cw = container.clientWidth;
+                          const ch = container.clientHeight;
+                          const scale = Math.min(cw / 800, ch / 600, 1);
+                          el.style.setProperty('--game-scale', String(scale));
+                        }
+                      }
+                    }}
+                  />
+                </div>
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => { setGameStarted(true); trackEvent("review_game_start", undefined, { itemId: current.id }); }}>
                   <div className="text-center">
