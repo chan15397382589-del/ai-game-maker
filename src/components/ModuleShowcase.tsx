@@ -246,10 +246,10 @@ export default function ModuleShowcase({ userId }: Props) {
               <p className="text-sm font-bold text-white">{current.game_title || "未命名游戏"}</p>
               <p className="text-xs text-indigo-100">作者：{current.author?.name || "未知"}</p>
             </div>
-            <div className="flex-1 relative bg-black overflow-hidden">
+            <div className="flex-1 relative overflow-hidden bg-white">
               {gameStarted ? (
                 <iframe
-                  srcDoc={`<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;overflow:hidden;background:#000}canvas{display:block}</style></head><body>${extractCanvasAndScript(current.html_code)}</body></html>`}
+                  srcDoc={current.html_code}
                   className="absolute inset-0 w-full h-full"
                   sandbox="allow-scripts allow-same-origin"
                   scrolling="no"

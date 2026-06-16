@@ -74,10 +74,10 @@ export default function ModuleGallery({ userId }: Props) {
             <p className="text-xs text-gray-500">{selectedGame.author_name} · {selectedGame.author_grade}年级{selectedGame.author_class_num}班</p>
           </div>
         </div>
-        <div className="flex-1 bg-black rounded-2xl shadow-lg overflow-hidden relative">
+        <div className="flex-1 rounded-2xl shadow-lg overflow-hidden relative bg-white">
           {gameStarted ? (
             <iframe
-              srcDoc={`<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;overflow:hidden;background:#000}canvas{display:block}</style></head><body>${extractBodyContent(selectedGame.html_code)}</body></html>`}
+              srcDoc={selectedGame.html_code}
               className="absolute inset-0 w-full h-full"
               sandbox="allow-scripts allow-same-origin"
               scrolling="no"
