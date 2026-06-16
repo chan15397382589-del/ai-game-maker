@@ -299,7 +299,21 @@ export default function ModuleCreate({ userId }: Props) {
     }
   };
 
-  // 自动生成游戏（MIMO 蓝图生成 - 模拟流式显示）
+  // 轮询队列状态
+  const pollQueueStatus = async (): Promise<void> => {
+    try {
+      const res = await fetch("/api/queue-status");
+      if (res.ok) {
+        const status = await res.json();
+        const { queueLength, running } = status;
+        if (queueLength > 0) {
+          setLiveCode(`//   排队中...\n// 前方还有 ${queueLength} 人等待\n// 正在生成 ${running} 个游戏\n\n请耐心等待`);
+        }
+      }
+    } catch {}
+  };
+
+  // 自动生成游戏（MIMO 蓝图生成 - 带排队提示）
   const handleAutoGenerate = async () => {
     if (!designData?.game_name || sendingRef.current) return;
 
@@ -308,17 +322,22 @@ export default function ModuleCreate({ userId }: Props) {
     sendingRef.current = true;
     setLoading(true);
     setViewMode("code");
-    setLiveCode("//   正在分析设计图...\n// 生成视觉蓝图中...\n\n请稍候...");
+    setLiveCode("//   正在排队...\n\n请稍候...");
     setIsCoding(true);
     trackEvent("auto_generate_start", currentConvId || undefined, { gameName: designData.game_name });
 
     // 添加用户消息
     setMessages((prev) => [...prev, { role: "user", content: `请帮我制作游戏"${designData.game_name}"` }]);
 
+    // 启动队列状态轮询
+    const queuePollTimer = setInterval(pollQueueStatus, 2000);
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) return;
+
+      setLiveCode("//   正在分析设计图...\n// 生成视觉蓝图中...\n\n请稍候...");
 
       const res = await fetch("/api/ai/blueprint-generate", {
         method: "POST",
@@ -326,10 +345,12 @@ export default function ModuleCreate({ userId }: Props) {
         body: JSON.stringify({ imageUrl, gameName: designData.game_name, rules: designData.game_rules }),
       });
 
+      clearInterval(queuePollTimer);
+
       const data = await res.json();
 
       if (res.ok && data.code) {
-        // 模拟流式显示：分块显示代码（每 10 行一块，减少重渲染）
+        // 模拟流式显示：分块显示代码
         const codeLines = data.code.split("\n");
         const chunkSize = 10;
         for (let i = 0; i < codeLines.length; i += chunkSize) {
@@ -346,14 +367,20 @@ export default function ModuleCreate({ userId }: Props) {
         setViewMode("game");
         setMessages((prev) => [...prev, { role: "assistant", content: `  游戏"${designData.game_name}"已生成完成！\n\n请在右侧预览区查看。` }]);
         setRawMessages((prev) => [...prev, { role: "assistant", content: `\`\`\`html\n${data.code}\n\`\`\`` }]);
+      } else if (res.status === 429) {
+        setIsCoding(false);
+        setLiveCode("//   AI服务繁忙，请稍后重试");
+        setMessages((prev) => [...prev, { role: "assistant", content: "  AI服务繁忙，请稍后再试。" }]);
       } else {
         throw new Error(data.error || "未能生成代码");
       }
     } catch (e: any) {
+      clearInterval(queuePollTimer);
       setIsCoding(false);
       setLiveCode(`// 生成失败：${e.message}`);
       setMessages((prev) => [...prev, { role: "assistant", content: `  生成失败：${e.message}` }]);
     } finally {
+      clearInterval(queuePollTimer);
       setLoading(false); sendingRef.current = false;
     }
   };
