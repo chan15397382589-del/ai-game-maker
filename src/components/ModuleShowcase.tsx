@@ -210,18 +210,6 @@ export default function ModuleShowcase({ userId }: Props) {
 
     return (
       <div className="h-[calc(100vh-120px)] flex flex-col">
-        {/* 我的游戏预览 */}
-        {myGame && (
-          <div className="mb-3 p-3 bg-indigo-50 rounded-xl border border-indigo-100 flex items-center gap-3">
-            <div className="w-20 h-14 bg-gray-900 rounded-lg overflow-hidden flex-shrink-0">
-              <iframe srcDoc={myGame.html_code} className="w-full h-full" sandbox="allow-scripts allow-same-origin" scrolling="no" style={{ border: "none" }} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-indigo-700 truncate">  我的游戏：{myGame.game_title}</p>
-              <p className="text-xs text-indigo-500">完成评价后可以查看同学对你的评价</p>
-            </div>
-          </div>
-        )}
         {/* 顶部进度 */}
         <div className="flex items-center gap-3 mb-3 px-1">
           <div className="flex items-center gap-3 p-2 bg-indigo-50 rounded-xl border border-indigo-100 flex-1">
