@@ -33,6 +33,14 @@ interface PeerReview {
 
 type Phase = "selecting" | "reviewing" | "viewing";
 
+// 从 HTML 中提取 canvas 和 script 部分，去掉外层样式
+function extractCanvasAndScript(html: string): string {
+  // 提取 body 内容
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  const bodyContent = bodyMatch ? bodyMatch[1] : html;
+  return bodyContent;
+}
+
 export default function ModuleShowcase({ userId }: Props) {
   const [phase, setPhase] = useState<Phase>("selecting");
   const [tasks, setTasks] = useState<SharedItem[]>([]);
@@ -241,7 +249,7 @@ export default function ModuleShowcase({ userId }: Props) {
             <div className="flex-1 relative bg-black overflow-hidden">
               {gameStarted ? (
                 <iframe
-                  srcDoc={current.html_code}
+                  srcDoc={`<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}html,body{width:100%;height:100%;overflow:hidden;background:#000}canvas{display:block}</style></head><body>${extractCanvasAndScript(current.html_code)}</body></html>`}
                   className="absolute inset-0 w-full h-full"
                   sandbox="allow-scripts allow-same-origin"
                   scrolling="no"
@@ -257,9 +265,6 @@ export default function ModuleShowcase({ userId }: Props) {
                     <p className="text-sm text-indigo-200 mt-1">先玩再评价</p>
                   </div>
                 </div>
-              )}
-              {gameStarted && (
-                <button onClick={() => setGameStarted(false)} className="absolute top-3 right-3 bg-white/90 hover:bg-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md border border-gray-200 transition">  重新开始</button>
               )}
             </div>
           </div>
