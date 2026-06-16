@@ -516,22 +516,30 @@ export default function ModuleCreate({ userId }: Props) {
       // 保存到 projects 表
       const projRes = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ game_title: gameTitle.trim(), html_code: htmlCode }) });
 
-      // 同时分享到 shared_items 表（供同伴互评）
+      if (!projRes.ok) {
+        const err = await projRes.json().catch(() => ({}));
+        alert("上传失败：" + (err.error || "未知错误"));
+        setSaving(false);
+        return;
+      }
+
+      // 分享到 shared_items 表（供同伴互评）
       const shareRes = await fetch("/api/reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ conversation_id: currentConvId || null, game_title: gameTitle.trim(), html_code: htmlCode }),
       });
 
-      if (projRes.ok) {
-        trackEvent("game_upload", currentConvId || undefined, { title: gameTitle, codeLength: htmlCode.length });
-        // 跳转到同伴互评
-        localStorage.setItem("gotoModule", "showcase");
-        window.location.href = "/student?module=showcase";
-      } else {
-        const err = await projRes.json().catch(() => ({}));
-        alert("上传失败：" + (err.error || "未知错误"));
+      if (!shareRes.ok) {
+        const shareErr = await shareRes.json().catch(() => ({}));
+        console.error("分享到同伴互评失败:", shareErr);
+        // 分享失败不影响上传，继续跳转
       }
+
+      trackEvent("game_upload", currentConvId || undefined, { title: gameTitle, codeLength: htmlCode.length });
+      // 跳转到同伴互评
+      localStorage.setItem("gotoModule", "showcase");
+      window.location.href = "/student?module=showcase";
     } catch (e: any) { alert("上传异常：" + e.message); } finally { setSaving(false); }
   };
 
