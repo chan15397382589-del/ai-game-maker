@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getSupabaseAdmin } from "@/lib/deepseek";
+import { chatQueue } from "@/lib/requestQueue";
 
 const mimo = new Anthropic({
   apiKey: process.env.ANTHROPIC_AUTH_TOKEN || "placeholder",
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
     const base64Data = await imageUrlToBase64(imageUrl);
 
     // 第一步：用 MIMO 分析图片，生成详细描述
-    const analysisResponse = await mimo.messages.create({
+    const analysisResponse = await chatQueue.add(() => mimo.messages.create({
       model: "mimo-v2.5",
       max_tokens: 1500,
       temperature: 0.5,
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
           ]
         }
       ]
-    });
+    }));
 
     const analysisText = analysisResponse.content[0].type === "text" ? analysisResponse.content[0].text : "";
 
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
     const aiPrompt = promptMatch ? promptMatch[1].trim() : analysisText;
 
     // 第二步：用 MIMO 生成游戏代码
-    const codeResponse = await mimo.messages.create({
+    const codeResponse = await chatQueue.add(() => mimo.messages.create({
       model: "mimo-v2.5",
       max_tokens: 8192,
       temperature: 0.3,
@@ -126,7 +127,7 @@ export async function POST(req: NextRequest) {
           ]
         }
       ]
-    });
+    }));
 
     const codeText = codeResponse.content[0].type === "text" ? codeResponse.content[0].text : "";
 

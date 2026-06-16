@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getSupabaseAdmin } from "@/lib/deepseek";
+import { chatQueue } from "@/lib/requestQueue";
 
 const mimo = new Anthropic({
   apiKey: process.env.ANTHROPIC_AUTH_TOKEN || "placeholder",
@@ -10,12 +11,13 @@ const mimo = new Anthropic({
 async function generateGame(prompt: string, maxRetries = 2): Promise<string | null> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await mimo.messages.create({
+      // 使用队列控制并发
+      const response = await chatQueue.add(() => mimo.messages.create({
         model: "mimo-v2.5",
         max_tokens: 8192,
-        temperature: 0.3 + attempt * 0.1, // 每次重试增加随机性
+        temperature: 0.3 + attempt * 0.1,
         messages: [{ role: "user", content: prompt }],
-      });
+      }));
 
       // 提取文本内容（跳过 thinking 块）
       let text = "";

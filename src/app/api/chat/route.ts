@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, createChatCompletion, saveMessage, classifyAiSuggestion } from "@/lib/deepseek";
+import { chatQueue } from "@/lib/requestQueue";
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,9 +30,13 @@ export async function POST(req: NextRequest) {
 
     let response;
     try {
-      response = await createChatCompletion(messages, currentCode, srlCondition);
+      // 使用队列控制并发，避免 429 限流
+      response = await chatQueue.add(() => createChatCompletion(messages, currentCode, srlCondition));
     } catch (apiError: any) {
       console.error("MIMO API call failed:", apiError.message);
+      if (apiError.message?.includes("429")) {
+        return NextResponse.json({ error: "AI服务繁忙，请稍后重试" }, { status: 429 });
+      }
       return NextResponse.json({ error: "AI服务连接失败：" + apiError.message }, { status: 502 });
     }
 
