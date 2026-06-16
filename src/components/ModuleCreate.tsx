@@ -828,17 +828,15 @@ export default function ModuleCreate({ userId }: Props) {
               ) : <div className="h-full flex items-center justify-center text-gray-400"><p>和AI对话生成游戏代码</p></div>}
             </div>
           ) : (
-            <div className="h-full flex items-center justify-center p-2 overflow-hidden bg-gray-900">
+            <div className="h-full flex items-center justify-center p-2 overflow-hidden">
               {htmlCode ? (gameStarted ? (
-                <div className="relative w-full h-full overflow-hidden rounded-xl">
-                  <iframe
-                    srcDoc={injectFullscreenCSS(htmlCode)}
-                    className="absolute inset-0 w-full h-full"
-                    sandbox="allow-scripts allow-same-origin"
-                    scrolling="no"
-                    style={{ border: "none" }}
-                  />
-                </div>
+                <iframe
+                  srcDoc={htmlCode}
+                  className="w-full h-full rounded-xl"
+                  sandbox="allow-scripts allow-same-origin"
+                  scrolling="no"
+                  style={{ border: "none", display: "block" }}
+                />
               ) : (
                 <div className="w-full h-full bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer rounded-xl" onClick={() => { setGameStarted(true); trackEvent("game_start", currentConvId || undefined); }}>
                   <div className="text-center">
