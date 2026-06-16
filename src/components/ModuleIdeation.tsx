@@ -561,8 +561,18 @@ export default function ModuleIdeation({ userId }: Props) {
         }),
       });
       setDesignDone(true);
-      // 保存时间戳，让游戏设计模块知道有新数据
-      localStorage.setItem("designUpdatedAt", Date.now().toString());
+      // 直接传递设计数据到游戏设计模块（避免重新从数据库加载）
+      const designPayload = {
+        game_name: gameName,
+        game_rules: validRules,
+        design_reason: JSON.stringify({
+          game_type: gameType || customType,
+          ai_prompt: lastAiPrompt,
+          image_history: imageHistory.map(h => ({ prompt: h.prompt, url: h.url })),
+        }),
+        design_image: imageData,
+      };
+      localStorage.setItem("designData", JSON.stringify(designPayload));
       localStorage.setItem("gotoModule", "create");
       window.location.href = "/student?module=create";
     } catch { alert("保存失败"); }

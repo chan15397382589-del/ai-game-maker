@@ -132,17 +132,34 @@ export default function ModuleCreate({ userId }: Props) {
 
   // 当组件挂载时加载设计数据
   useEffect(() => {
-    loadDesign();
-    // 检查是否有新保存的设计数据
-    const designUpdatedAt = localStorage.getItem("designUpdatedAt");
-    if (designUpdatedAt) {
-      localStorage.removeItem("designUpdatedAt");
-      // 延迟重新加载，确保数据库已更新
-      setTimeout(() => {
-        designLoadingRef.current = false;
-        loadDesign();
-      }, 500);
+    // 优先从 localStorage 读取（从构思阶段跳转过来时）
+    const cachedData = localStorage.getItem("designData");
+    if (cachedData) {
+      try {
+        const task = JSON.parse(cachedData);
+        let aiPrompt = "";
+        let imageHistory: { url: string; prompt: string }[] = [];
+        try {
+          const info = JSON.parse(task.design_reason || "{}");
+          aiPrompt = info.ai_prompt || "";
+          imageHistory = info.image_history || [];
+        } catch {}
+        setDesignData({
+          game_name: task.game_name,
+          game_rules: task.game_rules || [],
+          design_reason: task.design_reason,
+          design_image: task.design_image,
+          ai_prompt: aiPrompt,
+          image_history: imageHistory,
+        });
+        if (task.game_name) setGameTitle(task.game_name);
+        setDesignLoaded(true);
+        localStorage.removeItem("designData");
+        return; // 跳过 API 调用
+      } catch {}
     }
+    // 否则从 API 加载
+    loadDesign();
   }, []);
 
   // 加载对话列表（带请求去重）
