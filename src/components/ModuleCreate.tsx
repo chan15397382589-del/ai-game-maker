@@ -608,8 +608,6 @@ export default function ModuleCreate({ userId }: Props) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `${gameTitle || "游戏"}.html`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    alert("  下载成功！点击确定跳转到反思页面");
-    router.push("/student?module=reflection");
   };
 
   const deleteConversation = async (convId: string) => {
