@@ -144,6 +144,19 @@ export default function ModuleCreate({ userId }: Props) {
 
   useEffect(() => { fetchConversations(); }, []);
 
+  // 加载游戏历史
+  useEffect(() => {
+    const fetchGameHistory = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token; if (!token) return;
+        const res = await fetch("/api/student/game-snapshots", { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) setGameHistory(await res.json() || []);
+      } catch (err) { console.error("加载游戏历史失败:", err); }
+    };
+    fetchGameHistory();
+  }, []);
+
   // 根据设计数据生成初始消息
   useEffect(() => {
     if (!designLoaded) return;
