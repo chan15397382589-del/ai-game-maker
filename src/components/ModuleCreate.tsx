@@ -473,11 +473,18 @@ export default function ModuleCreate({ userId }: Props) {
     const finalCode = extractHtmlCode(assistantContent);
     const finalText = extractTextOnly(assistantContent);
 
-    // 显示最终消息（保留AI的完整回复）
-    const displayText = finalText || (finalCode ? "游戏代码已生成，请查看右侧预览区！" : "  AI暂时无法回复，请稍后重试");
+    // 验证代码完整性：必须包含关键结构
+    const isCodeComplete = finalCode
+      && finalCode.includes("</html>")
+      && (finalCode.includes("requestAnimationFrame") || finalCode.includes("setInterval"))
+      && finalCode.includes("addEventListener")
+      && finalCode.length > 500;
+
+    // 显示最终消息
+    const displayText = finalText || (isCodeComplete ? "  游戏代码已生成，请查看右侧预览区！" : finalCode ? "  代码不完整，正在补全..." : "  AI暂时无法回复，请稍后重试");
     setMessages((prev) => { const msgs = [...prev]; const lastIdx = msgs.length - 1; if (lastIdx >= 0 && msgs[lastIdx].role === "assistant" && (msgs[lastIdx] as any)._s) { msgs[lastIdx] = { role: "assistant", content: displayText }; } else { msgs.push({ role: "assistant", content: displayText }); } return msgs; });
     setRawMessages((prev) => [...prev, { role: "assistant", content: assistantContent }]);
-    if (finalCode) {
+    if (isCodeComplete) {
       setHtmlCode(finalCode);
       setLiveCode(finalCode);
       setViewMode("game");
