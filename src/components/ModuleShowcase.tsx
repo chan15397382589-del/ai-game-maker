@@ -36,6 +36,7 @@ type Phase = "selecting" | "reviewing" | "viewing";
 export default function ModuleShowcase({ userId }: Props) {
   const [phase, setPhase] = useState<Phase>("selecting");
   const [tasks, setTasks] = useState<SharedItem[]>([]);
+  const [myGame, setMyGame] = useState<SharedItem | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [myReviews, setMyReviews] = useState<PeerReview[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,15 +60,31 @@ export default function ModuleShowcase({ userId }: Props) {
       const token = session?.access_token;
       if (!token) return;
 
-      const res = await fetch("/api/student/peer-reviews?mode=tasks", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
+      // 同时获取评价任务和自己的游戏
+      const [tasksRes, myGameRes] = await Promise.all([
+        fetch("/api/student/peer-reviews?mode=tasks", { headers: { Authorization: `Bearer ${token}` } }),
+        fetch("/api/student/sessions", { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+
+      if (tasksRes.ok) {
+        const data = await tasksRes.json();
         setTasks(data.tasks || []);
         if (data.totalReviewed >= 3 || (data.tasks || []).length === 0) {
-          // 已完成评价或没有可评价的游戏，查看自己的评价
           fetchMyReviews();
+        }
+      }
+
+      // 获取自己最新的有游戏的对话
+      if (myGameRes.ok) {
+        const convs = await myGameRes.json();
+        const gameConv = convs?.find((c: any) => c.html_code);
+        if (gameConv) {
+          setMyGame({
+            id: 0,
+            user_id: userId,
+            game_title: gameConv.title || "我的游戏",
+            html_code: gameConv.html_code,
+          });
         }
       }
     } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -153,13 +170,31 @@ export default function ModuleShowcase({ userId }: Props) {
   if (phase === "selecting") {
     if (tasks.length === 0) {
       return (
-        <div className="flex flex-col items-center justify-center h-[calc(100vh-120px)] text-center">
-          <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
-            <span className="text-5xl"> </span>
+        <div className="h-[calc(100vh-120px)] flex flex-col">
+          {/* 我的游戏 */}
+          {myGame && (
+            <div className="mb-4 p-4 bg-white rounded-2xl shadow-md border border-indigo-100">
+              <h3 className="text-sm font-bold text-indigo-700 mb-2">  我的游戏</h3>
+              <div className="flex gap-3">
+                <div className="w-48 h-32 bg-gray-900 rounded-lg overflow-hidden flex-shrink-0">
+                  <iframe srcDoc={myGame.html_code} className="w-full h-full" sandbox="allow-scripts allow-same-origin" scrolling="no" style={{ border: "none" }} />
+                </div>
+                <div className="flex-1">
+                  <p className="text-base font-bold text-gray-800">{myGame.game_title}</p>
+                  <p className="text-xs text-gray-500 mt-1">游戏代码已保存，等待同学评价</p>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* 无评价任务提示 */}
+          <div className="flex-1 flex flex-col items-center justify-center text-center">
+            <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
+              <span className="text-5xl"> </span>
+            </div>
+            <p className="text-2xl font-bold text-gray-800 mb-2">暂无可评价的游戏</p>
+            <p className="text-gray-500 mb-6">请等待同学分享游戏后再来</p>
+            <button onClick={fetchTasks} className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-sm font-medium transition shadow-md">刷新</button>
           </div>
-          <p className="text-2xl font-bold text-gray-800 mb-2">暂无可评价的游戏</p>
-          <p className="text-gray-500 mb-6">请等待同学分享游戏后再来</p>
-          <button onClick={fetchTasks} className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-sm font-medium transition shadow-md">刷新</button>
         </div>
       );
     }
@@ -175,6 +210,18 @@ export default function ModuleShowcase({ userId }: Props) {
 
     return (
       <div className="h-[calc(100vh-120px)] flex flex-col">
+        {/* 我的游戏预览 */}
+        {myGame && (
+          <div className="mb-3 p-3 bg-indigo-50 rounded-xl border border-indigo-100 flex items-center gap-3">
+            <div className="w-20 h-14 bg-gray-900 rounded-lg overflow-hidden flex-shrink-0">
+              <iframe srcDoc={myGame.html_code} className="w-full h-full" sandbox="allow-scripts allow-same-origin" scrolling="no" style={{ border: "none" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-indigo-700 truncate">  我的游戏：{myGame.game_title}</p>
+              <p className="text-xs text-indigo-500">完成评价后可以查看同学对你的评价</p>
+            </div>
+          </div>
+        )}
         {/* 顶部进度 */}
         <div className="flex items-center gap-3 mb-3 px-1">
           <div className="flex items-center gap-3 p-2 bg-indigo-50 rounded-xl border border-indigo-100 flex-1">
