@@ -51,12 +51,11 @@ export async function GET(req: NextRequest) {
 
     const reviewedIds = (myReviews || []).map((r: any) => r.reviewee_id);
 
-    // 3. 获取同班同学分享的游戏（排除自己）
+    // 3. 获取同年级同学分享的游戏（排除自己）
     const { data: items, error } = await db
       .from("shared_items")
       .select("*, author:users!shared_items_user_id_fkey(name, student_id)")
       .eq("grade", myInfo.grade)
-      .eq("class_num", myInfo.class_num)
       .neq("user_id", user.id)
       .order("created_at", { ascending: false });
 
