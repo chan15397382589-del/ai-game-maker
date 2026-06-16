@@ -7,23 +7,7 @@ import XiaozhiAvatar from "@/components/XiaozhiAvatar";
 import VoiceButton from "@/components/VoiceButton";
 import { getValidationMessage } from "@/utils/inputValidation";
 import { trackEvent } from "@/utils/trackEvent";
-
-// 注入全屏 CSS 让游戏填满 iframe
-function injectFullscreenCSS(html: string): string {
-  const fullscreenCSS = `<style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; background: transparent !important; }
-    canvas { display: block !important; width: 100vw !important; height: 100vh !important; }
-  </style>`;
-
-  if (html.includes('<head>')) {
-    return html.replace('<head>', `<head>${fullscreenCSS}`);
-  } else if (html.includes('<html>')) {
-    return html.replace('<html>', `<html><head>${fullscreenCSS}</head>`);
-  } else {
-    return `<!DOCTYPE html><html><head>${fullscreenCSS}</head><body>${html}</body></html>`;
-  }
-}
+import { injectGameCSS } from "@/utils/gamePreview";
 
 function formatAIMessage(text: string): ReactNode[] {
   const lines = text.split("\n");
@@ -831,7 +815,7 @@ export default function ModuleCreate({ userId }: Props) {
             <div className="h-full flex items-center justify-center p-2 overflow-hidden">
               {htmlCode ? (gameStarted ? (
                 <iframe
-                  srcDoc={htmlCode}
+                  srcDoc={injectGameCSS(htmlCode)}
                   className="w-full h-full rounded-xl"
                   sandbox="allow-scripts allow-same-origin"
                   scrolling="no"
