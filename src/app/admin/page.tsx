@@ -101,7 +101,7 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState("");
   const [ready, setReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "prior_knowledge" | "data_tracking" | "game_maker" | "tasks">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "prior_knowledge" | "data_tracking" | "game_maker" | "tasks" | "exam">("students");
   const router = useRouter();
 
   useEffect(() => { checkUser(); }, []);
@@ -162,6 +162,7 @@ export default function AdminDashboard() {
             { key: "prior_knowledge", label: "📝 学生前测" },
             { key: "data_tracking", label: "  数据采集" },
             { key: "tasks", label: "  任务数据" },
+            { key: "exam", label: "  期末测试" },
             { key: "game_maker", label: "  游戏制作" },
           ].map((tab) => (
             <button
@@ -189,6 +190,8 @@ export default function AdminDashboard() {
             <DataTrackingView />
           ) : activeTab === "tasks" ? (
             <TasksDataView />
+          ) : activeTab === "exam" ? (
+            <ExamManagement />
           ) : activeTab === "game_maker" ? (
             <GameMaker />
           ) : (
@@ -3256,6 +3259,196 @@ function GameMaker() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// 期末测试管理
+// ============================================================
+function ExamManagement() {
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeExamTab, setActiveExamTab] = useState<"questions" | "results">("questions");
+  const [showAdd, setShowAdd] = useState(false);
+  const [newQ, setNewQ] = useState({ question_text: "", option_a: "", option_b: "", option_c: "", option_d: "", correct_answer: "A" });
+
+  const fetchQuestions = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      const res = await fetch("/api/admin/exam", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setQuestions(await res.json());
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  }, []);
+
+  const fetchResults = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      const res = await fetch("/api/admin/exam/results", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        setResults(data.results || []);
+      }
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchQuestions(); fetchResults(); }, [fetchQuestions, fetchResults]);
+
+  const handleAddQuestion = async () => {
+    if (!newQ.question_text || !newQ.option_a || !newQ.option_b || !newQ.option_c || !newQ.option_d) {
+      alert("请填写完整题目信息");
+      return;
+    }
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      const res = await fetch("/api/admin/exam", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(newQ),
+      });
+      if (res.ok) {
+        setNewQ({ question_text: "", option_a: "", option_b: "", option_c: "", option_d: "", correct_answer: "A" });
+        setShowAdd(false);
+        fetchQuestions();
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteQuestion = async (id: number) => {
+    if (!confirm("确定删除这道题目？")) return;
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      await fetch("/api/admin/exam", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id }),
+      });
+      fetchQuestions();
+    } catch (err) { console.error(err); }
+  };
+
+  const exportResults = () => {
+    if (results.length === 0) { alert("暂无成绩数据"); return; }
+    const rows = results.map((r: any) => ({
+      "姓名": r.name || "未知",
+      "学号": r.student_id || "",
+      "年级": r.grade ? `${r.grade}年级` : "",
+      "班级": r.class_num ? `${r.class_num}班` : "",
+      "得分": r.score,
+      "总分": r.total,
+      "正确率": `${r.percentage}%`,
+      "已答题数": r.answered,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "期末测试成绩");
+    XLSX.writeFile(wb, `期末测试成绩_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-md p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold text-gray-800">  期末测试管理</h2>
+        <div className="flex gap-2">
+          <button onClick={() => setActiveExamTab("questions")} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeExamTab === "questions" ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-600"}`}>  题目管理</button>
+          <button onClick={() => { setActiveExamTab("results"); fetchResults(); }} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeExamTab === "results" ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-600"}`}>  成绩统计</button>
+          {activeExamTab === "questions" && (
+            <button onClick={() => setShowAdd(true)} className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition">➕ 添加题目</button>
+          )}
+          {activeExamTab === "results" && (
+            <button onClick={exportResults} className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition">📊 导出成绩</button>
+          )}
+        </div>
+      </div>
+
+      {/* 添加题目弹窗 */}
+      {showAdd && (
+        <div className="mb-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+          <div className="space-y-3">
+            <textarea value={newQ.question_text} onChange={(e) => setNewQ({ ...newQ, question_text: e.target.value })} placeholder="题目内容" rows={2} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none" />
+            <div className="grid grid-cols-2 gap-3">
+              <input value={newQ.option_a} onChange={(e) => setNewQ({ ...newQ, option_a: e.target.value })} placeholder="选项 A" className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none" />
+              <input value={newQ.option_b} onChange={(e) => setNewQ({ ...newQ, option_b: e.target.value })} placeholder="选项 B" className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none" />
+              <input value={newQ.option_c} onChange={(e) => setNewQ({ ...newQ, option_c: e.target.value })} placeholder="选项 C" className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none" />
+              <input value={newQ.option_d} onChange={(e) => setNewQ({ ...newQ, option_d: e.target.value })} placeholder="选项 D" className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none" />
+            </div>
+            <select value={newQ.correct_answer} onChange={(e) => setNewQ({ ...newQ, correct_answer: e.target.value })} className="px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none">
+              <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
+            </select>
+            <div className="flex gap-2">
+              <button onClick={handleAddQuestion} className="px-4 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-sm font-medium transition">保存</button>
+              <button onClick={() => setShowAdd(false)} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg text-sm font-medium transition">取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeExamTab === "questions" ? (
+        questions.length === 0 ? (
+          <div className="text-center py-12 text-gray-400">暂无题目</div>
+        ) : (
+          <div className="space-y-3">
+            {questions.map((q: any, idx: number) => (
+              <div key={q.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-800 mb-2">{idx + 1}. {q.question_text}</p>
+                    <div className="grid grid-cols-2 gap-1 text-sm">
+                      <p className={q.correct_answer === "A" ? "text-green-600 font-bold" : "text-gray-600"}>A. {q.option_a} {q.correct_answer === "A" && "✅"}</p>
+                      <p className={q.correct_answer === "B" ? "text-green-600 font-bold" : "text-gray-600"}>B. {q.option_b} {q.correct_answer === "B" && "✅"}</p>
+                      <p className={q.correct_answer === "C" ? "text-green-600 font-bold" : "text-gray-600"}>C. {q.option_c} {q.correct_answer === "C" && "✅"}</p>
+                      <p className={q.correct_answer === "D" ? "text-green-600 font-bold" : "text-gray-600"}>D. {q.option_d} {q.correct_answer === "D" && "✅"}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => handleDeleteQuestion(q.id)} className="ml-4 px-3 py-1 text-red-500 hover:bg-red-50 rounded-lg text-sm transition">  删除</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+        results.length === 0 ? (
+          <div className="text-center py-12 text-gray-400">暂无成绩数据</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">姓名</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">学号</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">年级班级</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-700">得分</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-700">正确率</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-700">已答题</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r: any, idx: number) => (
+                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{r.name || "未知"}</td>
+                    <td className="px-4 py-3 text-gray-600">{r.student_id}</td>
+                    <td className="px-4 py-3 text-gray-500">{r.grade ? `${r.grade}年级` : ""}{r.class_num ? `${r.class_num}班` : ""}</td>
+                    <td className="px-4 py-3 text-center font-bold text-indigo-600">{r.score}/{r.total}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${r.percentage >= 80 ? "bg-green-100 text-green-700" : r.percentage >= 60 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"}`}>
+                        {r.percentage}%
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center text-gray-500">{r.answered}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
     </div>
   );
 }
