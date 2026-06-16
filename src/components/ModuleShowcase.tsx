@@ -33,12 +33,22 @@ interface PeerReview {
 
 type Phase = "selecting" | "reviewing" | "viewing";
 
-// 从 HTML 中提取 canvas 和 script 部分，去掉外层样式
-function extractCanvasAndScript(html: string): string {
-  // 提取 body 内容
-  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-  const bodyContent = bodyMatch ? bodyMatch[1] : html;
-  return bodyContent;
+// 注入全屏 CSS 让游戏填满 iframe
+function injectFullscreenCSS(html: string): string {
+  // 在 <head> 中注入强制全屏的 CSS
+  const fullscreenCSS = `<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; }
+    canvas { display: block !important; width: 100vw !important; height: 100vh !important; }
+  </style>`;
+
+  if (html.includes('<head>')) {
+    return html.replace('<head>', `<head>${fullscreenCSS}`);
+  } else if (html.includes('<html>')) {
+    return html.replace('<html>', `<html><head>${fullscreenCSS}</head>`);
+  } else {
+    return `<!DOCTYPE html><html><head>${fullscreenCSS}</head><body>${html}</body></html>`;
+  }
 }
 
 export default function ModuleShowcase({ userId }: Props) {
@@ -249,7 +259,7 @@ export default function ModuleShowcase({ userId }: Props) {
             <div className="flex-1 relative overflow-hidden bg-white">
               {gameStarted ? (
                 <iframe
-                  srcDoc={current.html_code}
+                  srcDoc={injectFullscreenCSS(current.html_code)}
                   className="absolute inset-0 w-full h-full"
                   sandbox="allow-scripts allow-same-origin"
                   scrolling="no"

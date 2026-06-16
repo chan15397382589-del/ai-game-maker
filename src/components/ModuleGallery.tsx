@@ -7,10 +7,21 @@ interface Props {
   userId: string;
 }
 
-// 从 HTML 中提取 body 内容
-function extractBodyContent(html: string): string {
-  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-  return bodyMatch ? bodyMatch[1] : html;
+// 注入全屏 CSS 让游戏填满 iframe
+function injectFullscreenCSS(html: string): string {
+  const fullscreenCSS = `<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; }
+    canvas { display: block !important; width: 100vw !important; height: 100vh !important; }
+  </style>`;
+
+  if (html.includes('<head>')) {
+    return html.replace('<head>', `<head>${fullscreenCSS}`);
+  } else if (html.includes('<html>')) {
+    return html.replace('<html>', `<html><head>${fullscreenCSS}</head>`);
+  } else {
+    return `<!DOCTYPE html><html><head>${fullscreenCSS}</head><body>${html}</body></html>`;
+  }
 }
 
 interface GameItem {
@@ -77,7 +88,7 @@ export default function ModuleGallery({ userId }: Props) {
         <div className="flex-1 rounded-2xl shadow-lg overflow-hidden relative bg-white">
           {gameStarted ? (
             <iframe
-              srcDoc={selectedGame.html_code}
+              srcDoc={injectFullscreenCSS(selectedGame.html_code)}
               className="absolute inset-0 w-full h-full"
               sandbox="allow-scripts allow-same-origin"
               scrolling="no"
