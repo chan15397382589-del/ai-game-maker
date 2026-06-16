@@ -35,10 +35,9 @@ type Phase = "selecting" | "reviewing" | "viewing";
 
 // 注入全屏 CSS 让游戏填满 iframe
 function injectFullscreenCSS(html: string): string {
-  // 在 <head> 中注入强制全屏的 CSS
   const fullscreenCSS = `<style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; }
+    html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; background: transparent !important; }
     canvas { display: block !important; width: 100vw !important; height: 100vh !important; }
   </style>`;
 

@@ -11,7 +11,7 @@ interface Props {
 function injectFullscreenCSS(html: string): string {
   const fullscreenCSS = `<style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; }
+    html, body { width: 100% !important; height: 100% !important; overflow: hidden !important; background: transparent !important; }
     canvas { display: block !important; width: 100vw !important; height: 100vh !important; }
   </style>`;
 
