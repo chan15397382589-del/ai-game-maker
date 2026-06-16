@@ -68,14 +68,14 @@ export default function ModuleGallery({ userId }: Props) {
             <p className="text-xs text-gray-500">{selectedGame.author_name} · {selectedGame.author_grade}年级{selectedGame.author_class_num}班</p>
           </div>
         </div>
-        <div className="flex-1 bg-gray-900 rounded-2xl shadow-lg overflow-hidden relative">
+        <div className="flex-1 bg-black rounded-2xl shadow-lg overflow-hidden relative">
           {gameStarted ? (
             <iframe
               srcDoc={selectedGame.html_code}
-              className="w-full h-full"
+              className="absolute inset-0 w-full h-full"
               sandbox="allow-scripts allow-same-origin"
               scrolling="no"
-              style={{ border: "none", display: "block" }}
+              style={{ border: "none" }}
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => setGameStarted(true)}>

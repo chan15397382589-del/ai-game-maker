@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
 
 要求：
 1. 直接输出完整HTML代码，用\`\`\`html包裹，以</html>结尾
-2. Canvas使用固定尺寸800x600，body设置margin:0;padding:0;overflow:hidden
+2. Canvas必须填满整个页面：canvas.width=window.innerWidth; canvas.height=window.innerHeight; body设置margin:0;padding:0;overflow:hidden;background:#000;
 3. 使用HTML5 Canvas绘制所有图形，颜色明快、卡通风格
 4. 实现基本物理效果（重力、碰撞、反弹）
 5. 实现游戏规则（计分、胜负判定）

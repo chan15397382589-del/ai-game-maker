@@ -238,14 +238,14 @@ export default function ModuleShowcase({ userId }: Props) {
               <p className="text-sm font-bold text-white">{current.game_title || "未命名游戏"}</p>
               <p className="text-xs text-indigo-100">作者：{current.author?.name || "未知"}</p>
             </div>
-            <div className="flex-1 relative bg-gray-900 overflow-hidden">
+            <div className="flex-1 relative bg-black overflow-hidden">
               {gameStarted ? (
                 <iframe
                   srcDoc={current.html_code}
-                  className="w-full h-full"
+                  className="absolute inset-0 w-full h-full"
                   sandbox="allow-scripts allow-same-origin"
                   scrolling="no"
-                  style={{ border: "none", display: "block" }}
+                  style={{ border: "none" }}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => { setGameStarted(true); trackEvent("review_game_start", undefined, { itemId: current.id }); }}>
