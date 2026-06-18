@@ -255,17 +255,22 @@ export default function ModuleCreate({ userId }: Props) {
 
   const extractTextOnly = (content: string): string => {
     return content
-      .replace(/```html\s*\n[\s\S]*?```/gi, "")  // 移除完整html代码块
-      .replace(/```html[\s\S]*?```/gi, "")        // 移除无换行html代码块
-      .replace(/```\s*\n[\s\S]*?```/g, "")         // 移除其他代码块
-      .replace(/```[\s\S]*?```/g, "")               // 移除无换行代码块
-      .replace(/```[\s\S]*/g, "")                   // 移除未闭合的代码块（流式传输中）
-      .replace(/`[^`]+`/g, "")                      // 移除行内代码
-      .replace(/\*\*([^*]+)\*\*/g, "$1")            // 移除加粗标记
-      .replace(/\[.*?\]\(.*?\)/g, "")               // 移除链接
-      .replace(/<[^>]+>/g, "")                      // 移除HTML标签
-      .replace(/\n{3,}/g, "\n\n")                   // 压缩多余空行
-      .replace(/^\s*[\r\n]/gm, "")                  // 移除空行
+      .replace(/```html\s*\n[\s\S]*?```/gi, "")     // 移除完整html代码块
+      .replace(/```html[\s\S]*?```/gi, "")           // 移除无换行html代码块
+      .replace(/```\s*\n[\s\S]*?```/g, "")            // 移除其他代码块
+      .replace(/```[\s\S]*?```/g, "")                 // 移除无换行代码块
+      .replace(/```[\s\S]*/g, "")                     // 移除未闭合的代码块
+      .replace(/`[^`]+`/g, "")                        // 移除行内代码
+      .replace(/<!DOCTYPE[\s\S]*?<\/html>/gi, "")     // 移除完整HTML文档
+      .replace(/<html[\s\S]*?<\/html>/gi, "")         // 移除html标签对
+      .replace(/<script[\s\S]*?<\/script>/gi, "")     // 移除script标签
+      .replace(/<canvas[\s\S]*?<\/canvas>/gi, "")     // 移除canvas标签
+      .replace(/<style[\s\S]*?<\/style>/gi, "")       // 移除style标签
+      .replace(/<[a-z][\s\S]*?\/?>/gi, "")            // 移除其他HTML标签
+      .replace(/\*\*([^*]+)\*\*/g, "$1")              // 移除加粗标记
+      .replace(/\[.*?\]\(.*?\)/g, "")                 // 移除链接
+      .replace(/\n{3,}/g, "\n\n")                     // 压缩多余空行
+      .replace(/^\s*[\r\n]/gm, "")                    // 移除空行
       .trim();
   };
 
