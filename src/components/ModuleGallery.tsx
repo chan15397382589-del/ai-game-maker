@@ -46,6 +46,22 @@ export default function ModuleGallery({ userId }: Props) {
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
+  const loadGameCode = async (gameId: string | number) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      const res = await fetch(`/api/student/gallery/${String(gameId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedGame((prev: any) => prev ? { ...prev, html_code: data.html_code } : prev);
+      }
+    } catch (err) { console.error(err); }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-120px)]">
@@ -121,17 +137,13 @@ export default function ModuleGallery({ userId }: Props) {
             {items.map((item) => (
               <div key={item.id}
                 className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
-                onClick={() => setSelectedGame(item)}>
+                onClick={() => { setSelectedGame(item); loadGameCode(item.id); }}>
                 <div className="aspect-video bg-gray-100 relative overflow-hidden">
-                  <iframe
-                    srcDoc={item.html_code}
-                    className="w-full h-full border-0 pointer-events-none"
-                    sandbox="allow-scripts"
-                    loading="lazy"
-                    scrolling="no"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent opacity-0 hover:opacity-100 transition-opacity flex items-end justify-center pb-3">
-                    <span className="text-white text-sm font-bold">点击试玩</span>
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-100 to-purple-100">
+                    <div className="text-center">
+                      <span className="text-4xl"> </span>
+                      <p className="text-xs text-gray-500 mt-1">点击查看详情</p>
+                    </div>
                   </div>
                 </div>
                 <div className="px-3 py-2.5">

@@ -44,8 +44,7 @@ export async function GET(req: NextRequest) {
 
     if (classmateIds.length === 0) return NextResponse.json([]);
 
-    // 获取每个学生最新的一条有游戏代码的对话（只取元数据，不取 html_code）
-    // 先查所有有 html_code 的对话 ID
+    // 获取每个学生最新的一条有游戏代码的对话（不取 html_code，减少响应大小）
     const { data: allConvs } = await db
       .from("conversations")
       .select("id, user_id, title, updated_at, html_code")
@@ -66,7 +65,7 @@ export async function GET(req: NextRequest) {
         id: c.id,
         user_id: c.user_id,
         game_title: c.title || "未命名游戏",
-        html_code: c.html_code,
+        has_code: true,
         author_name: author?.name || "未知",
         author_grade: author?.grade,
         author_class_num: author?.class_num,
