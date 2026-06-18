@@ -254,24 +254,39 @@ export default function ModuleCreate({ userId }: Props) {
   };
 
   const extractTextOnly = (content: string): string => {
-    return content
-      .replace(/```html\s*\n[\s\S]*?```/gi, "")     // 移除完整html代码块
-      .replace(/```html[\s\S]*?```/gi, "")           // 移除无换行html代码块
-      .replace(/```\s*\n[\s\S]*?```/g, "")            // 移除其他代码块
-      .replace(/```[\s\S]*?```/g, "")                 // 移除无换行代码块
-      .replace(/```[\s\S]*/g, "")                     // 移除未闭合的代码块
-      .replace(/`[^`]+`/g, "")                        // 移除行内代码
-      .replace(/<!DOCTYPE[\s\S]*?<\/html>/gi, "")     // 移除完整HTML文档
-      .replace(/<html[\s\S]*?<\/html>/gi, "")         // 移除html标签对
-      .replace(/<script[\s\S]*?<\/script>/gi, "")     // 移除script标签
-      .replace(/<canvas[\s\S]*?<\/canvas>/gi, "")     // 移除canvas标签
-      .replace(/<style[\s\S]*?<\/style>/gi, "")       // 移除style标签
-      .replace(/<[a-z][\s\S]*?\/?>/gi, "")            // 移除其他HTML标签
-      .replace(/\*\*([^*]+)\*\*/g, "$1")              // 移除加粗标记
-      .replace(/\[.*?\]\(.*?\)/g, "")                 // 移除链接
-      .replace(/\n{3,}/g, "\n\n")                     // 压缩多余空行
-      .replace(/^\s*[\r\n]/gm, "")                    // 移除空行
+    let text = content
+      // 移除代码块（各种格式）
+      .replace(/```html\s*\n[\s\S]*?```/gi, "")
+      .replace(/```html[\s\S]*?```/gi, "")
+      .replace(/```\s*\n[\s\S]*?```/g, "")
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/```[\s\S]*/g, "")
+      .replace(/`[^`]+`/g, "")
+      // 移除完整HTML文档
+      .replace(/<!DOCTYPE[\s\S]*?<\/html>/gi, "")
+      .replace(/<html[\s\S]*?<\/html>/gi, "")
+      // 移除HTML标签和内容
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<canvas[\s\S]*?<\/canvas>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<[a-z][\s\S]*?\/?>/gi, "")
+      // 移除代码修改指令
+      .replace(/请基于以下当前游戏代码进行修改[，,]输出完整的HTML代码[：:]/g, "")
+      .replace(/请基于以下.*?代码.*?修改/g, "")
+      .replace(/输出完整的HTML代码/g, "")
+      .replace(/```html/g, "")
+      .replace(/```/g, "")
+      // 移除markdown格式
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/\[.*?\]\(.*?\)/g, "")
+      // 清理空白
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/^\s*[\r\n]/gm, "")
       .trim();
+
+    // 如果清理后只剩空白或太短，返回空
+    if (text.length < 2) return "";
+    return text;
   };
 
   // 检查消息是否包含代码
