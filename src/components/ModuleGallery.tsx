@@ -13,6 +13,7 @@ interface GameItem {
   user_id: string;
   game_title: string;
   html_code: string;
+  game_rules?: string[];
   author_name: string;
   author_grade: number | null;
   author_class_num: number | null;
@@ -149,6 +150,14 @@ export default function ModuleGallery({ userId }: Props) {
                 <div className="px-3 py-2.5">
                   <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
                   <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
+                  {item.game_rules && item.game_rules.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
+                        <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
+                      ))}
+                      {item.game_rules.length > 2 && <p className="text-[10px] text-gray-400">+{item.game_rules.length - 2} 条规则</p>}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

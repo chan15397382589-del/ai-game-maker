@@ -53,6 +53,16 @@ export async function GET(req: NextRequest) {
       .order("updated_at", { ascending: false })
       .limit(500);
 
+    // 获取学生的游戏规则
+    const { data: tasks } = await db
+      .from("student_tasks")
+      .select("user_id, game_rules, game_name")
+      .in("user_id", classmateIds)
+      .eq("task_id", "1-1");
+
+    const rulesMap: Record<string, any> = {};
+    (tasks || []).forEach((t: any) => { rulesMap[t.user_id] = t; });
+
     // 每个学生只保留最新的一条
     const seen = new Set<string>();
     const games: any[] = [];
@@ -61,11 +71,13 @@ export async function GET(req: NextRequest) {
       if (!c.html_code || c.html_code.length < 100) continue;
       seen.add(c.user_id);
       const author = classmateMap[c.user_id];
+      const task = rulesMap[c.user_id];
       games.push({
         id: c.id,
         user_id: c.user_id,
-        game_title: c.title || "未命名游戏",
-        has_code: true,
+        game_title: task?.game_name || c.title || "未命名游戏",
+        html_code: c.html_code,
+        game_rules: task?.game_rules || [],
         author_name: author?.name || "未知",
         author_grade: author?.grade,
         author_class_num: author?.class_num,
