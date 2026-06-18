@@ -36,7 +36,7 @@ export default function ModuleGallery({ userId }: Props) {
       const token = session?.access_token;
       if (!token) return;
 
-      const res = await fetch("/api/reviews", {
+      const res = await fetch("/api/student/gallery", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
