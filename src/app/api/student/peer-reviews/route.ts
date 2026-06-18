@@ -119,7 +119,7 @@ export async function GET(req: NextRequest) {
     const classmateMap: Record<string, any> = {};
     (classmates || []).forEach((c: any) => { classmateMap[c.id] = c; });
 
-    // 过滤已评价的，按收到评价数排序（优先分配给评价少的同学）
+    // 过滤已评价的
     const available = classmateIds
       .filter((id: string) => !reviewedIds.includes(id) && gameMap[id])
       .map((id: string) => ({
@@ -129,11 +129,23 @@ export async function GET(req: NextRequest) {
         html_code: gameMap[id].html_code,
         author: classmateMap[id],
         review_count: reviewCountMap[id] || 0,
-      }))
-      .sort((a: any, b: any) => a.review_count - b.review_count);
+      }));
 
-    // 取前3个
-    const selected = available.slice(0, 3);
+    // 随机打乱，但优先选评价少的
+    // 先按评价数分组，每组内随机排序，再拼接
+    const groups: Record<number, any[]> = {};
+    for (const item of available) {
+      const count = item.review_count;
+      if (!groups[count]) groups[count] = [];
+      groups[count].push(item);
+    }
+    // 每组内随机打乱
+    for (const key of Object.keys(groups)) {
+      groups[Number(key)].sort(() => Math.random() - 0.5);
+    }
+    // 按评价数从少到多拼接
+    const sorted = Object.keys(groups).sort().flatMap((key) => groups[Number(key)]);
+    const selected = sorted.slice(0, 3);
 
     return NextResponse.json({
       tasks: selected,
