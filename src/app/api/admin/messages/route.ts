@@ -14,33 +14,36 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get("user_id");
 
-    // 分页参数
-    const page = parseInt(searchParams.get("page") || "1");
-    const pageSize = Math.min(parseInt(searchParams.get("page_size") || "500"), 1000);
-    const offset = (page - 1) * pageSize;
+    // 时间范围筛选
+    const startTime = searchParams.get("start_time");
+    const endTime = searchParams.get("end_time");
 
     let query = db
       .from("messages")
-      .select("id, user_id, role, content, session_id, created_at", { count: "exact" })
-      .order("created_at", { ascending: true })
-      .range(offset, offset + pageSize - 1);
+      .select("id, user_id, role, content, session_id, created_at")
+      .order("created_at", { ascending: true });
 
     if (userId) {
       query = query.eq("user_id", userId);
     }
 
-    const { data, error, count } = await query;
+    // 如果有时间范围，按时间筛选（用于加载单个会话的消息）
+    if (startTime) {
+      query = query.gte("created_at", startTime);
+    }
+    if (endTime) {
+      query = query.lte("created_at", endTime);
+    }
+
+    // 没有时间范围时限制返回数量
+    if (!startTime && !endTime) {
+      query = query.limit(500);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
 
-    return NextResponse.json({
-      data: data || [],
-      pagination: {
-        page,
-        pageSize,
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / pageSize),
-      },
-    });
+    return NextResponse.json(data || []);
   } catch (error: any) {
     console.error("[对话记录] 失败:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

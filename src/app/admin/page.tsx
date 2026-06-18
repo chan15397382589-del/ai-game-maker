@@ -1210,15 +1210,17 @@ function MessagesAudit() {
         session = { ...session, reflection: convData?.reflection || null };
       }
       setSelectedSession(session);
-      const res = await fetch(`/api/admin/messages?user_id=${encodeURIComponent(selectedStudent)}`, { headers: { Authorization: `Bearer ${token}` } });
+      // 传入时间范围，只加载该会话的消息
+      const params = new URLSearchParams({
+        user_id: selectedStudent,
+        start_time: session.start_time,
+        end_time: session.end_time,
+      });
+      const res = await fetch(`/api/admin/messages?${params}`, { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         const result = await res.json();
         const allMessages = Array.isArray(result) ? result : (result.data || []);
-        const filtered = allMessages.filter((m: any) => {
-          const t = new Date(m.created_at).getTime();
-          return t >= new Date(session.start_time).getTime() && t <= new Date(session.end_time).getTime();
-        });
-        setMessages(filtered);
+        setMessages(allMessages);
       }
     } catch (err) { setMessages([]); }
     finally { setLoading(false); }
