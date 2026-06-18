@@ -29,30 +29,23 @@ interface PeerReview {
   q3_bug: string;
   created_at: string;
   reviewer?: { name: string; student_id: string };
-  item?: { game_title: string; html_code: string };
 }
 
-type Phase = "selecting" | "reviewing" | "viewing";
-
 export default function ModuleShowcase({ userId }: Props) {
-  const [phase, setPhase] = useState<Phase>("selecting");
+  const [activeTab, setActiveTab] = useState<"review" | "myreviews">("review");
   const [tasks, setTasks] = useState<SharedItem[]>([]);
-  const [myGame, setMyGame] = useState<SharedItem | null>(null);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [myReviews, setMyReviews] = useState<PeerReview[]>([]);
+  const [totalReviewed, setTotalReviewed] = useState(0);
   const [loading, setLoading] = useState(true);
   const [gameStarted, setGameStarted] = useState(false);
 
-  // 评价表单
   const [q1, setQ1] = useState("");
   const [q2, setQ2] = useState("");
   const [q3, setQ3] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // 加载评价任务
-  useEffect(() => {
-    fetchTasks();
-  }, []);
+  useEffect(() => { fetchTasks(); }, []);
 
   const fetchTasks = async () => {
     setLoading(true);
@@ -61,59 +54,28 @@ export default function ModuleShowcase({ userId }: Props) {
       const token = session?.access_token;
       if (!token) return;
 
-      // 同时获取评价任务和自己的游戏
-      const [tasksRes, myGameRes] = await Promise.all([
-        fetch("/api/student/peer-reviews?mode=tasks", { headers: { Authorization: `Bearer ${token}` } }),
-        fetch("/api/student/sessions", { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-
-      if (tasksRes.ok) {
-        const data = await tasksRes.json();
+      const res = await fetch("/api/student/peer-reviews?mode=tasks", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
         setTasks(data.tasks || []);
-        if (data.totalReviewed >= 3 || (data.tasks || []).length === 0) {
-          fetchMyReviews();
-        }
-      }
-
-      // 获取自己最新的有游戏的对话
-      if (myGameRes.ok) {
-        const convs = await myGameRes.json();
-        const gameConv = convs?.find((c: any) => c.html_code);
-        if (gameConv) {
-          setMyGame({
-            id: 0,
-            user_id: userId,
-            game_title: gameConv.title || "我的游戏",
-            html_code: gameConv.html_code,
-          });
-        }
+        setTotalReviewed(data.totalReviewed || 0);
       }
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
   const fetchMyReviews = async () => {
     try {
-      trackEvent("view_my_reviews", undefined);
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) return;
 
-      const res = await fetch("/api/student/peer-reviews?mode=my_reviews", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setMyReviews(await res.json());
-        setPhase("viewing");
-      }
+      const res = await fetch("/api/student/peer-reviews?mode=my_reviews", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setMyReviews(await res.json());
     } catch (err) { console.error(err); }
   };
 
   const handleSubmitReview = async () => {
-    if (!q1.trim() || !q2.trim()) {
-      alert("请至少填写前两个问题");
-      return;
-    }
-
+    if (!q1.trim() || !q2.trim()) { alert("请至少填写前两个问题"); return; }
     const task = tasks[currentIdx];
     if (!task) return;
 
@@ -126,25 +88,20 @@ export default function ModuleShowcase({ userId }: Props) {
       const res = await fetch("/api/student/peer-reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          reviewee_id: task.user_id,
-          shared_item_id: task.id,
-          q1_enjoy: q1.trim(),
-          q2_suggestion: q2.trim(),
-          q3_bug: q3.trim(),
-        }),
+        body: JSON.stringify({ reviewee_id: task.user_id, shared_item_id: task.id, q1_enjoy: q1.trim(), q2_suggestion: q2.trim(), q3_bug: q3.trim() }),
       });
 
       if (res.ok) {
         trackEvent("peer_review_submit", undefined, { revieweeId: task.user_id, itemId: task.id });
-        // 清空表单
         setQ1(""); setQ2(""); setQ3(""); setGameStarted(false);
+        const newTotal = totalReviewed + 1;
+        setTotalReviewed(newTotal);
 
         if (currentIdx < tasks.length - 1) {
-          // 还有下一个游戏
           setCurrentIdx(currentIdx + 1);
         } else {
-          // 全部评价完成，查看自己的评价
+          // 评价完成，切换到查看我的评价
+          setActiveTab("myreviews");
           fetchMyReviews();
         }
       } else {
@@ -155,7 +112,6 @@ export default function ModuleShowcase({ userId }: Props) {
     finally { setSubmitting(false); }
   };
 
-  // 加载中
   if (loading) {
     return (
       <div className="flex items-center justify-center h-[calc(100vh-120px)]">
@@ -167,27 +123,21 @@ export default function ModuleShowcase({ userId }: Props) {
     );
   }
 
-  // 阶段1：选择游戏（自动完成，直接进入评价）
-  if (phase === "selecting") {
-    if (tasks.length === 0) {
-      return (
-        <div className="h-[calc(100vh-120px)] flex flex-col">
-          {/* 我的游戏 */}
-          {myGame && (
-            <div className="mb-4 p-4 bg-white rounded-2xl shadow-md border border-indigo-100">
-              <h3 className="text-sm font-bold text-indigo-700 mb-2">  我的游戏</h3>
-              <div className="flex gap-3">
-                <div className="w-48 h-32 bg-gray-900 rounded-lg overflow-hidden flex-shrink-0">
-                  <iframe srcDoc={myGame.html_code} className="w-full h-full" sandbox="allow-scripts allow-same-origin" scrolling="no" style={{ border: "none" }} />
-                </div>
-                <div className="flex-1">
-                  <p className="text-base font-bold text-gray-800">{myGame.game_title}</p>
-                  <p className="text-xs text-gray-500 mt-1">游戏代码已保存，等待同学评价</p>
-                </div>
-              </div>
-            </div>
-          )}
-          {/* 无评价任务提示 */}
+  return (
+    <div className="h-[calc(100vh-120px)] flex flex-col">
+      {/* 标签切换 */}
+      <div className="flex items-center gap-3 mb-3">
+        <button onClick={() => setActiveTab("review")} className={`px-5 py-2.5 rounded-xl text-sm font-bold transition ${activeTab === "review" ? "bg-indigo-500 text-white shadow-md" : "bg-white text-gray-600 border border-gray-200"}`}>
+           评价他人的作品 {totalReviewed > 0 && <span className="ml-1 bg-white/20 px-1.5 py-0.5 rounded text-xs">已评 {totalReviewed}</span>}
+        </button>
+        <button onClick={() => { setActiveTab("myreviews"); fetchMyReviews(); }} className={`px-5 py-2.5 rounded-xl text-sm font-bold transition ${activeTab === "myreviews" ? "bg-green-500 text-white shadow-md" : "bg-white text-gray-600 border border-gray-200"}`}>
+           查看我的评价
+        </button>
+      </div>
+
+      {/* 评价他人的作品 */}
+      {activeTab === "review" && (
+        tasks.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
               <span className="text-5xl"> </span>
@@ -196,171 +146,143 @@ export default function ModuleShowcase({ userId }: Props) {
             <p className="text-gray-500 mb-6">请等待同学分享游戏后再来</p>
             <button onClick={fetchTasks} className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-sm font-medium transition shadow-md">刷新</button>
           </div>
-        </div>
-      );
-    }
-    // 自动进入评价阶段
-    setPhase("reviewing");
-    return null;
-  }
+        ) : (() => {
+          const current = tasks[currentIdx];
+          return (
+            <div className="flex-1 flex gap-4 min-h-0">
+              {/* 左侧：游戏预览 */}
+              <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center gap-3">
+                  <span className="text-white font-bold">{currentIdx + 1} / {tasks.length}</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-white">{current.game_title || "未命名游戏"}</p>
+                    <p className="text-xs text-indigo-100">作者：{current.author?.name || "未知"}</p>
+                  </div>
+                  {/* 进度指示器 */}
+                  <div className="flex gap-1.5">
+                    {tasks.map((_, i) => (
+                      <div key={i} className={`w-3 h-3 rounded-full ${i < currentIdx ? "bg-green-400" : i === currentIdx ? "bg-white" : "bg-white/30"}`} />
+                    ))}
+                  </div>
+                </div>
+                <div className="flex-1 relative bg-black overflow-hidden">
+                  {gameStarted ? (
+                    <iframe
+                      srcDoc={injectGameCSS(current.html_code)}
+                      className="absolute inset-0 w-full h-full"
+                      sandbox="allow-scripts allow-same-origin"
+                      scrolling="no"
+                      style={{ border: "none" }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => { setGameStarted(true); trackEvent("review_game_start", undefined, { itemId: current.id }); }}>
+                      <div className="text-center">
+                        <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
+                          <span className="text-4xl ml-1">▶️</span>
+                        </div>
+                        <p className="text-xl font-bold text-white">点击试玩游戏</p>
+                        <p className="text-sm text-indigo-200 mt-1">先玩再评价</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-  // 阶段2：评价游戏
-  if (phase === "reviewing") {
-    const current = tasks[currentIdx];
-    if (!current) return null;
-
-    return (
-      <div className="h-[calc(100vh-120px)] flex flex-col">
-        {/* 顶部进度 */}
-        <div className="flex items-center gap-3 mb-3 px-1">
-          <div className="flex items-center gap-3 p-2 bg-indigo-50 rounded-xl border border-indigo-100 flex-1">
-            <div className="w-10 h-10"><XiaozhiAvatar state="idle" /></div>
-            <div>
-              <p className="text-sm font-bold text-indigo-700">小智老师</p>
-              <p className="text-xs text-indigo-500">认真评价同学的游戏，帮助他改进！</p>
+              {/* 右侧：评价表单 */}
+              <div className="w-96 bg-white rounded-2xl shadow-lg border border-gray-100 flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-green-500 to-emerald-500">
+                  <h3 className="text-base font-bold text-white">  评价这个游戏</h3>
+                  <p className="text-xs text-green-100">认真回答，帮助同学改进游戏</p>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-5">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                      <label className="text-sm font-bold text-gray-800">哪里最好玩？</label>
+                    </div>
+                    <div className="flex gap-2">
+                      <textarea value={q1} onChange={(e) => setQ1(e.target.value)} placeholder="比如：画面很酷、玩法有趣..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-green-400 resize-none transition" />
+                      <VoiceButton onResult={(text) => setQ1((prev) => prev + text)} />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                      <label className="text-sm font-bold text-gray-800">有什么建议？</label>
+                    </div>
+                    <div className="flex gap-2">
+                      <textarea value={q2} onChange={(e) => setQ2(e.target.value)} placeholder="比如：加点音乐、难度调整..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400 resize-none transition" />
+                      <VoiceButton onResult={(text) => setQ2((prev) => prev + text)} />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-xs font-bold">3</span>
+                      <label className="text-sm font-bold text-gray-800">发现问题了吗？<span className="text-gray-400 font-normal">（可选）</span></label>
+                    </div>
+                    <div className="flex gap-2">
+                      <textarea value={q3} onChange={(e) => setQ3(e.target.value)} placeholder="比如：按钮点不到、角色会穿墙..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-orange-400 resize-none transition" />
+                      <VoiceButton onResult={(text) => setQ3((prev) => prev + text)} />
+                    </div>
+                  </div>
+                </div>
+                <div className="p-4 border-t border-gray-100">
+                  <button onClick={handleSubmitReview} disabled={submitting || !q1.trim() || !q2.trim()} className="w-full py-3.5 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 disabled:from-gray-200 disabled:to-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition shadow-md">
+                    {submitting ? "提交中..." : currentIdx < tasks.length - 1 ? "提交并评价下一个 →" : "提交完成，查看我的评价 ✅"}
+                  </button>
+                </div>
+              </div>
             </div>
+          );
+        })()
+      )}
+
+      {/* 查看我的评价 */}
+      {activeTab === "myreviews" && (
+        myReviews.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center text-center">
+            <div className="w-24 h-24 bg-gray-50 rounded-full flex items-center justify-center mb-6">
+              <span className="text-5xl"> </span>
+            </div>
+            <p className="text-xl font-bold text-gray-700 mb-2">还没有同学评价你的游戏</p>
+            <p className="text-gray-500">完成 3 个评价后可以查看</p>
           </div>
-          <div className="flex items-center gap-2">
-            {tasks.map((_, i) => (
-              <div key={i} className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold transition ${
-                i < currentIdx ? "bg-green-500 text-white shadow-md" :
-                i === currentIdx ? "bg-indigo-500 text-white shadow-lg scale-110" :
-                "bg-gray-100 text-gray-400 border border-gray-200"
-              }`}>{i < currentIdx ? "✓" : i + 1}</div>
+        ) : (
+          <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+            <div className="flex items-center gap-3 p-3 bg-green-50 rounded-xl border border-green-100">
+              <div className="w-10 h-10"><XiaozhiAvatar state="success" /></div>
+              <div>
+                <p className="text-sm font-bold text-green-700">共有 {myReviews.length} 位同学评价了你的游戏</p>
+                <p className="text-xs text-green-600">认真看看同学的建议，继续改进！</p>
+              </div>
+            </div>
+            {myReviews.map((review, idx) => (
+              <div key={review.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+                <div className="flex items-center gap-3 px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-100">
+                  <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-sm font-bold">{idx + 1}</div>
+                  <span className="text-sm font-bold text-gray-800">同学 {idx + 1}</span>
+                  <span className="text-xs text-gray-400 ml-auto">{new Date(review.created_at).toLocaleString("zh-CN")}</span>
+                </div>
+                <div className="p-5 space-y-3">
+                  <div className="p-3 bg-green-50 rounded-xl border border-green-100">
+                    <p className="text-xs font-bold text-green-700 mb-1">  哪里最好玩</p>
+                    <p className="text-sm text-green-900">{review.q1_enjoy}</p>
+                  </div>
+                  <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
+                    <p className="text-xs font-bold text-blue-700 mb-1">  改进建议</p>
+                    <p className="text-sm text-blue-900">{review.q2_suggestion}</p>
+                  </div>
+                  {review.q3_bug && (
+                    <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
+                      <p className="text-xs font-bold text-orange-700 mb-1">  发现的问题</p>
+                      <p className="text-sm text-orange-900">{review.q3_bug}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
-        </div>
-
-        {/* 主体：左游戏 右评价 */}
-        <div className="flex-1 flex gap-4 min-h-0">
-          {/* 左侧：游戏预览 */}
-          <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-indigo-500 to-purple-500">
-              <p className="text-sm font-bold text-white">{current.game_title || "未命名游戏"}</p>
-              <p className="text-xs text-indigo-100">作者：{current.author?.name || "未知"}</p>
-            </div>
-            <div className="flex-1 relative overflow-hidden bg-white">
-              {gameStarted ? (
-                <iframe
-                  srcDoc={injectGameCSS(current.html_code)}
-                  className="absolute inset-0 w-full h-full"
-                  sandbox="allow-scripts allow-same-origin"
-                  scrolling="no"
-                  style={{ border: "none" }}
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => { setGameStarted(true); trackEvent("review_game_start", undefined, { itemId: current.id }); }}>
-                  <div className="text-center">
-                    <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
-                      <span className="text-4xl ml-1">▶️</span>
-                    </div>
-                    <p className="text-xl font-bold text-white">点击试玩游戏</p>
-                    <p className="text-sm text-indigo-200 mt-1">先玩再评价</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* 右侧：评价表单 */}
-          <div className="w-96 bg-white rounded-2xl shadow-lg border border-gray-100 flex flex-col overflow-hidden">
-            <div className="p-4 border-b border-gray-100 bg-gradient-to-r from-green-500 to-emerald-500">
-              <h3 className="text-base font-bold text-white">  评价这个游戏</h3>
-              <p className="text-xs text-green-100">认真回答，帮助同学改进游戏</p>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-5">
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-bold">1</span>
-                  <label className="text-sm font-bold text-gray-800">哪里最好玩？</label>
-                </div>
-                <div className="flex gap-2">
-                  <textarea value={q1} onChange={(e) => setQ1(e.target.value)} placeholder="比如：画面很酷、玩法有趣..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-green-400 resize-none transition" />
-                  <VoiceButton onResult={(text) => setQ1((prev) => prev + text)} />
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">2</span>
-                  <label className="text-sm font-bold text-gray-800">有什么建议？</label>
-                </div>
-                <div className="flex gap-2">
-                  <textarea value={q2} onChange={(e) => setQ2(e.target.value)} placeholder="比如：加点音乐、难度调整..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400 resize-none transition" />
-                  <VoiceButton onResult={(text) => setQ2((prev) => prev + text)} />
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-xs font-bold">3</span>
-                  <label className="text-sm font-bold text-gray-800">发现问题了吗？<span className="text-gray-400 font-normal">（可选）</span></label>
-                </div>
-                <div className="flex gap-2">
-                  <textarea value={q3} onChange={(e) => setQ3(e.target.value)} placeholder="比如：按钮点不到、角色会穿墙..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-orange-400 resize-none transition" />
-                  <VoiceButton onResult={(text) => setQ3((prev) => prev + text)} />
-                </div>
-              </div>
-            </div>
-            <div className="p-4 border-t border-gray-100">
-              <button onClick={handleSubmitReview} disabled={submitting || !q1.trim() || !q2.trim()} className="w-full py-3.5 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 disabled:from-gray-200 disabled:to-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition shadow-md">
-                {submitting ? "提交中..." : currentIdx < tasks.length - 1 ? "提交并评价下一个 →" : "提交完成 ✅"}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // 阶段3：查看我的评价
-  return (
-    <div className="h-[calc(100vh-120px)] flex flex-col">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3 p-3 bg-green-50 rounded-xl border border-green-100">
-          <div className="w-10 h-10"><XiaozhiAvatar state="success" /></div>
-          <div>
-            <h2 className="text-lg font-bold text-green-800">  同学给你的评价</h2>
-            <p className="text-xs text-green-600">认真看看同学的建议，继续改进你的游戏！</p>
-          </div>
-        </div>
-        <button onClick={() => { localStorage.setItem("gotoModule", "revise"); window.location.href = "/student?module=revise"; }} className="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 text-white rounded-xl text-sm font-bold transition shadow-md">  同伴建议</button>
-      </div>
-
-      {myReviews.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-center">
-          <div className="w-24 h-24 bg-gray-50 rounded-full flex items-center justify-center mb-6">
-            <span className="text-5xl"> </span>
-          </div>
-          <p className="text-xl font-bold text-gray-700 mb-2">还没有同学评价你的游戏</p>
-          <p className="text-gray-500">请稍后再来查看</p>
-        </div>
-      ) : (
-        <div className="flex-1 overflow-y-auto space-y-4 pb-4">
-          {myReviews.map((review, idx) => (
-            <div key={review.id} className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-              <div className="flex items-center gap-3 px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-100">
-                <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-sm font-bold">{idx + 1}</div>
-                <span className="text-sm font-bold text-gray-800">同学 {idx + 1}</span>
-                <span className="text-xs text-gray-400 ml-auto">{new Date(review.created_at).toLocaleString("zh-CN")}</span>
-              </div>
-              <div className="p-5 space-y-3">
-                <div className="p-3 bg-green-50 rounded-xl border border-green-100">
-                  <p className="text-xs font-bold text-green-700 mb-1">  哪里最好玩</p>
-                  <p className="text-sm text-green-900">{review.q1_enjoy}</p>
-                </div>
-                <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
-                  <p className="text-xs font-bold text-blue-700 mb-1">  改进建议</p>
-                  <p className="text-sm text-blue-900">{review.q2_suggestion}</p>
-                </div>
-                {review.q3_bug && (
-                  <div className="p-3 bg-orange-50 rounded-xl border border-orange-100">
-                    <p className="text-xs font-bold text-orange-700 mb-1">  发现的问题</p>
-                    <p className="text-sm text-orange-900">{review.q3_bug}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        )
       )}
     </div>
   );
