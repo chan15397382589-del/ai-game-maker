@@ -50,14 +50,14 @@ export async function GET(req: NextRequest) {
 
     if (classmateIds.length === 0) return NextResponse.json([]);
 
-    // 获取每个学生最新的一条有游戏代码的对话（不取 html_code，减少响应大小）
+    // 获取每个学生最新的一条有游戏代码的对话
     const { data: allConvs } = await db
       .from("conversations")
       .select("id, user_id, title, updated_at, html_code")
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
       .order("updated_at", { ascending: false })
-      .limit(500);
+      .limit(200);
 
     // 获取学生的游戏规则
     const { data: tasks } = await db

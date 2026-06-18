@@ -139,13 +139,20 @@ export default function ModuleGallery({ userId }: Props) {
               <div key={item.id}
                 className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
                 onClick={() => { setSelectedGame(item); loadGameCode(item.id); }}>
-                <div className="aspect-video bg-gray-100 relative overflow-hidden">
-                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-100 to-purple-100">
-                    <div className="text-center">
+                <div className="aspect-video bg-gray-900 relative overflow-hidden">
+                  {item.html_code ? (
+                    <iframe
+                      srcDoc={injectGameCSS(item.html_code)}
+                      className="w-full h-full border-0 pointer-events-none"
+                      sandbox="allow-scripts"
+                      loading="lazy"
+                      scrolling="no"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
                       <span className="text-4xl"> </span>
-                      <p className="text-xs text-gray-500 mt-1">点击查看详情</p>
                     </div>
-                  </div>
+                  )}
                 </div>
                 <div className="px-3 py-2.5">
                   <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
