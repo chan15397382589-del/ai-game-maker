@@ -270,7 +270,7 @@ export default function ModuleCreate({ userId }: Props) {
       .replace(/<canvas[\s\S]*?<\/canvas>/gi, "")
       .replace(/<style[\s\S]*?<\/style>/gi, "")
       .replace(/<[a-z][\s\S]*?\/?>/gi, "")
-      // 移除代码修改指令
+      // 移除代码修改指令和相关文本
       .replace(/请基于以下当前游戏代码进行修改[，,]输出完整的HTML代码[：:]/g, "")
       .replace(/请基于以下.*?代码.*?修改/g, "")
       .replace(/输出完整的HTML代码/g, "")
@@ -286,6 +286,10 @@ export default function ModuleCreate({ userId }: Props) {
 
     // 如果清理后只剩空白或太短，返回空
     if (text.length < 2) return "";
+    // 截断过长的消息（超过500字符）
+    if (text.length > 500) {
+      text = text.substring(0, 500) + "...";
+    }
     return text;
   };
 
