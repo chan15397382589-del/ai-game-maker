@@ -96,14 +96,7 @@ export default function ModuleShowcase({ userId }: Props) {
         setQ1(""); setQ2(""); setQ3(""); setGameStarted(false);
         const newTotal = totalReviewed + 1;
         setTotalReviewed(newTotal);
-
-        if (currentIdx < tasks.length - 1) {
-          setCurrentIdx(currentIdx + 1);
-        } else {
-          // 评价完成，切换到查看我的评价
-          setActiveTab("myreviews");
-          fetchMyReviews();
-        }
+        alert("✅ 评价已提交！可以继续评价其他同学，或切换到「查看我的评价」");
       } else {
         const err = await res.json().catch(() => ({}));
         alert(err.error || "提交失败");
@@ -153,15 +146,19 @@ export default function ModuleShowcase({ userId }: Props) {
               {/* 左侧：游戏预览 */}
               <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center gap-3">
-                  <span className="text-white font-bold">{currentIdx + 1} / {tasks.length}</span>
                   <div className="flex-1">
                     <p className="text-sm font-bold text-white">{current.game_title || "未命名游戏"}</p>
                     <p className="text-xs text-indigo-100">作者：{current.author?.name || "未知"}</p>
                   </div>
-                  {/* 进度指示器 */}
-                  <div className="flex gap-1.5">
-                    {tasks.map((_, i) => (
-                      <div key={i} className={`w-3 h-3 rounded-full ${i < currentIdx ? "bg-green-400" : i === currentIdx ? "bg-white" : "bg-white/30"}`} />
+                  {/* 可点击的进度指示器 */}
+                  <div className="flex gap-2">
+                    {tasks.map((task, i) => (
+                      <button key={i} onClick={() => { setCurrentIdx(i); setGameStarted(false); setQ1(""); setQ2(""); setQ3(""); }}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition ${
+                          i === currentIdx ? "bg-white text-indigo-600 scale-110" : "bg-white/30 text-white hover:bg-white/50"
+                        }`}>
+                        {i + 1}
+                      </button>
                     ))}
                   </div>
                 </div>
