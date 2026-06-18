@@ -44,32 +44,35 @@ export async function GET(req: NextRequest) {
 
     if (classmateIds.length === 0) return NextResponse.json([]);
 
-    // 获取这些学生的有游戏代码的对话
-    const { data: conversations } = await db
+    // 获取每个学生最新的一条有游戏代码的对话（只取元数据，不取 html_code）
+    // 先查所有有 html_code 的对话 ID
+    const { data: allConvs } = await db
       .from("conversations")
-      .select("id, user_id, title, html_code, updated_at")
+      .select("id, user_id, title, updated_at, html_code")
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
       .order("updated_at", { ascending: false })
-      .limit(200);
+      .limit(500);
 
-    // 转换为统一格式
-    const games = (conversations || [])
-      .filter((c: any) => c.html_code && c.html_code.length > 100)
-      .map((c: any) => {
-        const author = classmateMap[c.user_id];
-        return {
-          id: c.id,
-          user_id: c.user_id,
-          game_title: c.title || "未命名游戏",
-          html_code: c.html_code,
-          author_name: author?.name || "未知",
-          author_grade: author?.grade,
-          author_class_num: author?.class_num,
-          created_at: c.updated_at,
-          source: "conversation",
-        };
+    // 每个学生只保留最新的一条
+    const seen = new Set<string>();
+    const games: any[] = [];
+    for (const c of allConvs || []) {
+      if (seen.has(c.user_id)) continue;
+      if (!c.html_code || c.html_code.length < 100) continue;
+      seen.add(c.user_id);
+      const author = classmateMap[c.user_id];
+      games.push({
+        id: c.id,
+        user_id: c.user_id,
+        game_title: c.title || "未命名游戏",
+        html_code: c.html_code,
+        author_name: author?.name || "未知",
+        author_grade: author?.grade,
+        author_class_num: author?.class_num,
+        created_at: c.updated_at,
       });
+    }
 
     // 按更新时间排序
     games.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
