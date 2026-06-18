@@ -2278,14 +2278,9 @@ function PriorKnowledgeView() {
 // ============================================================
 
 function DataTrackingView() {
-  const [data, setData] = useState<{ interactionEvents: any[]; gameEvents: any[]; inputMethodStats: any }>({
-    interactionEvents: [],
-    gameEvents: [],
-    inputMethodStats: { text: 0, voice: 0, hasCode: 0 },
-  });
+  const [students, setStudents] = useState<any[]>([]);
+  const [summary, setSummary] = useState<any>({});
   const [loading, setLoading] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<"interaction" | "game">("interaction");
-  const [filterType, setFilterType] = useState<string>("");
 
   useEffect(() => {
     const fetchData = async () => {
@@ -2295,7 +2290,11 @@ function DataTrackingView() {
         const res = await fetch("/api/admin/tracking", {
           headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.ok) setData(await res.json());
+        if (res.ok) {
+          const data = await res.json();
+          setStudents(data.students || []);
+          setSummary(data.summary || {});
+        }
       } catch (err) {
         console.error("获取追踪数据失败:", err);
       } finally {
@@ -2304,17 +2303,6 @@ function DataTrackingView() {
     };
     fetchData();
   }, []);
-
-  const undoCount = data.interactionEvents.filter((e) => e.event_type === "undo").length;
-  const redoCount = data.interactionEvents.filter((e) => e.event_type === "redo").length;
-  const totalInteraction = data.interactionEvents.length;
-  const totalGame = data.gameEvents.length;
-
-  const filteredInteraction = filterType
-    ? data.interactionEvents.filter((e) => e.event_type === filterType)
-    : data.interactionEvents;
-
-  const eventTypes = [...new Set(data.interactionEvents.map((e) => e.event_type))];
 
   if (loading) {
     return <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">
@@ -2330,43 +2318,24 @@ function DataTrackingView() {
           onClick={() => {
             const date = new Date().toISOString().slice(0, 10);
             const wb = XLSX.utils.book_new();
-            const intRows = data.interactionEvents.map((e) => ({
-              "学生姓名": e.student_name,
-              "学号": e.student_id,
-              "年级": e.grade ? `${e.grade}年级` : "",
-              "班级": e.class_num ? `${e.class_num}班` : "",
-              "事件类型": e.event_type,
-              "附加信息": JSON.stringify(e.metadata || {}),
-              "时间": e.created_at ? new Date(e.created_at).toLocaleString("zh-CN") : "",
+            const rows = students.map((s: any) => ({
+              "姓名": s.name,
+              "学号": s.student_id,
+              "年级": s.grade ? `${s.grade}年级` : "",
+              "班级": s.class_num ? `${s.class_num}班` : "",
+              "对话数": s.conversation_count,
+              "游戏数": s.game_count,
+              "消息数": s.message_count,
+              "文字输入": s.text_input,
+              "语音输入": s.voice_input,
+              "AI生成代码": s.code_generations,
             }));
-            const ws1 = XLSX.utils.json_to_sheet(intRows.length > 0 ? intRows : [{ "提示": "暂无数据" }]);
-            ws1["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 6 }, { wch: 6 }, { wch: 16 }, { wch: 40 }, { wch: 16 }];
-            XLSX.utils.book_append_sheet(wb, ws1, "交互事件");
-            const gameRows = data.gameEvents.map((e) => ({
-              "学生姓名": e.student_name,
-              "学号": e.student_id,
-              "年级": e.grade ? `${e.grade}年级` : "",
-              "班级": e.class_num ? `${e.class_num}班` : "",
-              "事件类型": e.event_type,
-              "游戏数据": JSON.stringify(e.event_data || {}),
-              "时间": e.created_at ? new Date(e.created_at).toLocaleString("zh-CN") : "",
-            }));
-            const ws2 = XLSX.utils.json_to_sheet(gameRows.length > 0 ? gameRows : [{ "提示": "暂无数据" }]);
-            ws2["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 6 }, { wch: 6 }, { wch: 16 }, { wch: 40 }, { wch: 16 }];
-            XLSX.utils.book_append_sheet(wb, ws2, "游戏事件");
-            const statsRows = [
-              { "指标": "文字输入次数", "数值": data.inputMethodStats.text },
-              { "指标": "语音输入次数", "数值": data.inputMethodStats.voice },
-              { "指标": "AI回复含代码次数", "数值": data.inputMethodStats.hasCode },
-              { "指标": "Undo次数", "数值": undoCount },
-              { "指标": "Redo次数", "数值": redoCount },
-            ];
-            const ws3 = XLSX.utils.json_to_sheet(statsRows);
-            ws3["!cols"] = [{ wch: 20 }, { wch: 10 }];
-            XLSX.utils.book_append_sheet(wb, ws3, "统计概览");
+            const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [{ "提示": "暂无数据" }]);
+            ws["!cols"] = [{ wch: 10 }, { wch: 12 }, { wch: 6 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 10 }];
+            XLSX.utils.book_append_sheet(wb, ws, "学生数据");
             XLSX.writeFile(wb, `数据采集_${date}.xlsx`);
           }}
-          disabled={totalInteraction + totalGame === 0}
+          disabled={students.length === 0}
           className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
         >
           📊 导出Excel
@@ -2374,147 +2343,60 @@ function DataTrackingView() {
       </div>
 
       {/* 统计卡片 */}
-      <div className="grid grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-          <p className="text-3xl font-bold text-indigo-600">{totalInteraction + totalGame}</p>
-          <p className="text-sm text-gray-500 mt-1">总事件数</p>
+          <p className="text-3xl font-bold text-indigo-600">{summary.total_students || 0}</p>
+          <p className="text-sm text-gray-500 mt-1">总学生数</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-          <p className="text-3xl font-bold text-blue-600">{totalInteraction}</p>
-          <p className="text-sm text-gray-500 mt-1">交互事件</p>
+          <p className="text-3xl font-bold text-green-600">{summary.active_students || 0}</p>
+          <p className="text-sm text-gray-500 mt-1">活跃学生</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-          <p className="text-3xl font-bold text-purple-600">{totalGame}</p>
-          <p className="text-sm text-gray-500 mt-1">游戏事件</p>
+          <p className="text-3xl font-bold text-purple-600">{summary.total_games || 0}</p>
+          <p className="text-sm text-gray-500 mt-1">生成游戏</p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-          <p className="text-3xl font-bold text-orange-600">{undoCount + redoCount}</p>
-          <p className="text-sm text-gray-500 mt-1">Undo/Redo</p>
-        </div>
-        <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-          <p className="text-3xl font-bold text-green-600">{data.inputMethodStats.voice}</p>
-          <p className="text-sm text-gray-500 mt-1">语音输入</p>
+          <p className="text-3xl font-bold text-orange-600">{summary.total_messages || 0}</p>
+          <p className="text-sm text-gray-500 mt-1">消息总数</p>
         </div>
       </div>
 
-      {/* 子Tab + 筛选 */}
-      <div className="flex items-center gap-4 mb-4">
-        <div className="flex gap-2">
-          <button
-            onClick={() => { setActiveSubTab("interaction"); setFilterType(""); }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeSubTab === "interaction" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            交互事件 ({totalInteraction})
-          </button>
-          <button
-            onClick={() => setActiveSubTab("game")}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              activeSubTab === "game" ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}
-          >
-            游戏事件 ({totalGame})
-          </button>
+      {/* 学生数据表格 */}
+      <div className="bg-white rounded-2xl shadow-md overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">姓名</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">学号</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">年级班级</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">对话数</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">游戏数</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">消息数</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">文字输入</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">语音输入</th>
+                <th className="px-4 py-3 text-center font-medium text-gray-700">AI生成</th>
+              </tr>
+            </thead>
+            <tbody>
+              {students.map((s: any) => (
+                <tr key={s.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <td className="px-4 py-3 font-medium">{s.name || "未知"}</td>
+                  <td className="px-4 py-3 text-gray-600">{s.student_id}</td>
+                  <td className="px-4 py-3 text-gray-500">{s.grade ? `${s.grade}年级` : ""}{s.class_num ? `${s.class_num}班` : ""}</td>
+                  <td className="px-4 py-3 text-center">{s.conversation_count}</td>
+                  <td className="px-4 py-3 text-center">{s.game_count}</td>
+                  <td className="px-4 py-3 text-center">{s.message_count}</td>
+                  <td className="px-4 py-3 text-center">{s.text_input}</td>
+                  <td className="px-4 py-3 text-center">{s.voice_input}</td>
+                  <td className="px-4 py-3 text-center">{s.code_generations}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        {activeSubTab === "interaction" && eventTypes.length > 0 && (
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-gray-200 text-sm"
-          >
-            <option value="">全部类型</option>
-            {eventTypes.map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
-          </select>
-        )}
       </div>
-
-      {/* 数据表格 */}
-      {activeSubTab === "interaction" ? (
-        filteredInteraction.length === 0 ? (
-          <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">暂无交互事件数据</div>
-        ) : (
-          <div className="bg-white rounded-2xl shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">姓名</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">学号</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">年级班级</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">事件类型</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">附加信息</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">时间</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredInteraction.slice(0, 200).map((e) => (
-                    <tr key={e.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-800">{e.student_name}</td>
-                      <td className="px-4 py-3 text-gray-600">{e.student_id}</td>
-                      <td className="px-4 py-3 text-gray-600">
-                        {e.grade ? `${e.grade}年级` : ""}{e.class_num ? `${e.class_num}班` : ""}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">{e.event_type}</span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">
-                        {e.metadata && Object.keys(e.metadata).length > 0 ? JSON.stringify(e.metadata) : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-gray-400 text-xs">
-                        {e.created_at ? new Date(e.created_at).toLocaleString("zh-CN") : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )
-      ) : (
-        data.gameEvents.length === 0 ? (
-          <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">暂无游戏事件数据</div>
-        ) : (
-          <div className="bg-white rounded-2xl shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">姓名</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">学号</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">年级班级</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">事件类型</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">游戏数据</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">时间</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {data.gameEvents.slice(0, 200).map((e) => (
-                    <tr key={e.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-800">{e.student_name}</td>
-                      <td className="px-4 py-3 text-gray-600">{e.student_id}</td>
-                      <td className="px-4 py-3 text-gray-600">
-                        {e.grade ? `${e.grade}年级` : ""}{e.class_num ? `${e.class_num}班` : ""}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-700">{e.event_type}</span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 text-xs max-w-[200px] truncate">
-                        {e.event_data && Object.keys(e.event_data).length > 0 ? JSON.stringify(e.event_data) : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-gray-400 text-xs">
-                        {e.created_at ? new Date(e.created_at).toLocaleString("zh-CN") : ""}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )
-      )}
     </div>
   );
 }
