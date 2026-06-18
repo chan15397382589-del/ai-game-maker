@@ -14,10 +14,10 @@ export async function GET(req: NextRequest) {
     const grade = searchParams.get("grade");
     const classNum = searchParams.get("class_num");
 
-    // 先获取任务数据（不JOIN用户表，不取大字段，减少查询复杂度）
+    // 先获取任务数据
     let query = supabaseAdmin
       .from("student_tasks")
-      .select("id, user_id, task_id, game_name, game_rules, design_image, created_at, updated_at")
+      .select("id, user_id, task_id, game_name, game_rules, design_image, design_reason, created_at, updated_at")
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -39,11 +39,32 @@ export async function GET(req: NextRequest) {
       (users || []).forEach((u: any) => { userMap[u.id] = u; });
     }
 
-    // 组装结果
-    const tasksWithUsers = (tasks || []).map((t: any) => ({
-      ...t,
-      user: userMap[t.user_id] || null,
-    }));
+    // 组装结果，从 design_reason 中提取图片
+    const tasksWithUsers = (tasks || []).map((t: any) => {
+      let designImage = t.design_image || "";
+      let imageHistory: any[] = [];
+      let aiPrompt = "";
+
+      // 从 design_reason 中提取图片历史
+      try {
+        const info = JSON.parse(t.design_reason || "{}");
+        imageHistory = info.image_history || [];
+        aiPrompt = info.ai_prompt || "";
+        // 如果 design_image 为空，从 image_history 中取最新的图片
+        if (!designImage && imageHistory.length > 0) {
+          designImage = imageHistory[imageHistory.length - 1].url || "";
+        }
+      } catch {}
+
+      return {
+        ...t,
+        design_image: designImage,
+        image_history: imageHistory,
+        ai_prompt: aiPrompt,
+        design_reason: undefined, // 不返回原始 design_reason
+        user: userMap[t.user_id] || null,
+      };
+    });
 
     // 过滤年级班级
     let filtered = tasksWithUsers;
