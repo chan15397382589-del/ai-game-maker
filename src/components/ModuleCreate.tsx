@@ -749,9 +749,9 @@ export default function ModuleCreate({ userId }: Props) {
             </div>
           )}
           {messages.map((msg, i) => {
-            // 助手消息：提取纯文本，跳过空消息
-            const displayContent = msg.role === "assistant" ? extractTextOnly(msg.content) : msg.content;
-            if (msg.role === "assistant" && !displayContent) return null;
+            // 所有消息都提取纯文本，跳过空消息
+            const displayContent = extractTextOnly(msg.content);
+            if (!displayContent) return null;
 
             return (
               <div key={`${i}-${msg.content.length}`} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
