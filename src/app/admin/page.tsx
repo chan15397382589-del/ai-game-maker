@@ -1491,7 +1491,18 @@ function MessagesAudit() {
                   {selectedSession.reflection && <ReflectionCard reflectionJson={selectedSession.reflection} />}
                   {messages.map((msg, i) => {
                     const hasCode = msg.role === "assistant" && extractCode(msg.content);
-                    const displayContent = msg.content.replace(/```html[\s\S]*?```/g, "").replace(/```[\s\S]*?```/g, "").trim() || msg.content;
+                    // 剥离所有代码块，只显示文字
+                    const displayContent = msg.content
+                      .replace(/```html[\s\S]*?```/gi, "")
+                      .replace(/```[\s\S]*?```/g, "")
+                      .replace(/<!DOCTYPE[\s\S]*<\/html>/gi, "")
+                      .replace(/<html[\s\S]*<\/html>/gi, "")
+                      .replace(/<script[\s\S]*<\/script>/gi, "")
+                      .replace(/<canvas[\s\S]*<\/canvas>/gi, "")
+                      .replace(/<style[\s\S]*<\/style>/gi, "")
+                      .replace(/\n{3,}/g, "\n\n")
+                      .trim();
+                    if (!displayContent && !hasCode) return null;
                     return (
                     <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                       <div className={msg.role === "user" ? "chat-bubble-user max-w-[80%]" : "chat-bubble-ai max-w-[80%]"}>
