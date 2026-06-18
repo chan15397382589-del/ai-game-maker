@@ -63,12 +63,19 @@ export async function GET(req: NextRequest) {
       .eq("reviewer_id", user.id);
     const reviewedIds = (myReviews || []).map((r: any) => r.reviewee_id);
 
-    // 获取同年级有游戏的同学（从 conversations 表，排除自己）
-    const { data: classmates } = await db
+    // 获取同班有游戏的同学（从 conversations 表，排除自己）
+    const classQuery = db
       .from("users")
       .select("id, name, student_id")
       .eq("grade", myInfo.grade)
       .eq("role", "student");
+
+    // 如果有班级信息，只看同班同学
+    if (myInfo.class_num) {
+      classQuery.eq("class_num", myInfo.class_num);
+    }
+
+    const { data: classmates } = await classQuery;
 
     const classmateIds = (classmates || [])
       .map((c: any) => c.id)
