@@ -71,6 +71,7 @@ export default function ModuleCreate({ userId }: Props) {
   const [currentConvId, setCurrentConvId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sendingRef = useRef(false);
+  const lastInputMethod = useRef<"text" | "voice">("text");
 
   // 左侧栏状态
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -476,10 +477,12 @@ export default function ModuleCreate({ userId }: Props) {
         const convRes = await fetch("/api/student/sessions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ title: designData?.game_name || "新对话" }) });
         if (convRes.ok) { const conv = await convRes.json(); convId = conv.id; setCurrentConvId(conv.id); }
       }
+      const method = lastInputMethod.current;
+      lastInputMethod.current = "text"; // 重置
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ messages: newRaw.map((m) => ({ role: m.role, content: m.content })), currentCode: htmlCode || undefined, sessionId: convId, inputMethod: "text" }),
+        body: JSON.stringify({ messages: newRaw.map((m) => ({ role: m.role, content: m.content })), currentCode: htmlCode || undefined, sessionId: convId, inputMethod: method }),
         signal: AbortSignal.timeout(120000), // 2分钟超时
       });
       if (!res.ok) {
@@ -795,7 +798,7 @@ export default function ModuleCreate({ userId }: Props) {
         </div>
         <div className="p-4 border-t border-gray-100 bg-gray-50">
           <div className="flex gap-2">
-            <VoiceButton onResult={(text) => setInput(text)} />
+            <VoiceButton onResult={(text) => { setInput(text); lastInputMethod.current = "voice"; }} />
             <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} placeholder="和小智老师聊聊你想做的游戏..." className="input-field flex-1" disabled={loading} />
             <button onClick={handleSend} disabled={loading || !input.trim()} className="btn-primary disabled:opacity-50">发送</button>
           </div>
