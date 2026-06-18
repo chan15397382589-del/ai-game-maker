@@ -29,12 +29,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json([]);
     }
 
-    // 获取同年级学生
-    const { data: classmates } = await db
+    // 获取同班学生
+    const classQuery = db
       .from("users")
       .select("id, name, student_id, grade, class_num")
       .eq("grade", myInfo.grade)
       .eq("role", "student");
+
+    if (myInfo.class_num) {
+      classQuery.eq("class_num", myInfo.class_num);
+    }
+
+    const { data: classmates } = await classQuery;
 
     const classmateMap: Record<string, any> = {};
     const classmateIds = (classmates || []).map((c: any) => {
