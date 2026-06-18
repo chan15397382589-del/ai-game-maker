@@ -1212,7 +1212,8 @@ function MessagesAudit() {
       setSelectedSession(session);
       const res = await fetch(`/api/admin/messages?user_id=${encodeURIComponent(selectedStudent)}`, { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
-        const allMessages = await res.json();
+        const result = await res.json();
+        const allMessages = Array.isArray(result) ? result : (result.data || []);
         const filtered = allMessages.filter((m: any) => {
           const t = new Date(m.created_at).getTime();
           return t >= new Date(session.start_time).getTime() && t <= new Date(session.end_time).getTime();
