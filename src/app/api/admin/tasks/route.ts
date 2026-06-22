@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/lib/deepseek";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
 
 // GET - 获取学生的任务数据（支持年级/班级筛选）
+// ?action=counts → 返回每个 task_id 的记录数
+// ?task_id=xxx → 返回该任务的具体数据
 export async function GET(req: NextRequest) {
   try {
     const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
@@ -10,6 +12,7 @@ export async function GET(req: NextRequest) {
     if (adminCheck instanceof NextResponse) return adminCheck;
 
     const { searchParams } = new URL(req.url);
+    const action = searchParams.get("action");
     const taskId = searchParams.get("task_id");
     const grade = searchParams.get("grade");
     const classNum = searchParams.get("class_num");
@@ -26,7 +29,28 @@ export async function GET(req: NextRequest) {
     const filteredUserIds = (filteredUsers || []).map((u: any) => u.id);
 
     if (filteredUserIds.length === 0) {
-      return NextResponse.json([]);
+      return action === "counts" ? NextResponse.json({}) : NextResponse.json([]);
+    }
+
+    // action=counts: 返回每个 task_id 的记录数
+    if (action === "counts") {
+      const { data: allTasks } = await supabaseAdmin
+        .from("student_tasks")
+        .select("task_id")
+        .in("user_id", filteredUserIds)
+        .limit(5000);
+
+      const counts: Record<string, number> = {};
+      (allTasks || []).forEach((t: any) => {
+        counts[t.task_id] = (counts[t.task_id] || 0) + 1;
+      });
+
+      // 同时统计小组消息数
+      const { count: groupMsgCount } = await supabaseAdmin
+        .from("group_messages")
+        .select("id", { count: "exact", head: true });
+
+      return NextResponse.json({ taskCounts: counts, groupMessageCount: groupMsgCount || 0 });
     }
 
     // 获取任务数据（只查询符合条件的学生）

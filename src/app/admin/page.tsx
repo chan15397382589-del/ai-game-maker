@@ -2470,285 +2470,389 @@ function DataTrackingView({ grade, classNum }: { grade?: string; classNum?: stri
 }
 
 // ============================================================
-// 任务数据查看
+// 任务数据查看（并列标签，只显示有数据的）
 // ============================================================
+
+// 标签定义
+const TASK_TABS = [
+  { key: "survey", label: "前测", taskIds: ["survey"] },
+  { key: "1-1", label: "个人设计", taskIds: ["1-1"] },
+  { key: "1-2", label: "小组讨论任务", taskIds: ["1-2"] },
+  { key: "2-1", label: "AI协作", taskIds: ["2-1"] },
+  { key: "2-2", label: "修改迭代", taskIds: ["2-2"] },
+  { key: "3-1", label: "作品展示", taskIds: ["3-1"] },
+  { key: "3-2", label: "同伴互评", taskIds: ["3-2"] },
+  { key: "designs", label: "设计图", taskIds: [] },
+  { key: "discussions", label: "小组讨论", taskIds: [] },
+] as const;
+
+type TabKey = typeof TASK_TABS[number]["key"];
+
 function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string }) {
+  const [activeTab, setActiveTab] = useState<TabKey>("survey");
   const [tasks, setTasks] = useState<any[]>([]);
   const [groupMessages, setGroupMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTaskTab, setActiveTaskTab] = useState<"designs" | "discussions">("designs");
-  const [selectedTaskId, setSelectedTaskId] = useState("1-1");
+  const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
+  const [countsLoaded, setCountsLoaded] = useState(false);
 
-  const fetchTasks = useCallback(async () => {
-    setLoading(true);
-    try {
-      const token = await getAuthToken();
-      if (!token) return;
-      const params = new URLSearchParams({ task_id: selectedTaskId });
-      if (grade) params.set("grade", grade);
-      if (classNum) params.set("class_num", classNum);
-      const res = await fetch(`/api/admin/tasks?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setTasks(await res.json());
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
-  }, [selectedTaskId, grade, classNum]);
+  // 加载标签计数（哪些标签有数据）
+  useEffect(() => {
+    const fetchCounts = async () => {
+      try {
+        const token = await getAuthToken();
+        if (!token) return;
+        const params = new URLSearchParams({ action: "counts" });
+        if (grade) params.set("grade", grade);
+        if (classNum) params.set("class_num", classNum);
+        const res = await fetch(`/api/admin/tasks?${params}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const counts: Record<string, number> = {};
+          const tc = (data.taskCounts || {}) as Record<string, number>;
+          // 任务计数
+          for (const [taskId, count] of Object.entries(tc)) {
+            counts[taskId] = count as number;
+          }
+          // 设计图：只要有任务数据就显示
+          counts["designs"] = Object.values(tc).reduce((a, b) => a + b, 0) > 0 ? 1 : 0;
+          // 小组讨论
+          counts["discussions"] = data.groupMessageCount || 0;
+          setTabCounts(counts);
+          // 自动选中第一个有数据的标签
+          const firstActive = TASK_TABS.find(t => (counts[t.key] || 0) > 0);
+          if (firstActive) setActiveTab(firstActive.key);
+        }
+      } catch (err) { console.error(err); }
+      finally { setCountsLoaded(true); }
+    };
+    fetchCounts();
+  }, [grade, classNum]);
 
-  const fetchGroupMessages = useCallback(async () => {
-    try {
-      const token = await getAuthToken();
-      if (!token) return;
-      const res = await fetch("/api/admin/group-messages", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setGroupMessages(await res.json());
-    } catch (err) { console.error(err); }
-  }, []);
+  // 加载当前标签的数据
+  useEffect(() => {
+    if (!countsLoaded) return;
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const token = await getAuthToken();
+        if (!token) return;
 
-  useEffect(() => { fetchTasks(); fetchGroupMessages(); }, [fetchTasks, fetchGroupMessages]);
+        if (activeTab === "discussions") {
+          const params = new URLSearchParams();
+          if (grade) params.set("grade", grade);
+          if (classNum) params.set("class_num", classNum);
+          const res = await fetch(`/api/admin/group-messages?${params}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) setGroupMessages(await res.json());
+        } else if (activeTab === "designs") {
+          // 设计图：获取所有有图片的任务
+          const params = new URLSearchParams();
+          if (grade) params.set("grade", grade);
+          if (classNum) params.set("class_num", classNum);
+          const res = await fetch(`/api/admin/tasks?${params}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const all = await res.json();
+            setTasks(all.filter((t: any) => t.design_image));
+          }
+        } else {
+          const params = new URLSearchParams({ task_id: activeTab });
+          if (grade) params.set("grade", grade);
+          if (classNum) params.set("class_num", classNum);
+          const res = await fetch(`/api/admin/tasks?${params}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) setTasks(await res.json());
+        }
+      } catch (err) { console.error(err); }
+      finally { setLoading(false); }
+    };
+    fetchData();
+  }, [activeTab, countsLoaded, grade, classNum]);
 
-  // 导出设计图到Word
-  const exportDesignsToWord = async () => {
+  // 只显示有数据的标签
+  const visibleTabs = TASK_TABS.filter(t => (tabCounts[t.key] || 0) > 0);
+
+  // 导出 Word
+  const exportWord = () => {
+    if (tasks.length === 0) { alert("没有数据"); return; }
     const designs = tasks.filter((t: any) => t.design_image);
-    if (designs.length === 0) { alert("没有设计图数据"); return; }
-
-    const docHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>学生设计图</title>
+    const docHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>数据导出</title>
       <style>body{font-family:Arial;padding:20px}h1{text-align:center}.student{margin:30px 0;padding:20px;border:1px solid #ddd;border-radius:8px}
       h2{color:#333}img{max-width:400px;border:1px solid #ccc;border-radius:8px;margin:10px 0}
-      .rules{background:#f5f5f5;padding:15px;border-radius:8px;margin:10px 0}
-      .rule{margin:5px 0}</style></head><body>
-      <h1>学生游戏设计图汇总</h1>
-      ${designs.map((t: any) => `
+      .rules{background:#f5f5f5;padding:15px;border-radius:8px;margin:10px 0}</style></head><body>
+      <h1>${TASK_TABS.find(t => t.key === activeTab)?.label || "数据导出"}</h1>
+      ${designs.length > 0 ? designs.map((t: any) => `
         <div class="student">
           <h2>${t.user?.name || '未知'} (${t.user?.student_id || ''})</h2>
           <p>游戏名称：${t.game_name || '未命名'}</p>
           <img src="${t.design_image}" alt="设计图" />
-          <div class="rules">
-            <strong>游戏规则：</strong>
-            ${(t.game_rules || []).map((r: string, i: number) => `<p class="rule">规则${i + 1}：如果${r}，就____________</p>`).join('')}
-          </div>
-          <p><strong>设计理由：</strong>${t.design_reason || '未填写'}</p>
-        </div>
-      `).join('')}
+          <div class="rules"><strong>游戏规则：</strong>${(t.game_rules || []).map((r: string) => `<p>• 如果${r}</p>`).join('')}</div>
+        </div>`).join('') : tasks.map((t: any) => `
+        <div class="student">
+          <h2>${t.user?.name || '未知'} (${t.user?.student_id || ''})</h2>
+          <p>任务：${t.task_id}</p>
+        </div>`).join('')}
     </body></html>`;
-
     const blob = new Blob([docHtml], { type: "application/msword" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `学生设计图_${selectedTaskId}_${new Date().toISOString().slice(0, 10)}.doc`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const a = document.createElement("a"); a.href = url;
+    a.download = `${TASK_TABS.find(t => t.key === activeTab)?.label || "数据"}_${new Date().toISOString().slice(0, 10)}.doc`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
-  // 导出小组聊天记录
-  const exportGroupMessages = () => {
+  // 导出聊天记录
+  const exportMessages = () => {
     if (groupMessages.length === 0) { alert("没有聊天记录"); return; }
-
-    const csvContent = [
+    const csv = [
       ["小组", "学生", "学号", "类型", "内容", "语音转文字", "时间"].join(","),
       ...groupMessages.map((m: any) => [
-        m.group?.name || m.group_id,
-        m.sender?.name || "",
-        m.sender?.student_id || "",
+        m.group?.name || m.group_id, m.sender?.name || "", m.sender?.student_id || "",
         m.message_type === "voice" ? "语音" : "文字",
         `"${(m.content || "").replace(/"/g, '""')}"`,
         `"${(m.voice_transcript || "").replace(/"/g, '""')}"`,
         new Date(m.created_at).toLocaleString("zh-CN"),
       ].join(","))
     ].join("\n");
-
-    const blob = new Blob(["﻿" + csvContent], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
+    const a = document.createElement("a"); a.href = url;
     a.download = `小组聊天记录_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
+  if (!countsLoaded) {
+    return <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">
+      <p className="animate-pulse">加载中...</p>
+    </div>;
+  }
+
+  if (visibleTabs.length === 0) {
+    return <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">
+      暂无任务数据
+    </div>;
+  }
+
   return (
     <div className="bg-white rounded-2xl shadow-md p-6">
-      <div className="flex items-center justify-end mb-6">
-        <div className="flex gap-2">
-          <select
-            value={selectedTaskId}
-            onChange={(e) => setSelectedTaskId(e.target.value)}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+      {/* 并列标签 */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {visibleTabs.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              activeTab === tab.key
+                ? "bg-indigo-500 text-white shadow-md"
+                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            }`}
           >
-            <option value="survey">前测</option>
-            <option value="1-1">1-1 个人设计</option>
-            <option value="1-2">1-2 小组讨论</option>
-            <option value="2-1">2-1 AI协作</option>
-            <option value="2-2">2-2 修改迭代</option>
-            <option value="3-1">3-1 作品展示</option>
-            <option value="3-2">3-2 同伴互评</option>
-          </select>
-          <button
-            onClick={exportDesignsToWord}
-            className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition"
-          >  导出Word</button>
-          <button
-            onClick={exportGroupMessages}
-            className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm font-medium transition"
-          >  导出聊天记录</button>
-        </div>
+            {tab.label}
+            <span className="ml-1 text-xs opacity-70">({tabCounts[tab.key] || 0})</span>
+          </button>
+        ))}
+        <div className="flex-1" />
+        {activeTab !== "discussions" && (
+          <button onClick={exportWord} className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-medium transition">
+              导出
+          </button>
+        )}
+        {activeTab === "discussions" && (
+          <button onClick={exportMessages} className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition">
+              导出聊天
+          </button>
+        )}
       </div>
 
-      {/* 标签切换 */}
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={() => setActiveTaskTab("designs")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeTaskTab === "designs" ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-600"}`}
-        >  设计图</button>
-        <button
-          onClick={() => setActiveTaskTab("discussions")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${activeTaskTab === "discussions" ? "bg-indigo-500 text-white" : "bg-gray-100 text-gray-600"}`}
-        >  小组讨论</button>
-      </div>
-
+      {/* 内容区 */}
       {loading ? (
         <div className="flex items-center justify-center h-40 text-gray-400">
           <span className="animate-pulse">加载中...</span>
         </div>
-      ) : selectedTaskId === "survey" ? (
-        /* 基础情况调查数据 */
-        <div className="overflow-x-auto">
-          {tasks.length === 0 ? (
-            <div className="text-center py-12 text-gray-400">暂无调查数据</div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">姓名</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">学号</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">班级</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">玩过游戏吗</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">玩过哪些游戏</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">接触过编程吗</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">设计过游戏吗</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">好游戏最重要的是</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tasks.map((task: any) => {
-                  let answers: any = {};
-                  try { answers = JSON.parse(task.design_reason || "{}"); } catch (err) { console.error(err); }
-                  return (
-                    <tr key={task.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium">{task.user?.name || "未知"}</td>
-                      <td className="px-4 py-3 text-gray-600 font-mono text-xs">{task.user?.student_id}</td>
-                      <td className="px-4 py-3 text-gray-500">{task.user?.grade}年级{task.user?.class_num}班</td>
-                      <td className="px-4 py-3 text-gray-600">{answers.q1 || "-"}</td>
-                      <td className="px-4 py-3 text-gray-600">{answers.q2 || "-"}</td>
-                      <td className="px-4 py-3 text-gray-600">{answers.q3 || "-"}</td>
-                      <td className="px-4 py-3 text-gray-600">{answers.q4 || "-"}</td>
-                      <td className="px-4 py-3 text-gray-600">{answers.q5 || "-"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      ) : activeTaskTab === "designs" ? (
-        /* 设计图列表 */
-        <div className="grid grid-cols-2 gap-4">
-          {tasks.length === 0 ? (
-            <div className="col-span-2 text-center py-12 text-gray-400">暂无数据</div>
-          ) : (
-            tasks.map((task: any) => {
-              let designInfo: any = {};
-              try { designInfo = JSON.parse(task.design_reason || "{}"); } catch { designInfo = { game_type: task.design_reason }; }
-              return (
-                <div key={task.id} className="border border-gray-200 rounded-xl p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-sm font-bold text-gray-800">{task.user?.name || "未知"}</span>
-                    <span className="text-xs text-gray-400">{task.user?.student_id}</span>
-                    <span className="text-xs text-gray-400">{task.user?.grade}年级{task.user?.class_num}班</span>
-                  </div>
-                  {task.design_image ? (
-                    <img
-                      src={task.design_image}
-                      alt="设计图"
-                      className="w-full max-w-[300px] border border-gray-200 rounded-lg mb-3"
-                      style={{ aspectRatio: "16/9", objectFit: "contain" }}
-                      onError={(e) => {
-                        // 图片加载失败时替换为占位
-                        const parent = (e.target as HTMLImageElement).parentElement;
-                        if (parent) {
-                          (e.target as HTMLImageElement).style.display = "none";
-                          const placeholder = document.createElement("div");
-                          placeholder.className = "w-full max-w-[300px] h-[170px] bg-gray-50 rounded-lg flex items-center justify-center mb-3";
-                          placeholder.innerHTML = '<span class="text-gray-400 text-sm">图片已过期</span>';
-                          parent.insertBefore(placeholder, (e.target as HTMLImageElement).nextSibling);
-                        }
-                      }}
-                    />
-                  ) : (
-                    <div className="w-full max-w-[300px] h-[170px] bg-gray-50 rounded-lg flex items-center justify-center mb-3">
-                      <span className="text-gray-300">无设计图</span>
-                    </div>
-                  )}
-                  {task.game_name && <p className="text-sm"><strong>游戏名：</strong>{task.game_name}</p>}
-                  {designInfo.ai_prompt && <p className="text-xs text-purple-600 mt-1"><strong>AI描述：</strong>{designInfo.ai_prompt}</p>}
-                  {task.game_rules && task.game_rules.length > 0 && (
-                    <div className="mt-2">
-                      <p className="text-xs font-medium text-gray-500">游戏规则：</p>
-                      {task.game_rules.map((rule: string, i: number) => (
-                        <p key={i} className="text-xs text-gray-600">• 如果{rule}</p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
+      ) : activeTab === "survey" ? (
+        <SurveyTable tasks={tasks} />
+      ) : activeTab === "designs" ? (
+        <DesignCards tasks={tasks} />
+      ) : activeTab === "discussions" ? (
+        <DiscussionList messages={groupMessages} />
       ) : (
-        /* 小组讨论记录 */
-        <div className="space-y-4">
-          {groupMessages.length === 0 ? (
-            <div className="text-center py-12 text-gray-400">暂无小组讨论记录</div>
-          ) : (
-            Object.entries(
-              groupMessages.reduce((acc: any, msg: any) => {
-                const gid = msg.group_id;
-                if (!acc[gid]) acc[gid] = [];
-                acc[gid].push(msg);
-                return acc;
-              }, {})
-            ).map(([groupId, messages]: [string, any]) => (
-              <div key={groupId} className="border border-gray-200 rounded-xl p-4">
-                <h3 className="text-sm font-bold text-gray-700 mb-3">  {messages[0]?.group?.name || groupId}</h3>
-                <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                  {messages.map((msg: any) => (
-                    <div key={msg.id} className="flex items-start gap-2">
-                      <span className="text-xs font-medium text-indigo-600 w-16">{msg.sender?.name}</span>
-                      <div className="flex-1">
-                        {msg.message_type === "voice" ? (
-                          <div className="bg-amber-50 rounded-lg px-3 py-2">
-                            <p className="text-xs text-amber-700">🎤 语音消息</p>
-                            <p className="text-sm text-gray-700">{msg.voice_transcript || msg.content}</p>
-                          </div>
-                        ) : (
-                          <p className="text-sm text-gray-700">{msg.content}</p>
-                        )}
-                      </div>
-                      <span className="text-xs text-gray-400">{new Date(msg.created_at).toLocaleTimeString("zh-CN")}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))
+        <TaskCards tasks={tasks} />
+      )}
+    </div>
+  );
+}
+
+// 前测表格
+function SurveyTable({ tasks }: { tasks: any[] }) {
+  if (tasks.length === 0) return <div className="text-center py-12 text-gray-400">暂无前测数据</div>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">姓名</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">学号</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">班级</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">玩过游戏吗</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">玩过哪些游戏</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">接触过编程吗</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">设计过游戏吗</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">好游戏最重要</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tasks.map((task: any) => {
+            let answers: any = {};
+            try { answers = JSON.parse(task.design_reason || "{}"); } catch {}
+            return (
+              <tr key={task.id} className="border-b border-gray-100 hover:bg-gray-50">
+                <td className="px-4 py-3 font-medium">{task.user?.name || "未知"}</td>
+                <td className="px-4 py-3 text-gray-600 font-mono text-xs">{task.user?.student_id}</td>
+                <td className="px-4 py-3 text-gray-500">{task.user?.grade}年级{task.user?.class_num}班</td>
+                <td className="px-4 py-3 text-gray-600">{answers.q1 || "—"}</td>
+                <td className="px-4 py-3 text-gray-600">{answers.q2 || "—"}</td>
+                <td className="px-4 py-3 text-gray-600">{answers.q3 || "—"}</td>
+                <td className="px-4 py-3 text-gray-600">{answers.q4 || "—"}</td>
+                <td className="px-4 py-3 text-gray-600">{answers.q5 || "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// 设计图卡片
+function DesignCards({ tasks }: { tasks: any[] }) {
+  if (tasks.length === 0) return <div className="text-center py-12 text-gray-400">暂无设计图数据</div>;
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      {tasks.map((task: any) => (
+        <div key={task.id} className="border border-gray-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm font-bold text-gray-800">{task.user?.name || "未知"}</span>
+            <span className="text-xs text-gray-400">{task.user?.student_id}</span>
+            <span className="text-xs text-gray-400">{task.user?.grade}年级{task.user?.class_num}班</span>
+          </div>
+          <img
+            src={task.design_image}
+            alt="设计图"
+            className="w-full max-w-[300px] border border-gray-200 rounded-lg mb-3"
+            style={{ aspectRatio: "16/9", objectFit: "contain" }}
+            onError={(e) => {
+              const el = e.target as HTMLImageElement;
+              el.style.display = "none";
+              const p = document.createElement("div");
+              p.className = "w-full max-w-[300px] h-[170px] bg-gray-50 rounded-lg flex items-center justify-center mb-3";
+              p.innerHTML = '<span class="text-gray-400 text-sm">图片已过期</span>';
+              el.parentElement?.insertBefore(p, el.nextSibling);
+            }}
+          />
+          {task.game_name && <p className="text-sm"><strong>游戏名：</strong>{task.game_name}</p>}
+          {task.game_rules?.length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs font-medium text-gray-500">游戏规则：</p>
+              {task.game_rules.map((rule: string, i: number) => (
+                <p key={i} className="text-xs text-gray-600">• 如果{rule}</p>
+              ))}
+            </div>
           )}
         </div>
-      )}
+      ))}
+    </div>
+  );
+}
+
+// 任务卡片（个人设计、AI协作等通用）
+function TaskCards({ tasks }: { tasks: any[] }) {
+  if (tasks.length === 0) return <div className="text-center py-12 text-gray-400">暂无数据</div>;
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      {tasks.map((task: any) => {
+        let designInfo: any = {};
+        try { designInfo = JSON.parse(task.design_reason || "{}"); } catch {}
+        return (
+          <div key={task.id} className="border border-gray-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-sm font-bold text-gray-800">{task.user?.name || "未知"}</span>
+              <span className="text-xs text-gray-400">{task.user?.student_id}</span>
+              <span className="text-xs text-gray-400">{task.user?.grade}年级{task.user?.class_num}班</span>
+            </div>
+            {task.design_image && (
+              <img
+                src={task.design_image}
+                alt="设计图"
+                className="w-full max-w-[300px] border border-gray-200 rounded-lg mb-3"
+                style={{ aspectRatio: "16/9", objectFit: "contain" }}
+                onError={(e) => {
+                  const el = e.target as HTMLImageElement;
+                  el.style.display = "none";
+                  const p = document.createElement("div");
+                  p.className = "w-full max-w-[300px] h-[170px] bg-gray-50 rounded-lg flex items-center justify-center mb-3";
+                  p.innerHTML = '<span class="text-gray-400 text-sm">图片已过期</span>';
+                  el.parentElement?.insertBefore(p, el.nextSibling);
+                }}
+              />
+            )}
+            {task.game_name && <p className="text-sm"><strong>游戏名：</strong>{task.game_name}</p>}
+            {designInfo.ai_prompt && <p className="text-xs text-purple-600 mt-1"><strong>AI描述：</strong>{designInfo.ai_prompt}</p>}
+            {task.game_rules?.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs font-medium text-gray-500">游戏规则：</p>
+                {task.game_rules.map((rule: string, i: number) => (
+                  <p key={i} className="text-xs text-gray-600">• 如果{rule}</p>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// 小组讨论列表
+function DiscussionList({ messages }: { messages: any[] }) {
+  if (messages.length === 0) return <div className="text-center py-12 text-gray-400">暂无小组讨论记录</div>;
+  const grouped = messages.reduce((acc: any, msg: any) => {
+    const gid = msg.group_id;
+    if (!acc[gid]) acc[gid] = [];
+    acc[gid].push(msg);
+    return acc;
+  }, {});
+  return (
+    <div className="space-y-4">
+      {Object.entries(grouped).map(([groupId, msgs]: [string, any]) => (
+        <div key={groupId} className="border border-gray-200 rounded-xl p-4">
+          <h3 className="text-sm font-bold text-gray-700 mb-3">  {msgs[0]?.group?.name || groupId}</h3>
+          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+            {msgs.map((msg: any) => (
+              <div key={msg.id} className="flex items-start gap-2">
+                <span className="text-xs font-medium text-indigo-600 w-16">{msg.sender?.name}</span>
+                <div className="flex-1">
+                  {msg.message_type === "voice" ? (
+                    <div className="bg-amber-50 rounded-lg px-3 py-2">
+                      <p className="text-xs text-amber-700">🎤 语音消息</p>
+                      <p className="text-sm text-gray-700">{msg.voice_transcript || msg.content}</p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-700">{msg.content}</p>
+                  )}
+                </div>
+                <span className="text-xs text-gray-400">{new Date(msg.created_at).toLocaleTimeString("zh-CN")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

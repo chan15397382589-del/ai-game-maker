@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/deepseek";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
 
-// GET - 获取所有小组消息
+// GET - 获取小组消息（支持 grade/class_num 筛选）
 export async function GET(req: NextRequest) {
   try {
     const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
@@ -11,8 +11,10 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const groupId = searchParams.get("group_id");
+    const grade = searchParams.get("grade");
+    const classNum = searchParams.get("class_num");
 
-    // 获取消息（不使用JOIN，避免外键关系问题）
+    // 获取消息
     let query = supabaseAdmin
       .from("group_messages")
       .select("id, group_id, user_id, content, message_type, voice_transcript, created_at")
@@ -45,19 +47,27 @@ export async function GET(req: NextRequest) {
     const groupIds = [...new Set(messages.map((m: any) => m.group_id).filter(Boolean))];
     let groupMap: Record<string, any> = {};
     if (groupIds.length > 0) {
-      const { data: groups } = await supabaseAdmin
+      let groupQuery = supabaseAdmin
         .from("groups")
         .select("id, name, grade, class_num")
         .in("id", groupIds);
+      if (grade) groupQuery = groupQuery.eq("grade", parseInt(grade));
+      if (classNum) groupQuery = groupQuery.eq("class_num", parseInt(classNum));
+      const { data: groups } = await groupQuery;
       (groups || []).forEach((g: any) => { groupMap[g.id] = g; });
     }
 
+    // 如果有 grade/class 筛选，只保留匹配小组的消息
+    const filteredGroupIds = grade || classNum ? new Set(Object.keys(groupMap)) : null;
+
     // 组装结果
-    const result = messages.map((m: any) => ({
-      ...m,
-      sender: userMap[m.user_id] || null,
-      group: groupMap[m.group_id] || null,
-    }));
+    const result = messages
+      .filter((m: any) => !filteredGroupIds || filteredGroupIds.has(m.group_id))
+      .map((m: any) => ({
+        ...m,
+        sender: userMap[m.user_id] || null,
+        group: groupMap[m.group_id] || null,
+      }));
 
     return NextResponse.json(result);
   } catch (err: any) {
