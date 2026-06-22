@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/deepseek";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
 
-// GET - 获取所有学生的任务数据
+// GET - 获取学生的任务数据（支持年级/班级筛选）
 export async function GET(req: NextRequest) {
   try {
     const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
@@ -14,10 +14,26 @@ export async function GET(req: NextRequest) {
     const grade = searchParams.get("grade");
     const classNum = searchParams.get("class_num");
 
-    // 先获取任务数据
+    // 先获取符合年级/班级条件的学生ID
+    let userQuery = supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("role", "student");
+    if (grade) userQuery = userQuery.eq("grade", parseInt(grade));
+    if (classNum) userQuery = userQuery.eq("class_num", parseInt(classNum));
+
+    const { data: filteredUsers } = await userQuery.limit(500);
+    const filteredUserIds = (filteredUsers || []).map((u: any) => u.id);
+
+    if (filteredUserIds.length === 0) {
+      return NextResponse.json([]);
+    }
+
+    // 获取任务数据（只查询符合条件的学生）
     let query = supabaseAdmin
       .from("student_tasks")
       .select("id, user_id, task_id, game_name, game_rules, design_image, design_reason, created_at, updated_at")
+      .in("user_id", filteredUserIds)
       .order("created_at", { ascending: false })
       .limit(200);
 
@@ -45,12 +61,10 @@ export async function GET(req: NextRequest) {
       let imageHistory: any[] = [];
       let aiPrompt = "";
 
-      // 从 design_reason 中提取图片历史
       try {
         const info = JSON.parse(t.design_reason || "{}");
         imageHistory = info.image_history || [];
         aiPrompt = info.ai_prompt || "";
-        // 如果 design_image 为空，从 image_history 中取最新的图片
         if (!designImage && imageHistory.length > 0) {
           designImage = imageHistory[imageHistory.length - 1].url || "";
         }
@@ -61,21 +75,12 @@ export async function GET(req: NextRequest) {
         design_image: designImage,
         image_history: imageHistory,
         ai_prompt: aiPrompt,
-        design_reason: undefined, // 不返回原始 design_reason
+        design_reason: undefined,
         user: userMap[t.user_id] || null,
       };
     });
 
-    // 过滤年级班级
-    let filtered = tasksWithUsers;
-    if (grade) {
-      filtered = filtered.filter((t: any) => t.user?.grade === parseInt(grade));
-    }
-    if (classNum) {
-      filtered = filtered.filter((t: any) => t.user?.class_num === parseInt(classNum));
-    }
-
-    return NextResponse.json(filtered);
+    return NextResponse.json(tasksWithUsers);
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

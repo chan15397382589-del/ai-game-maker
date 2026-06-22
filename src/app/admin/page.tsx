@@ -2120,16 +2120,20 @@ function ReflectionCard({ reflectionJson }: { reflectionJson: string }) {
 // ============================================================
 // 学生前测查看
 // ============================================================
-function PriorKnowledgeView() {
+function PriorKnowledgeView({ grade, classNum }: { grade?: string; classNum?: string }) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true);
       try {
         const token = await getAuthToken();
         if (!token) return;
-        const res = await fetch("/api/admin/prior-knowledge", {
+        const params = new URLSearchParams();
+        if (grade) params.set("grade", grade);
+        if (classNum) params.set("class_num", classNum);
+        const res = await fetch(`/api/admin/prior-knowledge?${params}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) setData(await res.json());
@@ -2140,7 +2144,7 @@ function PriorKnowledgeView() {
       }
     };
     fetchData();
-  }, []);
+  }, [grade, classNum]);
 
   const answeredCount = data.filter((d) => !d.skipped).length;
   const skippedCount = data.filter((d) => d.skipped).length;
@@ -2266,36 +2270,72 @@ function PriorKnowledgeView() {
 // ============================================================
 function DataOverview() {
   const [activeSubTab, setActiveSubTab] = useState<"prior" | "tracking" | "tasks">("tracking");
+  const [selectedGrade, setSelectedGrade] = useState("");
+  const [selectedClass, setSelectedClass] = useState("");
 
   return (
     <div>
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={() => setActiveSubTab("prior")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-            activeSubTab === "prior" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-gray-100"
-          }`}
-        >
-          📝 学生前测
-        </button>
-        <button
-          onClick={() => setActiveSubTab("tracking")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-            activeSubTab === "tracking" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-gray-100"
-          }`}
-        >
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setActiveSubTab("prior")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              activeSubTab === "prior" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-gray-100"
+            }`}
+          >
+            📝 学生前测
+          </button>
+          <button
+            onClick={() => setActiveSubTab("tracking")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              activeSubTab === "tracking" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-gray-100"
+            }`}
+          >
             活动数据
-        </button>
-        <button
-          onClick={() => setActiveSubTab("tasks")}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-            activeSubTab === "tasks" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-gray-100"
-          }`}
-        >
+          </button>
+          <button
+            onClick={() => setActiveSubTab("tasks")}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              activeSubTab === "tasks" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-gray-100"
+            }`}
+          >
             任务数据
-        </button>
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={selectedGrade}
+            onChange={(e) => { setSelectedGrade(e.target.value); setSelectedClass(""); }}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+          >
+            <option value="">全部年级</option>
+            <option value="3">三年级</option>
+            <option value="4">四年级</option>
+            <option value="5">五年级</option>
+            <option value="6">六年级</option>
+          </select>
+          <select
+            value={selectedClass}
+            onChange={(e) => setSelectedClass(e.target.value)}
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
+          >
+            <option value="">全部班级</option>
+            <option value="1">1班</option>
+            <option value="2">2班</option>
+            <option value="3">3班</option>
+            <option value="4">4班</option>
+            <option value="5">5班</option>
+            <option value="6">6班</option>
+          </select>
+        </div>
       </div>
-      {activeSubTab === "prior" ? <PriorKnowledgeView /> : activeSubTab === "tracking" ? <DataTrackingView /> : <TasksDataView />}
+      {activeSubTab === "prior" ? (
+        <PriorKnowledgeView grade={selectedGrade} classNum={selectedClass} />
+      ) : activeSubTab === "tracking" ? (
+        <DataTrackingView grade={selectedGrade} classNum={selectedClass} />
+      ) : (
+        <TasksDataView grade={selectedGrade} classNum={selectedClass} />
+      )}
     </div>
   );
 }
@@ -2304,17 +2344,21 @@ function DataOverview() {
 // 数据采集视图
 // ============================================================
 
-function DataTrackingView() {
+function DataTrackingView({ grade, classNum }: { grade?: string; classNum?: string }) {
   const [students, setStudents] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true);
       try {
         const token = await getAuthToken();
         if (!token) return;
-        const res = await fetch("/api/admin/tracking", {
+        const params = new URLSearchParams();
+        if (grade) params.set("grade", grade);
+        if (classNum) params.set("class_num", classNum);
+        const res = await fetch(`/api/admin/tracking?${params}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
@@ -2329,7 +2373,7 @@ function DataTrackingView() {
       }
     };
     fetchData();
-  }, []);
+  }, [grade, classNum]);
 
   if (loading) {
     return <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">
@@ -2428,30 +2472,28 @@ function DataTrackingView() {
 // ============================================================
 // 任务数据查看
 // ============================================================
-function TasksDataView() {
+function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string }) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [groupMessages, setGroupMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTaskTab, setActiveTaskTab] = useState<"designs" | "discussions">("designs");
   const [selectedTaskId, setSelectedTaskId] = useState("1-1");
-  const [selectedGrade, setSelectedGrade] = useState<string>("");
-  const [selectedClass, setSelectedClass] = useState<string>("");
 
   const fetchTasks = useCallback(async () => {
     setLoading(true);
     try {
       const token = await getAuthToken();
       if (!token) return;
-      let url = `/api/admin/tasks?task_id=${selectedTaskId}`;
-      if (selectedGrade) url += `&grade=${selectedGrade}`;
-      if (selectedClass) url += `&class_num=${selectedClass}`;
-      const res = await fetch(url, {
+      const params = new URLSearchParams({ task_id: selectedTaskId });
+      if (grade) params.set("grade", grade);
+      if (classNum) params.set("class_num", classNum);
+      const res = await fetch(`/api/admin/tasks?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setTasks(await res.json());
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
-  }, [selectedTaskId, selectedGrade, selectedClass]);
+  }, [selectedTaskId, grade, classNum]);
 
   const fetchGroupMessages = useCallback(async () => {
     try {
@@ -2534,30 +2576,6 @@ function TasksDataView() {
     <div className="bg-white rounded-2xl shadow-md p-6">
       <div className="flex items-center justify-end mb-6">
         <div className="flex gap-2">
-          <select
-            value={selectedGrade}
-            onChange={(e) => { setSelectedGrade(e.target.value); setSelectedClass(""); }}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
-          >
-            <option value="">全部年级</option>
-            <option value="3">三年级</option>
-            <option value="4">四年级</option>
-            <option value="5">五年级</option>
-            <option value="6">六年级</option>
-          </select>
-          <select
-            value={selectedClass}
-            onChange={(e) => setSelectedClass(e.target.value)}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
-          >
-            <option value="">全部班级</option>
-            <option value="1">1班</option>
-            <option value="2">2班</option>
-            <option value="3">3班</option>
-            <option value="4">4班</option>
-            <option value="5">5班</option>
-            <option value="6">6班</option>
-          </select>
           <select
             value={selectedTaskId}
             onChange={(e) => setSelectedTaskId(e.target.value)}
