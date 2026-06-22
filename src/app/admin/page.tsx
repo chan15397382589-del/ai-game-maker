@@ -101,7 +101,7 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState("");
   const [ready, setReady] = useState(false);
-  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "prior_knowledge" | "data_overview" | "game_maker">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "data_overview" | "game_maker">("students");
   const router = useRouter();
 
   useEffect(() => { checkUser(); }, []);
@@ -159,7 +159,6 @@ export default function AdminDashboard() {
             { key: "students", label: "👥 学生管理" },
             { key: "messages", label: "💬 对话记录" },
             { key: "projects", label: "🎮 作品审核" },
-            { key: "prior_knowledge", label: "📝 学生前测" },
             { key: "data_overview", label: "  数据总览" },
             { key: "game_maker", label: "  游戏制作" },
           ].map((tab) => (
@@ -182,8 +181,6 @@ export default function AdminDashboard() {
         ) : (
           activeTab === "students" ? (
             <StudentsManagement />
-          ) : activeTab === "prior_knowledge" ? (
-            <PriorKnowledgeView />
           ) : activeTab === "data_overview" ? (
             <DataOverview />
           ) : activeTab === "game_maker" ? (
@@ -2155,9 +2152,8 @@ function PriorKnowledgeView() {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl font-bold text-gray-800">📝 学生前测</h2>
+    <div className="bg-white rounded-2xl shadow-md p-6">
+      <div className="flex items-center justify-end mb-4">
         <button
           onClick={() => {
             const rows = data.map((d) => ({
@@ -2207,12 +2203,11 @@ function PriorKnowledgeView() {
 
       {/* 数据表格 */}
       {data.length === 0 ? (
-        <div className="bg-white rounded-2xl shadow-md p-12 text-center text-gray-400">
+        <div className="text-center py-12 text-gray-400">
           暂无前测数据
         </div>
       ) : (
-        <div className="bg-white rounded-2xl shadow-md overflow-hidden">
-          <div className="overflow-x-auto">
+        <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -2261,21 +2256,28 @@ function PriorKnowledgeView() {
               </tbody>
             </table>
           </div>
-        </div>
       )}
     </div>
   );
 }
 
 // ============================================================
-// 数据总览（整合数据采集 + 任务数据）
+// 数据总览（整合前测 + 数据采集 + 任务数据）
 // ============================================================
 function DataOverview() {
-  const [activeSubTab, setActiveSubTab] = useState<"tracking" | "tasks">("tracking");
+  const [activeSubTab, setActiveSubTab] = useState<"prior" | "tracking" | "tasks">("tracking");
 
   return (
     <div>
       <div className="flex gap-2 mb-4">
+        <button
+          onClick={() => setActiveSubTab("prior")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+            activeSubTab === "prior" ? "bg-indigo-500 text-white" : "bg-white text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          📝 学生前测
+        </button>
         <button
           onClick={() => setActiveSubTab("tracking")}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
@@ -2293,7 +2295,7 @@ function DataOverview() {
             任务数据
         </button>
       </div>
-      {activeSubTab === "tracking" ? <DataTrackingView /> : <TasksDataView />}
+      {activeSubTab === "prior" ? <PriorKnowledgeView /> : activeSubTab === "tracking" ? <DataTrackingView /> : <TasksDataView />}
     </div>
   );
 }
