@@ -6,6 +6,25 @@ export async function POST(req: NextRequest) {
   try {
     const { messages, sessionId, currentCode, srlCondition, inputMethod, skipSave } = await req.json();
 
+    // 输入验证
+    if (!Array.isArray(messages)) {
+      return NextResponse.json({ error: "消息格式错误" }, { status: 400 });
+    }
+    if (messages.length > 100) {
+      return NextResponse.json({ error: "消息数量过多" }, { status: 400 });
+    }
+    for (const msg of messages) {
+      if (!msg.role || !msg.content || typeof msg.content !== "string") {
+        return NextResponse.json({ error: "消息格式错误" }, { status: 400 });
+      }
+      if (msg.content.length > 10000) {
+        return NextResponse.json({ error: "单条消息过长" }, { status: 400 });
+      }
+      if (!["user", "assistant", "system"].includes(msg.role)) {
+        return NextResponse.json({ error: "消息角色无效" }, { status: 400 });
+      }
+    }
+
     // 从请求头获取 token 并验证用户身份（不信任客户端传入的 userId）
     const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
     if (!token) {

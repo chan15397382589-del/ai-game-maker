@@ -14,9 +14,38 @@ async function imageUrlToBase64(url: string): Promise<string> {
   if (url.startsWith("data:")) {
     return url.replace(/^data:image\/\w+;base64,/, "");
   }
+
+  // SSRF 防护：只允许 HTTPS 外部 URL，禁止内网地址
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      throw new Error("只允许 HTTPS 图片链接");
+    }
+    const hostname = parsed.hostname;
+    // 禁止内网地址
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("172.") ||
+      hostname.startsWith("192.168.") ||
+      hostname === "169.254.169.254"
+    ) {
+      throw new Error("不允许访问内网地址");
+    }
+  } catch (e: any) {
+    throw new Error(`URL验证失败: ${e.message}`);
+  }
+
   // 下载图片并转为base64
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(10000) });
+  if (!response.ok) throw new Error(`图片下载失败: ${response.status}`);
   const buffer = await response.arrayBuffer();
+  // 限制图片大小 (5MB)
+  if (buffer.byteLength > 5 * 1024 * 1024) {
+    throw new Error("图片太大，请使用小于5MB的图片");
+  }
   return Buffer.from(buffer).toString("base64");
 }
 

@@ -43,11 +43,24 @@ export async function POST(req: NextRequest) {
     }
 
     // 批量插入
+    let insertErrors: string[] = [];
     if (interactionRows.length > 0) {
-      await db.from("interaction_events").insert(interactionRows);
+      const { error } = await db.from("interaction_events").insert(interactionRows);
+      if (error) {
+        console.error("[track] interaction_events insert error:", error);
+        insertErrors.push("interaction_events: " + error.message);
+      }
     }
     if (gameRows.length > 0) {
-      await db.from("game_events").insert(gameRows);
+      const { error } = await db.from("game_events").insert(gameRows);
+      if (error) {
+        console.error("[track] game_events insert error:", error);
+        insertErrors.push("game_events: " + error.message);
+      }
+    }
+
+    if (insertErrors.length > 0) {
+      return NextResponse.json({ ok: false, errors: insertErrors, inserted: 0 }, { status: 500 });
     }
 
     return NextResponse.json({ ok: true, inserted: batch.length });

@@ -45,6 +45,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data || []);
     }
 
+    // 验证用户是指定小组的成员
+    const { data: membership } = await supabaseAdmin
+      .from("group_members")
+      .select("group_id")
+      .eq("group_id", groupId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!membership) {
+      return NextResponse.json({ error: "你不是该小组的成员" }, { status: 403 });
+    }
+
     // 获取指定小组的消息
     const { data, error } = await supabaseAdmin
       .from("group_messages")
