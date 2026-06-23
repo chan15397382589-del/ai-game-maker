@@ -96,7 +96,17 @@ export default function ModuleShowcase({ userId }: Props) {
         setQ1(""); setQ2(""); setQ3(""); setGameStarted(false);
         const newTotal = totalReviewed + 1;
         setTotalReviewed(newTotal);
-        alert("✅ 评价已提交！可以继续评价其他同学，或切换到「查看我的评价」");
+
+        // 最后一个评价完成后，跳转到游戏设计模块
+        if (currentIdx >= tasks.length - 1) {
+          alert("✅ 所有评价已完成！即将跳转到游戏设计页面，继续改进你的游戏。");
+          localStorage.setItem("gotoModule", "create");
+          window.location.href = "/student?module=create";
+        } else {
+          // 自动跳到下一个
+          setCurrentIdx(currentIdx + 1);
+          alert("✅ 评价已提交！继续评价下一位同学。");
+        }
       } else {
         const err = await res.json().catch(() => ({}));
         alert(err.error || "提交失败");

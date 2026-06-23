@@ -76,6 +76,7 @@ export default function ModuleCreate({ userId }: Props) {
   // 左侧栏状态
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [gameHistory, setGameHistory] = useState<GameSnapshot[]>([]);
+  const [peerReviews, setPeerReviews] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -202,6 +203,59 @@ export default function ModuleCreate({ userId }: Props) {
       setRawMessages([welcome]);
     }
   }, [designLoaded, designData]);
+
+  // 从同伴互评跳转回来时，加载评价并注入聊天
+  useEffect(() => {
+    const loadPeerReviews = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+
+        const res = await fetch("/api/student/peer-reviews?mode=my_reviews", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+
+        const reviews = await res.json();
+        if (!reviews || reviews.length === 0) return;
+
+        setPeerReviews(reviews);
+
+        // 构建评价摘要消息
+        let reviewMsg = `  同学们对你的游戏评价来了！共 ${reviews.length} 条评价：\n\n`;
+        reviews.forEach((r: any, i: number) => {
+          reviewMsg += `【评价 ${i + 1}】\n`;
+          reviewMsg += `  好玩之处：${r.q1_enjoy}\n`;
+          reviewMsg += `  改进建议：${r.q2_suggestion}\n`;
+          if (r.q3_bug) reviewMsg += `  发现问题：${r.q3_bug}\n`;
+          reviewMsg += `\n`;
+        });
+        reviewMsg += `根据这些评价，你可以继续修改游戏。点击「  自动生成」或直接告诉我你想怎么改！`;
+
+        const reviewAssistantMsg = { role: "assistant", content: reviewMsg };
+
+        // 等待 welcome 消息设置完成后再追加
+        setMessages((prev) => {
+          // 避免重复添加
+          if (prev.some(m => m.content.includes("同学们对你的游戏评价来了"))) return prev;
+          return [...prev, reviewAssistantMsg];
+        });
+        setRawMessages((prev) => {
+          if (prev.some(m => m.content.includes("同学们对你的游戏评价来了"))) return prev;
+          return [...prev, reviewAssistantMsg];
+        });
+      } catch (err) { console.error("加载同伴评价失败:", err); }
+    };
+
+    // 检查是否从同伴互评跳转过来（URL 参数或刚切换到此模块）
+    const params = new URLSearchParams(window.location.search);
+    const fromShowcase = params.get("module") === "create" && localStorage.getItem("gotoModule") === null;
+    // 也检查 messages 是否还是初始状态（只有 welcome）
+    if (messages.length <= 1 && peerReviews.length === 0) {
+      loadPeerReviews();
+    }
+  }, [messages.length]);
 
   const extractHtmlCode = (content: string): string => {
     // 1. 匹配 ```html ... ```（贪婪匹配最大的代码块）
