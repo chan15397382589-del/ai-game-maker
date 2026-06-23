@@ -114,7 +114,7 @@ export default function ModuleReflection({ userId }: Props) {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5 pb-8">
+    <div className="space-y-5 pb-8">
       {/* 标题 */}
       <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-2xl border border-amber-100">
         <span className="text-3xl"> </span>
@@ -159,7 +159,7 @@ export default function ModuleReflection({ userId }: Props) {
                         onChange={(e) => updateAnswer(prompt.id, blankIdx, e.target.value)}
                         placeholder={prompt.placeholder[blankIdx]}
                         className="inline-block px-1 py-0 bg-transparent border-b-2 border-gray-300 focus:border-indigo-500 outline-none text-base text-gray-800 placeholder-gray-300 transition"
-                        style={{ minWidth: "200px", width: `${Math.max(200, (answers[prompt.id]?.[blankIdx] || prompt.placeholder[blankIdx]).length * 18)}px` }}
+                        style={{ minWidth: "280px", width: `${Math.max(280, (answers[prompt.id]?.[blankIdx] || prompt.placeholder[blankIdx]).length * 18)}px` }}
                       />
                       <VoiceButton onResult={(text) => updateAnswer(prompt.id, blankIdx, (answers[prompt.id]?.[blankIdx] || "") + text)} />
                     </span>
