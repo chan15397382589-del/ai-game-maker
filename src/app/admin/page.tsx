@@ -3,8 +3,14 @@
 import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
 import XiaozhiAvatar from "@/components/XiaozhiAvatar";
+
+// xlsx 动态导入（减少首屏包大小）
+let XLSX: typeof import("xlsx") | null = null;
+async function getXLSX() {
+  if (!XLSX) XLSX = await import("xlsx");
+  return XLSX;
+}
 
 // AI消息自动格式化：提问高亮、正向反馈加色、游戏规则加粗
 function formatAIMessage(text: string): ReactNode[] {
@@ -116,7 +122,7 @@ export default function AdminDashboard() {
       } catch {
         router.push("/login");
       }
-    }, 10000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [ready, user]);
 
@@ -298,7 +304,8 @@ function StudentsManagement() {
   };
 
   // ---- 下载导入模板 ----
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
+    const XLSX = await getXLSX();
     const ws = XLSX.utils.aoa_to_sheet([
       ["序号", "学生姓名", "学号", "班级", "备注"],
       [1, "张三", "202401001", "1班", ""],
@@ -327,8 +334,9 @@ function StudentsManagement() {
     }
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
+        const XLSX = await getXLSX();
         const data = new Uint8Array(evt.target?.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -658,7 +666,8 @@ function StudentsManagement() {
   };
 
   // ---- 导出表格 ----
-  const handleExport = () => {
+  const handleExport = async () => {
+    const XLSX = await getXLSX();
     if (students.length === 0) { alert("没有数据可导出"); return; }
     const ws = XLSX.utils.json_to_sheet(
       students.map((s) => ({
@@ -1252,6 +1261,7 @@ function MessagesAudit() {
   const exportToExcel = async (allStudents: boolean) => {
     setExporting(true);
     try {
+      const XLSX = await getXLSX();
       const token = await getAuthToken();
       if (!token) return;
       const url = allStudents
@@ -1369,6 +1379,7 @@ function MessagesAudit() {
           <button onClick={async () => {
             setExporting(true);
             try {
+              const XLSX = await getXLSX();
               const token = await getAuthToken();
               if (!token) { alert("未登录"); setExporting(false); return; }
               const wb = XLSX.utils.book_new();
@@ -1908,7 +1919,7 @@ function ProjectsReview() {
             </div>
             <div className="flex-1 p-4 bg-gray-900 rounded-b-2xl">
               <iframe srcDoc={selectedProject.html_code} title={selectedProject.game_title}
-                className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts allow-same-origin" scrolling="no" />
+                className="w-full h-full rounded-xl bg-white" sandbox="allow-scripts" scrolling="no" />
             </div>
           </div>
         </div>
@@ -1950,7 +1961,8 @@ function ClassificationsView() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold text-gray-800">📊 学生分类评估</h2>
         <button
-          onClick={() => {
+          onClick={async () => {
+            const XLSX = await getXLSX();
             const rows = data.map((d) => ({
               "学生姓名": d.student_name,
               "学号": d.student_id,
@@ -2159,7 +2171,8 @@ function PriorKnowledgeView({ grade, classNum }: { grade?: string; classNum?: st
     <div className="bg-white rounded-2xl shadow-md p-6">
       <div className="flex items-center justify-end mb-4">
         <button
-          onClick={() => {
+          onClick={async () => {
+            const XLSX = await getXLSX();
             const rows = data.map((d) => ({
               "学生姓名": d.student_name,
               "学号": d.student_id,
@@ -2385,7 +2398,8 @@ function DataTrackingView({ grade, classNum }: { grade?: string; classNum?: stri
     <div className="bg-white rounded-2xl shadow-md p-6">
       <div className="flex items-center justify-between mb-4">
         <button
-          onClick={() => {
+          onClick={async () => {
+            const XLSX = await getXLSX();
             const date = new Date().toISOString().slice(0, 10);
             const wb = XLSX.utils.book_new();
             const rows = students.map((s: any) => ({
@@ -3278,7 +3292,7 @@ function GameMaker() {
           <div className="flex-1 min-h-0 p-4">
             {current.htmlCode ? (
               current.gameStarted ? (
-                <iframe key={current.htmlCode} srcDoc={current.htmlCode} title="游戏预览" className="w-full h-full rounded-2xl bg-white shadow-inner" sandbox="allow-scripts allow-same-origin" scrolling="no" />
+                <iframe key={current.htmlCode} srcDoc={current.htmlCode} title="游戏预览" className="w-full h-full rounded-2xl bg-white shadow-inner" sandbox="allow-scripts" scrolling="no" />
               ) : (
                 <div className="w-full h-full rounded-2xl bg-gradient-to-br from-indigo-50 to-purple-50 flex items-center justify-center cursor-pointer hover:from-indigo-100 hover:to-purple-100 transition" onClick={() => setCurrent((prev) => ({ ...prev, gameStarted: true }))}>
                   <div className="text-center">

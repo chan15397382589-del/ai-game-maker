@@ -3,7 +3,13 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { injectGameCSS } from "@/utils/gamePreview";
-import html2canvas from "html2canvas";
+
+// html2canvas 动态导入（减少首屏包大小）
+let html2canvas: typeof import("html2canvas")["default"] | null = null;
+async function getHtml2Canvas() {
+  if (!html2canvas) html2canvas = (await import("html2canvas")).default;
+  return html2canvas;
+}
 
 interface Props {
   userId: string;
@@ -68,7 +74,7 @@ function GameCard({ item, onClick }: { item: GameItem; onClick: () => void }) {
         // 创建隐藏 iframe 渲染游戏
         const iframe = document.createElement("iframe");
         iframe.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:480px;height:320px;border:none;";
-        iframe.sandbox = "allow-scripts allow-same-origin";
+        iframe.sandbox = "allow-scripts";
         document.body.appendChild(iframe);
 
         iframe.srcdoc = injectGameCSS(data.html_code);
@@ -85,7 +91,8 @@ function GameCard({ item, onClick }: { item: GameItem; onClick: () => void }) {
 
         // 截图
         try {
-          const canvas = await html2canvas(iframe.contentDocument!.body, {
+          const h2c = await getHtml2Canvas();
+          const canvas = await h2c(iframe.contentDocument!.body, {
             width: 480,
             height: 320,
             useCORS: true,
@@ -215,7 +222,7 @@ export default function ModuleGallery({ userId }: Props) {
             <iframe
               srcDoc={injectGameCSS(selectedGame.html_code || "")}
               className="absolute inset-0 w-full h-full"
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-scripts"
               scrolling="no"
               style={{ border: "none" }}
             />

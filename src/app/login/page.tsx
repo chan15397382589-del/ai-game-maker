@@ -34,17 +34,34 @@ export default function LoginPage() {
   // 检测是否已有活跃 session，自动跳转到对应门户
   // 如果 URL 带有 ?action=switch，则显示登录表单（用于切换账号）
   useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const isSwitch = searchParams.get("action") === "switch";
+    const checkSession = async () => {
+      const searchParams = new URLSearchParams(window.location.search);
+      const isSwitch = searchParams.get("action") === "switch";
 
-    if (isSwitch) {
+      if (isSwitch) {
+        setCheckingSession(false);
+        return;
+      }
+
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          // 已有会话，检查角色并跳转
+          const { data: userData } = await supabase.from("users").select("role").eq("id", session.user.id).single();
+          if (userData?.role === "admin") {
+            router.replace("/admin");
+          } else {
+            router.replace("/student");
+          }
+          return;
+        }
+      } catch {}
+
+      // 先清除可能损坏的本地存储
+      clearStaleStorage();
       setCheckingSession(false);
-      return;
-    }
-
-    // 先清除可能损坏的本地存储
-    clearStaleStorage();
-    setCheckingSession(false);
+    };
+    checkSession();
   }, []);
 
   const handleLogin = async () => {

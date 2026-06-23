@@ -152,7 +152,7 @@ export default function ModuleIdeation({ userId }: Props) {
   const [brushSize, setBrushSize] = useState(3);
   const [items, setItems] = useState<CanvasItem[]>([]);
   const [strokes, setStrokes] = useState<DrawStroke[]>([]);
-  const [currentStroke, setCurrentStroke] = useState<DrawPoint[]>([]);
+  const currentStrokeRef = useRef<DrawPoint[]>([]);
   const [dragging, setDragging] = useState<{ index: number; offsetX: number; offsetY: number } | null>(null);
   const trashRef = useRef<HTMLDivElement>(null);
   const [materialTab, setMaterialTab] = useState<"role" | "bg" | "prop">("role");
@@ -309,14 +309,15 @@ export default function ModuleIdeation({ userId }: Props) {
     }
 
     // 绘制当前正在画的笔画
-    if (currentStroke.length >= 2) {
+    const cs = currentStrokeRef.current;
+    if (cs.length >= 2) {
       ctx.beginPath();
       ctx.strokeStyle = brushColor;
       ctx.lineWidth = brushSize;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.moveTo(currentStroke[0].x, currentStroke[0].y);
-      for (let i = 1; i < currentStroke.length; i++) ctx.lineTo(currentStroke[i].x, currentStroke[i].y);
+      ctx.moveTo(cs[0].x, cs[0].y);
+      for (let i = 1; i < cs.length; i++) ctx.lineTo(cs[i].x, cs[i].y);
       ctx.stroke();
     }
 
@@ -329,14 +330,14 @@ export default function ModuleIdeation({ userId }: Props) {
     }
 
     // 如果有保存的设计图且没有新内容，绘制设计图
-    if (savedDesignImage && strokes.length === 0 && items.length === 0 && currentStroke.length === 0) {
+    if (savedDesignImage && strokes.length === 0 && items.length === 0 && cs.length === 0) {
       const img = new Image();
       img.onload = () => {
         ctx.drawImage(img, 0, 0, CW, CH);
       };
       img.src = savedDesignImage;
     }
-  }, [strokes, currentStroke, brushColor, brushSize, items, savedDesignImage]);
+  }, [strokes, brushColor, brushSize, items, savedDesignImage]);
 
   useEffect(() => { redrawAll(); }, [redrawAll]);
 
@@ -374,7 +375,7 @@ export default function ModuleIdeation({ userId }: Props) {
         }
       }
     } else {
-      setCurrentStroke([pos]);
+      currentStrokeRef.current = [pos];
     }
   };
 
@@ -384,8 +385,9 @@ export default function ModuleIdeation({ userId }: Props) {
       const newItems = [...items];
       newItems[dragging.index] = { ...newItems[dragging.index], x: pos.x - dragging.offsetX, y: pos.y - dragging.offsetY };
       setItems(newItems);
-    } else if (mode === "draw" && currentStroke.length > 0) {
-      setCurrentStroke((prev) => [...prev, pos]);
+    } else if (mode === "draw" && currentStrokeRef.current.length > 0) {
+      currentStrokeRef.current = [...currentStrokeRef.current, pos];
+      redrawAll(); // 直接重绘，不触发 setState
     }
   };
 
@@ -402,10 +404,10 @@ export default function ModuleIdeation({ userId }: Props) {
         }
       }
       setDragging(null);
-    } else if (mode === "draw" && currentStroke.length > 0) {
+    } else if (mode === "draw" && currentStrokeRef.current.length > 0) {
       saveToHistory();
-      setStrokes((prev) => [...prev, { color: brushColor, size: brushSize, points: currentStroke }]);
-      setCurrentStroke([]);
+      setStrokes((prev) => [...prev, { color: brushColor, size: brushSize, points: currentStrokeRef.current }]);
+      currentStrokeRef.current = [];
     }
   };
 
@@ -435,7 +437,7 @@ export default function ModuleIdeation({ userId }: Props) {
     saveToHistory();
     setItems([]);
     setStrokes([]);
-    setCurrentStroke([]);
+    currentStrokeRef.current = [];
   };
 
   // 保存当前状态到历史

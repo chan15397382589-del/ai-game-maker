@@ -899,7 +899,7 @@ export default function ModuleCreate({ userId }: Props) {
                 <iframe
                   srcDoc={injectGameCSS(htmlCode)}
                   className="w-full h-full rounded-xl"
-                  sandbox="allow-scripts allow-same-origin"
+                  sandbox="allow-scripts"
                   scrolling="no"
                   style={{ border: "none", display: "block" }}
                 />

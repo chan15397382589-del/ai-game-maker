@@ -177,7 +177,7 @@ export default function ModuleShowcase({ userId }: Props) {
                     <iframe
                       srcDoc={injectGameCSS(current.html_code)}
                       className="absolute inset-0 w-full h-full"
-                      sandbox="allow-scripts allow-same-origin"
+                      sandbox="allow-scripts"
                       scrolling="no"
                       style={{ border: "none" }}
                     />

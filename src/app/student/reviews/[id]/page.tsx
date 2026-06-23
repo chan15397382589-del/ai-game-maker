@@ -214,7 +214,7 @@ export default function ReviewDetailPage({ params }: { params: Promise<{ id: str
           {gameStarted ? (
             <>
               <iframe key={item.html_code} srcDoc={item.html_code} title={item.game_title}
-                className="w-full h-full" sandbox="allow-scripts allow-same-origin" scrolling="no" />
+                className="w-full h-full" sandbox="allow-scripts" scrolling="no" />
               <button
                 onClick={() => setGameStarted(false)}
                 className="absolute top-4 right-4 bg-white hover:bg-gray-50 text-gray-700 px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg border border-gray-200 transition z-10"
