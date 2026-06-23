@@ -144,8 +144,7 @@ export default function ModuleGallery({ userId }: Props) {
                     <iframe
                       srcDoc={injectGameCSS(item.html_code)}
                       className="w-full h-full border-0 pointer-events-none"
-                      sandbox="allow-scripts"
-                      loading="lazy"
+                      sandbox="allow-scripts allow-same-origin"
                       scrolling="no"
                     />
                   ) : (
