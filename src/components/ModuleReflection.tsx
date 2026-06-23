@@ -11,11 +11,11 @@ interface Props {
 }
 
 const REFLECTION_PROMPTS = [
-  { id: "q1", icon: " ", title: "描述你的游戏", parts: ["我的游戏叫", "，玩法是", "。"], placeholder: ["游戏名称", "玩法说明"] },
-  { id: "q2", icon: " ", title: "说明你的规则", parts: ["我的游戏有一条规则：如果", "，就", "。"], placeholder: ["条件", "结果"] },
-  { id: "q3", icon: " ", title: "遇到的困难", parts: ["我遇到的困难是", "，我用", "方法解决了。"], placeholder: ["困难", "解决方法"] },
-  { id: "q4", icon: " ", title: "同伴的反馈", parts: ["同伴说我的游戏", "，我觉得", "。"], placeholder: ["同伴的评价", "你的想法"] },
-  { id: "q5", icon: " ", title: "如果重新做", parts: ["如果再做一次，我会改", "。"], placeholder: ["你想改进的地方"] },
+  { id: "q1", icon: " ", title: "描述你的游戏", sentence: "我的游戏叫 {0}，玩法是 {1}。", blanks: 2, placeholder: ["游戏名称", "玩法说明"] },
+  { id: "q2", icon: " ", title: "说明你的规则", sentence: "我的游戏有一条规则：如果 {0}，就 {1}。", blanks: 2, placeholder: ["条件", "结果"] },
+  { id: "q3", icon: " ", title: "遇到的困难", sentence: "我遇到的困难是 {0}，我用 {1} 方法解决了。", blanks: 2, placeholder: ["困难", "解决方法"] },
+  { id: "q4", icon: " ", title: "同伴的反馈", sentence: "同伴说我的游戏 {0}，我觉得 {1}。", blanks: 2, placeholder: ["同伴的评价", "你的想法"] },
+  { id: "q5", icon: " ", title: "如果重新做", sentence: "如果再做一次，我会改 {0}。", blanks: 1, placeholder: ["你想改进的地方"] },
 ];
 
 export default function ModuleReflection({ userId }: Props) {
@@ -40,7 +40,6 @@ export default function ModuleReflection({ userId }: Props) {
   const handleSave = async () => {
     if (!canSave) return;
 
-    // 输入验证
     for (const p of REFLECTION_PROMPTS) {
       for (const a of answers[p.id] || []) {
         if (isRandomInput(a)) {
@@ -66,14 +65,11 @@ export default function ModuleReflection({ userId }: Props) {
       }
 
       const latestConvId = convs[0].id;
-      // 拼接答案为完整句子
       const reflection: Record<string, string> = {};
       REFLECTION_PROMPTS.forEach((p) => {
-        const arr = answers[p.id] || [];
-        let sentence = "";
-        p.parts.forEach((part, i) => {
-          sentence += part;
-          if (i < arr.length) sentence += arr[i] || "______";
+        let sentence = p.sentence;
+        (answers[p.id] || []).forEach((a, i) => {
+          sentence = sentence.replace(`{${i}}`, a || "______");
         });
         reflection[p.id] = sentence;
       });
@@ -129,37 +125,51 @@ export default function ModuleReflection({ userId }: Props) {
       </div>
 
       {/* 反思问题 */}
-      {REFLECTION_PROMPTS.map((prompt, idx) => (
-        <div key={prompt.id} className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-          <div className="px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center gap-2">
-            <span className="text-lg">{prompt.icon}</span>
-            <span className="text-sm font-bold text-white">{idx + 1}. {prompt.title}</span>
-          </div>
-          <div className="p-5">
-            {/* 横线填写 */}
-            <div className="text-base leading-10 text-gray-700 flex flex-wrap items-end gap-y-1">
-              {prompt.parts.map((part, i) => (
-                <span key={i} className="inline-flex items-end">
-                  <span className="mr-1">{part}</span>
-                  {i < (answers[prompt.id] || []).length && (
-                    <span className="inline-flex items-end relative">
+      {REFLECTION_PROMPTS.map((prompt, idx) => {
+        // 将 sentence 拆分成文字和输入框交替的数组
+        const parts: { type: "text" | "blank"; content: string; idx?: number }[] = [];
+        const segments = prompt.sentence.split(/(\{\d+\})/);
+        segments.forEach((seg) => {
+          const blankMatch = seg.match(/^\{(\d+)\}$/);
+          if (blankMatch) {
+            parts.push({ type: "blank", content: "", idx: parseInt(blankMatch[1]) });
+          } else if (seg) {
+            parts.push({ type: "text", content: seg });
+          }
+        });
+
+        return (
+          <div key={prompt.id} className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
+            <div className="px-5 py-3 bg-gradient-to-r from-indigo-500 to-purple-500 flex items-center gap-2">
+              <span className="text-lg">{prompt.icon}</span>
+              <span className="text-sm font-bold text-white">{idx + 1}. {prompt.title}</span>
+            </div>
+            <div className="p-5">
+              <div className="text-base text-gray-700 leading-relaxed">
+                {parts.map((part, i) => {
+                  if (part.type === "text") {
+                    return <span key={i}>{part.content}</span>;
+                  }
+                  const blankIdx = part.idx!;
+                  return (
+                    <span key={i} className="inline-flex items-center mx-0.5">
                       <input
                         type="text"
-                        value={answers[prompt.id]?.[i] || ""}
-                        onChange={(e) => updateAnswer(prompt.id, i, e.target.value)}
-                        placeholder={prompt.placeholder[i]}
-                        className="w-32 px-1 py-0 bg-transparent border-b-2 border-gray-300 focus:border-indigo-500 outline-none text-base text-gray-800 placeholder-gray-300 transition"
-                        style={{ minWidth: "80px", width: `${Math.max(80, (answers[prompt.id]?.[i] || "").length * 16 + 20)}px` }}
+                        value={answers[prompt.id]?.[blankIdx] || ""}
+                        onChange={(e) => updateAnswer(prompt.id, blankIdx, e.target.value)}
+                        placeholder={prompt.placeholder[blankIdx]}
+                        className="inline-block w-28 px-1 py-0 bg-transparent border-b-2 border-gray-300 focus:border-indigo-500 outline-none text-base text-gray-800 placeholder-gray-300 transition"
+                        style={{ width: `${Math.max(100, (answers[prompt.id]?.[blankIdx] || prompt.placeholder[blankIdx]).length * 17)}px` }}
                       />
-                      <VoiceButton onResult={(text) => updateAnswer(prompt.id, i, (answers[prompt.id]?.[i] || "") + text)} />
+                      <VoiceButton onResult={(text) => updateAnswer(prompt.id, blankIdx, (answers[prompt.id]?.[blankIdx] || "") + text)} />
                     </span>
-                  )}
-                </span>
-              ))}
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {/* 保存按钮 */}
       <div className="flex justify-center pt-2">
