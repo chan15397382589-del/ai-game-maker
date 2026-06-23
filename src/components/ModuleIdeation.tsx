@@ -181,15 +181,19 @@ export default function ModuleIdeation({ userId }: Props) {
   const CW = 800;
   const CH = 600;
 
-  // 加载已有数据
+  // 加载已有数据（并行请求）
   useEffect(() => {
     const loadExistingData = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token; if (!token) return;
 
-        // 加载基础情况数据
-        const surveyRes = await fetch("/api/student/tasks?task_id=survey", { headers: { Authorization: `Bearer ${token}` } });
+        // 并行加载基础情况和设计数据
+        const [surveyRes, designRes] = await Promise.all([
+          fetch("/api/student/tasks?task_id=survey", { headers: { Authorization: `Bearer ${token}` } }),
+          fetch("/api/student/tasks?task_id=1-1", { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+
         if (surveyRes.ok) {
           const surveyData = await surveyRes.json();
           if (surveyData.length > 0 && surveyData[0].design_reason) {
@@ -206,7 +210,6 @@ export default function ModuleIdeation({ userId }: Props) {
         }
 
         // 加载设计数据
-        const designRes = await fetch("/api/student/tasks?task_id=1-1", { headers: { Authorization: `Bearer ${token}` } });
         if (designRes.ok) {
           const designData = await designRes.json();
           if (designData.length > 0) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 
 interface VoiceButtonProps {
@@ -8,7 +9,7 @@ interface VoiceButtonProps {
   size?: "sm" | "md" | "lg";
 }
 
-export default function VoiceButton({ onResult, className = "", size = "md" }: VoiceButtonProps) {
+const VoiceButton = memo(function VoiceButton({ onResult, className = "", size = "md" }: VoiceButtonProps) {
   const { isRecording, toggleRecording } = useVoiceInput({ onResult });
 
   const sizeClasses = {
@@ -30,4 +31,6 @@ export default function VoiceButton({ onResult, className = "", size = "md" }: V
       {isRecording ? "⏹" : "🎤"}
     </button>
   );
-}
+});
+
+export default VoiceButton;

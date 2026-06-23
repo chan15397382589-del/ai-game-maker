@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { memo } from 'react';
 
 export interface XiaozhiAvatarProps {
   state?: 'idle' | 'thinking' | 'success';
 }
 
-export default function XiaozhiAvatar({ state = 'idle' }: XiaozhiAvatarProps) {
+const XiaozhiAvatar = memo(function XiaozhiAvatar({ state = 'idle' }: XiaozhiAvatarProps) {
   const colors = {
     primary: "#4F46E5",
     primaryLight: "#E0E7FF",
@@ -132,4 +132,6 @@ export default function XiaozhiAvatar({ state = 'idle' }: XiaozhiAvatarProps) {
 
     </svg>
   );
-}
+});
+
+export default XiaozhiAvatar;
