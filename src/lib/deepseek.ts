@@ -406,27 +406,31 @@ export async function saveMessage(
     return;
   }
 
-  try {
-    // 验证 sessionId 是否为有效的 UUID，否则传 null
-    const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId || "");
+  // 验证 sessionId 是否为有效的 UUID，否则传 null
+  const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId || "");
 
-    const row: any = {
-      user_id: userId,
-      role,
-      content,
-      session_id: validUuid ? sessionId : null,
-    };
+  const row: any = {
+    user_id: userId,
+    role,
+    content,
+    session_id: validUuid ? sessionId : null,
+  };
 
-    if (inputMethod) row.input_method = inputMethod;
-    if (hasCode !== undefined) row.has_code = hasCode;
-    if (aiSuggestionType) row.ai_suggestion_type = aiSuggestionType;
+  if (inputMethod) row.input_method = inputMethod;
+  if (hasCode !== undefined) row.has_code = hasCode;
+  if (aiSuggestionType) row.ai_suggestion_type = aiSuggestionType;
 
-    const { error } = await supabaseAdmin.from("messages").insert(row);
-
-    if (error) {
-      console.error("Save message error:", error.message);
+  // 带重试的插入（最多 3 次）
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { error } = await supabaseAdmin.from("messages").insert(row);
+      if (!error) return; // 成功
+      console.error(`Save message attempt ${attempt} failed:`, error.message);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
+    } catch (err: any) {
+      console.error(`Save message attempt ${attempt} error:`, err.message);
+      if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
     }
-  } catch (err) {
-    console.error("Save message error:", err);
   }
+  console.error("Save message failed after 3 attempts for user:", userId);
 }

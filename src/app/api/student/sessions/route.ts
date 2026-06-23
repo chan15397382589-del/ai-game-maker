@@ -158,9 +158,9 @@ export async function PATCH(req: NextRequest) {
     }
 
     const updates: Record<string, any> = { updated_at: new Date().toISOString() };
-    if (title !== undefined) updates.title = title;
-    if (html_code !== undefined) updates.html_code = html_code;
-    if (reflection !== undefined) updates.reflection = reflection;
+    if (title !== undefined && typeof title === "string" && title.length <= 100) updates.title = title;
+    if (html_code !== undefined && typeof html_code === "string" && html_code.length <= 1000000) updates.html_code = html_code;
+    if (reflection !== undefined && typeof reflection === "string" && reflection.length <= 10000) updates.reflection = reflection;
 
     const { data, error } = await supabaseAdmin
       .from("conversations")

@@ -28,7 +28,7 @@ export interface ValidationResult {
 }
 
 // 检查是否包含脏话
-function containsProfanity(text: string): boolean {
+export function containsProfanity(text: string): boolean {
   const lower = text.toLowerCase();
   return PROFANITY_LIST.some((word) => lower.includes(word.toLowerCase()));
 }

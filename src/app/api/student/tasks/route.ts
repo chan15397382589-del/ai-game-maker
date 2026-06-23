@@ -49,19 +49,28 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { task_id, design_image, game_rules, game_name, design_reason, discussion_notes, revision_notes, duration_seconds, save_count, undo_count } = body;
 
-    if (!task_id) {
+    if (!task_id || typeof task_id !== "string") {
       return NextResponse.json({ error: "缺少task_id" }, { status: 400 });
     }
 
+    // 验证数值字段
+    const validateInt = (val: any, max: number) => {
+      if (val === undefined) return undefined;
+      const num = Number(val);
+      if (isNaN(num) || num < 0) return 0;
+      if (num > max) return max;
+      return Math.floor(num);
+    };
+
     const updateData: any = { updated_at: new Date().toISOString() };
-    if (design_image !== undefined) updateData.design_image = design_image;
-    if (game_rules !== undefined) updateData.game_rules = game_rules;
-    if (game_name !== undefined) updateData.game_name = game_name;
-    if (design_reason !== undefined) updateData.design_reason = design_reason;
-    if (discussion_notes !== undefined) updateData.discussion_notes = discussion_notes;
-    if (revision_notes !== undefined) updateData.revision_notes = revision_notes;
-    if (duration_seconds !== undefined) updateData.duration_seconds = duration_seconds;
-    if (save_count !== undefined) updateData.save_count = save_count;
+    if (design_image !== undefined && typeof design_image === "string" && design_image.length < 10000000) updateData.design_image = design_image;
+    if (game_rules !== undefined && Array.isArray(game_rules) && game_rules.length <= 10) updateData.game_rules = game_rules;
+    if (game_name !== undefined && typeof game_name === "string" && game_name.length <= 50) updateData.game_name = game_name;
+    if (design_reason !== undefined && typeof design_reason === "string" && design_reason.length <= 10000) updateData.design_reason = design_reason;
+    if (discussion_notes !== undefined && typeof discussion_notes === "string" && discussion_notes.length <= 5000) updateData.discussion_notes = discussion_notes;
+    if (revision_notes !== undefined && typeof revision_notes === "string" && revision_notes.length <= 5000) updateData.revision_notes = revision_notes;
+    if (duration_seconds !== undefined) updateData.duration_seconds = validateInt(duration_seconds, 7200);
+    if (save_count !== undefined) updateData.save_count = validateInt(save_count, 10000);
     if (undo_count !== undefined) updateData.undo_count = undo_count;
 
     // 使用 upsert 避免竞态条件（需要数据库有 unique 约束）

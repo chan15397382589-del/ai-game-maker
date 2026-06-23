@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDB } from "@/lib/supabase-admin";
+import { validateGameName } from "@/lib/profanity";
 
 
 // 保存游戏作品
@@ -19,7 +20,21 @@ export async function POST(req: NextRequest) {
 
     const { game_title, html_code, reflection } = await req.json();
 
-    const insertData: Record<string, any> = { user_id: user.id, game_title, html_code, is_published: false };
+    // 验证游戏名称
+    const titleValidation = validateGameName(game_title);
+    if (!titleValidation.valid) {
+      return NextResponse.json({ error: titleValidation.error }, { status: 400 });
+    }
+
+    // 验证代码长度
+    if (!html_code || html_code.length < 100) {
+      return NextResponse.json({ error: "游戏代码太短" }, { status: 400 });
+    }
+    if (html_code.length > 1000000) {
+      return NextResponse.json({ error: "游戏代码太长" }, { status: 400 });
+    }
+
+    const insertData: Record<string, any> = { user_id: user.id, game_title: game_title.trim(), html_code, is_published: false };
     if (reflection) insertData.reflection = reflection;
 
     const { data, error } = await db

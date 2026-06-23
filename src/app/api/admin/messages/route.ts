@@ -35,9 +35,11 @@ export async function GET(req: NextRequest) {
       query = query.lte("created_at", endTime);
     }
 
-    // 没有时间范围时限制返回数量
-    if (!startTime && !endTime) {
-      query = query.limit(500);
+    // 限制返回数量（防止 OOM）
+    if (userId && (startTime || endTime)) {
+      query = query.limit(2000); // 单个会话的消息
+    } else {
+      query = query.limit(500); // 全局查询
     }
 
     const { data, error } = await query;

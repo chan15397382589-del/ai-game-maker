@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/deepseek";
+import { containsProfanity } from "@/lib/profanity";
 
 // 获取当前用户
 async function getUser(req: NextRequest) {
@@ -86,6 +87,21 @@ export async function POST(req: NextRequest) {
 
     if (!group_id || !content) {
       return NextResponse.json({ error: "缺少group_id或content" }, { status: 400 });
+    }
+
+    // 长度验证
+    if (content.length > 5000) {
+      return NextResponse.json({ error: "消息太长，请控制在5000字以内" }, { status: 400 });
+    }
+
+    // 脏话过滤
+    if (containsProfanity(content)) {
+      return NextResponse.json({ error: "消息包含不当内容，请修改后再发送" }, { status: 400 });
+    }
+
+    // 语音转文字也需要过滤
+    if (voice_transcript && containsProfanity(voice_transcript)) {
+      return NextResponse.json({ error: "语音内容包含不当内容" }, { status: 400 });
     }
 
     const { data, error } = await supabaseAdmin
