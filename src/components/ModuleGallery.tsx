@@ -1,15 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { injectGameCSS } from "@/utils/gamePreview";
-
-// html2canvas 动态导入（减少首屏包大小）
-let html2canvas: typeof import("html2canvas")["default"] | null = null;
-async function getHtml2Canvas() {
-  if (!html2canvas) html2canvas = (await import("html2canvas")).default;
-  return html2canvas;
-}
 
 interface Props {
   userId: string;
@@ -25,129 +18,6 @@ interface GameItem {
   author_grade: number | null;
   author_class_num: number | null;
   created_at: string;
-  thumbnail?: string; // base64 截图
-}
-
-// 单个游戏卡片（截图预览）
-function GameCard({ item, onClick }: { item: GameItem; onClick: () => void }) {
-  const [thumbnail, setThumbnail] = useState<string | null>(item.thumbnail || null);
-  const [loading, setLoading] = useState(false);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [shouldLoad, setShouldLoad] = useState(false);
-
-  // IntersectionObserver 控制可见时才加载
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShouldLoad(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "300px" }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  // 加载游戏代码并截图
-  useEffect(() => {
-    if (!shouldLoad || thumbnail || loading) return;
-    let cancelled = false;
-
-    const loadAndCapture = async () => {
-      setLoading(true);
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        if (!token || cancelled) return;
-
-        const res = await fetch(`/api/student/gallery/${item.id}`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok || cancelled) return;
-
-        const data = await res.json();
-        if (!data.html_code || cancelled) return;
-
-        // 创建隐藏 iframe 渲染游戏
-        const iframe = document.createElement("iframe");
-        iframe.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:480px;height:320px;border:none;";
-        iframe.sandbox = "allow-scripts";
-        document.body.appendChild(iframe);
-
-        iframe.srcdoc = injectGameCSS(data.html_code);
-
-        // 等待加载完成
-        await new Promise<void>((resolve) => {
-          iframe.onload = () => setTimeout(resolve, 1500); // 等 1.5 秒让游戏渲染
-        });
-
-        if (cancelled) {
-          document.body.removeChild(iframe);
-          return;
-        }
-
-        // 截图
-        try {
-          const h2c = await getHtml2Canvas();
-          const canvas = await h2c(iframe.contentDocument!.body, {
-            width: 480,
-            height: 320,
-            useCORS: true,
-            allowTaint: true,
-            backgroundColor: "#000",
-          });
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
-          if (!cancelled) setThumbnail(dataUrl);
-        } catch (err) {
-          console.error("截图失败:", err);
-        }
-
-        document.body.removeChild(iframe);
-      } catch (err) {
-        console.error("加载游戏失败:", err);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-
-    loadAndCapture();
-    return () => { cancelled = true; };
-  }, [shouldLoad, item.id]);
-
-  return (
-    <div ref={containerRef}
-      className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
-      onClick={onClick}>
-      <div className="aspect-video bg-gray-900 relative overflow-hidden">
-        {thumbnail ? (
-          <img src={thumbnail} alt={item.game_title} className="w-full h-full object-cover" />
-        ) : loading ? (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
-            <div className="w-8 h-8 border-3 border-white/30 border-t-white rounded-full animate-spin"></div>
-          </div>
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
-            <span className="text-4xl"> </span>
-          </div>
-        )}
-      </div>
-      <div className="px-3 py-2.5">
-        <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
-        {item.game_rules && item.game_rules.length > 0 && (
-          <div className="mt-1.5 space-y-0.5">
-            {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
-              <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
-            ))}
-            {item.game_rules.length > 2 && <p className="text-[10px] text-gray-400">+{item.game_rules.length - 2} 条规则</p>}
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 export default function ModuleGallery({ userId }: Props) {
@@ -173,7 +43,6 @@ export default function ModuleGallery({ userId }: Props) {
   const openGame = async (item: GameItem) => {
     setSelectedGame(item);
     setGameStarted(false);
-    if (item.html_code) return;
     setLoadingGame(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -244,7 +113,7 @@ export default function ModuleGallery({ userId }: Props) {
     );
   }
 
-  // 游戏列表
+  // 游戏列表（静态卡片，无 iframe 缩略图）
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -267,7 +136,29 @@ export default function ModuleGallery({ userId }: Props) {
         <div className="flex-1 overflow-y-auto pb-4">
           <div className="grid grid-cols-4 gap-4">
             {items.map((item) => (
-              <GameCard key={item.id} item={item} onClick={() => openGame(item)} />
+              <div key={item.id}
+                className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
+                onClick={() => openGame(item)}>
+                {/* 静态占位卡片 */}
+                <div className="aspect-video bg-gradient-to-br from-indigo-500 to-purple-600 relative flex items-center justify-center">
+                  <div className="text-center">
+                    <span className="text-4xl block mb-1"> </span>
+                    <p className="text-white text-xs font-medium opacity-80">点击试玩</p>
+                  </div>
+                </div>
+                <div className="px-3 py-2.5">
+                  <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
+                  {item.game_rules && item.game_rules.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
+                        <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
+                      ))}
+                      {item.game_rules.length > 2 && <p className="text-[10px] text-gray-400">+{item.game_rules.length - 2} 条规则</p>}
+                    </div>
+                  )}
+                </div>
+              </div>
             ))}
           </div>
         </div>

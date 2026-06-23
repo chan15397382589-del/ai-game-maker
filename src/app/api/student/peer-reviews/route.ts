@@ -107,10 +107,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ tasks: [], totalReviewed: reviewedIds.length, totalAvailable: 0 });
     }
 
-    // 获取这些同学的有游戏代码的最新对话
+    // 获取这些同学的有游戏代码的最新对话（不加载 html_code）
     const { data: convs } = await db
       .from("conversations")
-      .select("id, user_id, title, html_code, updated_at")
+      .select("id, user_id, title, updated_at")
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
       .order("updated_at", { ascending: false })
@@ -121,7 +121,6 @@ export async function GET(req: NextRequest) {
     const gameMap: Record<string, any> = {};
     for (const c of convs || []) {
       if (seen.has(c.user_id)) continue;
-      if (!c.html_code || c.html_code.length < 100) continue;
       seen.add(c.user_id);
       gameMap[c.user_id] = c;
     }

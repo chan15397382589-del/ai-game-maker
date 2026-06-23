@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { useRouter } from "next/navigation";
-import ModuleIdeation from "@/components/ModuleIdeation";
-import ModuleCreate from "@/components/ModuleCreate";
-import ModuleShowcase from "@/components/ModuleShowcase";
-import ModuleGallery from "@/components/ModuleGallery";
-import ModuleReflection from "@/components/ModuleReflection";
 
+// 懒加载模块组件
+const ModuleIdeation = lazy(() => import("@/components/ModuleIdeation"));
+const ModuleCreate = lazy(() => import("@/components/ModuleCreate"));
+const ModuleShowcase = lazy(() => import("@/components/ModuleShowcase"));
+const ModuleGallery = lazy(() => import("@/components/ModuleGallery"));
+const ModuleReflection = lazy(() => import("@/components/ModuleReflection"));
 
 const MODULES = [
   { id: "ideation", label: "  游戏构思", desc: "设计你的游戏" },
@@ -17,6 +18,17 @@ const MODULES = [
   { id: "gallery", label: "  班级作品", desc: "浏览同学游戏" },
   { id: "reflection", label: "  我的反思", desc: "回顾创作过程" },
 ];
+
+function ModuleLoader() {
+  return (
+    <div className="flex items-center justify-center h-40">
+      <div className="text-center">
+        <div className="w-8 h-8 border-3 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mx-auto mb-2"></div>
+        <p className="text-gray-400 text-sm">加载中...</p>
+      </div>
+    </div>
+  );
+}
 
 export default function StudentPage() {
   const router = useRouter();
@@ -60,6 +72,24 @@ export default function StudentPage() {
     );
   }
 
+  // 渲染当前激活的模块
+  const renderModule = () => {
+    switch (activeModule) {
+      case "ideation":
+        return <ModuleIdeation userId={userId} />;
+      case "create":
+        return <ModuleCreate userId={userId} />;
+      case "showcase":
+        return <ModuleShowcase userId={userId} />;
+      case "gallery":
+        return <ModuleGallery userId={userId} />;
+      case "reflection":
+        return <ModuleReflection userId={userId} />;
+      default:
+        return <ModuleIdeation userId={userId} />;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50">
       {/* 顶部导航栏 */}
@@ -94,23 +124,11 @@ export default function StudentPage() {
         </div>
       </nav>
 
-      {/* 模块内容 - 所有模块保持挂载，用CSS显示/隐藏 */}
+      {/* 模块内容 - 只渲染当前激活的模块 */}
       <div className="max-w-7xl mx-auto px-4 py-6">
-        <div style={{ display: activeModule === "ideation" ? "block" : "none" }}>
-          <ModuleIdeation userId={userId} />
-        </div>
-        <div style={{ display: activeModule === "create" ? "block" : "none" }}>
-          <ModuleCreate userId={userId} />
-        </div>
-        <div style={{ display: activeModule === "showcase" ? "block" : "none" }}>
-          <ModuleShowcase userId={userId} />
-        </div>
-        <div style={{ display: activeModule === "gallery" ? "block" : "none" }}>
-          <ModuleGallery userId={userId} />
-        </div>
-        <div style={{ display: activeModule === "reflection" ? "block" : "none" }}>
-          <ModuleReflection userId={userId} />
-        </div>
+        <Suspense fallback={<ModuleLoader />}>
+          {renderModule()}
+        </Suspense>
       </div>
     </div>
   );

@@ -71,15 +71,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "AI服务连接失败：" + apiError.message }, { status: 502 });
     }
 
-    // 创建流式响应
+    // 创建流式响应（带 90 秒超时）
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
         let assistantContent = "";
         let chunkCount = 0;
+        let streamTimeout: NodeJS.Timeout | null = null;
+
+        // 重置超时计时器
+        const resetTimeout = () => {
+          if (streamTimeout) clearTimeout(streamTimeout);
+          streamTimeout = setTimeout(() => {
+            console.warn("[chat] SSE stream timeout (90s)");
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI回复超时，请重试" })}\n\n`));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          }, 90000);
+        };
+
+        resetTimeout();
 
         try {
           for await (const event of response) {
+            resetTimeout(); // 收到数据时重置超时
             // 处理文本内容
             if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
               const content = event.delta.text;
@@ -114,6 +129,8 @@ export async function POST(req: NextRequest) {
           // 流处理异常，发送错误事件后关闭
           console.error("Stream error:", streamError.message, streamError.stack);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI回复中断：" + streamError.message })}\n\n`));
+        } finally {
+          if (streamTimeout) clearTimeout(streamTimeout);
         }
 
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));

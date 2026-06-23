@@ -4,10 +4,12 @@ class RequestQueue {
   private running = 0;
   private maxConcurrent: number;
   private delayBetween: number;
+  private retryDelay: number;
 
-  constructor(maxConcurrent = 10, delayBetween = 500) {
+  constructor(maxConcurrent = 5, delayBetween = 1000, retryDelay = 3000) {
     this.maxConcurrent = maxConcurrent;
     this.delayBetween = delayBetween;
+    this.retryDelay = retryDelay;
   }
 
   // 获取队列状态
@@ -45,8 +47,19 @@ class RequestQueue {
     try {
       const result = await task.fn();
       task.resolve(result);
-    } catch (err) {
-      task.reject(err);
+    } catch (err: any) {
+      // 429 错误时重试一次
+      if (err.message?.includes("429") || err.status === 429) {
+        await new Promise(r => setTimeout(r, this.retryDelay));
+        try {
+          const result = await task.fn();
+          task.resolve(result);
+        } catch (retryErr) {
+          task.reject(retryErr);
+        }
+      } else {
+        task.reject(err);
+      }
     } finally {
       this.running--;
       // 添加延迟避免瞬间大量请求
@@ -58,5 +71,5 @@ class RequestQueue {
   }
 }
 
-// 全局队列实例：最多 10 个并发请求，每个请求间隔 500ms
-export const chatQueue = new RequestQueue(10, 500);
+// 全局队列实例：最多 5 个并发请求，每个请求间隔 1000ms，429 重试延迟 3000ms
+export const chatQueue = new RequestQueue(5, 1000, 3000);
