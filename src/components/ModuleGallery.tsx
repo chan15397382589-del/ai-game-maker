@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { injectGameCSS } from "@/utils/gamePreview";
+import html2canvas from "html2canvas";
 
 interface Props {
   userId: string;
@@ -18,67 +19,111 @@ interface GameItem {
   author_grade: number | null;
   author_class_num: number | null;
   created_at: string;
+  thumbnail?: string; // base64 截图
 }
 
-// 单个游戏卡片（带懒加载预览）
+// 单个游戏卡片（截图预览）
 function GameCard({ item, onClick }: { item: GameItem; onClick: () => void }) {
-  const [visible, setVisible] = useState(false);
-  const [previewCode, setPreviewCode] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
+  const [thumbnail, setThumbnail] = useState<string | null>(item.thumbnail || null);
+  const [loading, setLoading] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [shouldLoad, setShouldLoad] = useState(false);
 
-  // IntersectionObserver 控制可见时才渲染 iframe
+  // IntersectionObserver 控制可见时才加载
   useEffect(() => {
-    const el = ref.current;
+    const el = containerRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setVisible(true);
+          setShouldLoad(true);
           observer.disconnect();
         }
       },
-      { rootMargin: "200px" } // 提前 200px 开始加载
+      { rootMargin: "300px" }
     );
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  // 可见时加载游戏代码
+  // 加载游戏代码并截图
   useEffect(() => {
-    if (!visible || previewCode !== null) return;
+    if (!shouldLoad || thumbnail || loading) return;
     let cancelled = false;
-    const load = async () => {
+
+    const loadAndCapture = async () => {
+      setLoading(true);
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
         if (!token || cancelled) return;
+
         const res = await fetch(`/api/student/gallery/${item.id}`, { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok && !cancelled) {
-          const data = await res.json();
-          setPreviewCode(data.html_code || "");
+        if (!res.ok || cancelled) return;
+
+        const data = await res.json();
+        if (!data.html_code || cancelled) return;
+
+        // 创建隐藏 iframe 渲染游戏
+        const iframe = document.createElement("iframe");
+        iframe.style.cssText = "position:fixed;left:-9999px;top:-9999px;width:480px;height:320px;border:none;";
+        iframe.sandbox = "allow-scripts allow-same-origin";
+        document.body.appendChild(iframe);
+
+        iframe.srcdoc = injectGameCSS(data.html_code);
+
+        // 等待加载完成
+        await new Promise<void>((resolve) => {
+          iframe.onload = () => setTimeout(resolve, 1500); // 等 1.5 秒让游戏渲染
+        });
+
+        if (cancelled) {
+          document.body.removeChild(iframe);
+          return;
         }
-      } catch {}
+
+        // 截图
+        try {
+          const canvas = await html2canvas(iframe.contentDocument!.body, {
+            width: 480,
+            height: 320,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: "#000",
+          });
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+          if (!cancelled) setThumbnail(dataUrl);
+        } catch (err) {
+          console.error("截图失败:", err);
+        }
+
+        document.body.removeChild(iframe);
+      } catch (err) {
+        console.error("加载游戏失败:", err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
-    load();
+
+    loadAndCapture();
     return () => { cancelled = true; };
-  }, [visible, item.id]);
+  }, [shouldLoad, item.id]);
 
   return (
-    <div ref={ref}
+    <div ref={containerRef}
       className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
       onClick={onClick}>
-      <div className="aspect-video bg-gray-900 relative overflow-hidden" style={{ contain: "layout style paint" }}>
-        {previewCode ? (
-          <iframe
-            srcDoc={injectGameCSS(previewCode)}
-            className="w-full h-full border-0 pointer-events-none"
-            sandbox="allow-scripts allow-same-origin"
-            scrolling="no"
-            style={{ contentVisibility: "auto" }}
-          />
+      <div className="aspect-video bg-gray-900 relative overflow-hidden">
+        {thumbnail ? (
+          <img src={thumbnail} alt={item.game_title} className="w-full h-full object-cover" />
+        ) : loading ? (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
+            <div className="w-8 h-8 border-3 border-white/30 border-t-white rounded-full animate-spin"></div>
+          </div>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
-            <div className="w-10 h-10 border-3 border-white/30 border-t-white rounded-full animate-spin"></div>
+            <span className="text-4xl"> </span>
           </div>
         )}
       </div>
@@ -121,7 +166,7 @@ export default function ModuleGallery({ userId }: Props) {
   const openGame = async (item: GameItem) => {
     setSelectedGame(item);
     setGameStarted(false);
-    if (item.html_code) return; // 已有代码
+    if (item.html_code) return;
     setLoadingGame(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
