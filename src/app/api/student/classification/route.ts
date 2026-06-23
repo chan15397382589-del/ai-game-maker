@@ -26,29 +26,44 @@ export async function POST(req: NextRequest) {
     // test_type: 'pre'（默认）或 'post'
     const type = test_type || "pre";
 
-    // 先删除同类型的旧记录（如果存在）
-    await supabaseAdmin
+    // 先查询是否已存在
+    const { data: existing } = await supabaseAdmin
       .from("student_classifications")
-      .delete()
+      .select("id")
       .eq("user_id", user.id)
-      .eq("test_type", type);
+      .eq("test_type", type)
+      .maybeSingle();
 
-    const { error } = await supabaseAdmin
-      .from("student_classifications")
-      .insert({
-        user_id: user.id,
-        conversation_id: conversation_id || null,
-        q1_answers: q1_answers || [],
-        q2_answer: q2_answer || "",
-        q3_answer: q3_answer || "",
-        q1_score: q1_score || 0,
-        q2_score: q2_score || 0,
-        q3_score: q3_score || 0,
-        total_score: total_score || 0,
-        srl_group: group || "low_srl",
-        total_time: total_time || 0,
-        test_type: type,
-      });
+    const recordData = {
+      user_id: user.id,
+      conversation_id: conversation_id || null,
+      q1_answers: q1_answers || [],
+      q2_answer: q2_answer || "",
+      q3_answer: q3_answer || "",
+      q1_score: q1_score || 0,
+      q2_score: q2_score || 0,
+      q3_score: q3_score || 0,
+      total_score: total_score || 0,
+      srl_group: group || "low_srl",
+      total_time: total_time || 0,
+      test_type: type,
+    };
+
+    let error;
+    if (existing) {
+      // 更新
+      const result = await supabaseAdmin
+        .from("student_classifications")
+        .update(recordData)
+        .eq("id", existing.id);
+      error = result.error;
+    } else {
+      // 插入
+      const result = await supabaseAdmin
+        .from("student_classifications")
+        .insert(recordData);
+      error = result.error;
+    }
 
     if (error) {
       console.error("[classification] 保存失败:", error);

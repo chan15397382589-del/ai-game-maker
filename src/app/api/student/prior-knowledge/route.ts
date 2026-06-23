@@ -19,21 +19,36 @@ export async function POST(req: NextRequest) {
 
     const { q1_gaming, q2_programming, q3_favorite, skipped } = await req.json();
 
-    // 先删除旧记录
-    await supabaseAdmin
-      .from("student_prior_knowledge")
-      .delete()
-      .eq("user_id", user.id);
+    const recordData = {
+      user_id: user.id,
+      q1_gaming: skipped ? null : q1_gaming || null,
+      q2_programming: skipped ? null : q2_programming || null,
+      q3_favorite: skipped ? null : q3_favorite || null,
+      skipped: skipped || false,
+    };
 
-    const { error } = await supabaseAdmin
+    // 先查询是否已存在
+    const { data: existing } = await supabaseAdmin
       .from("student_prior_knowledge")
-      .insert({
-        user_id: user.id,
-        q1_gaming: skipped ? null : q1_gaming || null,
-        q2_programming: skipped ? null : q2_programming || null,
-        q3_favorite: skipped ? null : q3_favorite || null,
-        skipped: skipped || false,
-      });
+      .select("id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    let error;
+    if (existing) {
+      // 更新
+      const result = await supabaseAdmin
+        .from("student_prior_knowledge")
+        .update(recordData)
+        .eq("id", existing.id);
+      error = result.error;
+    } else {
+      // 插入
+      const result = await supabaseAdmin
+        .from("student_prior_knowledge")
+        .insert(recordData);
+      error = result.error;
+    }
 
     if (error) {
       console.error("[prior-knowledge] 保存失败:", error);

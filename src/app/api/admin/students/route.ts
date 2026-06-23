@@ -163,8 +163,21 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "缺少 userId" }, { status: 400 });
     }
 
-    await db.auth.admin.deleteUser(userId);
-    await db.from("users").delete().eq("id", userId);
+    // 先删除数据库记录，再删除 auth 用户
+    // 这样如果 DB 删除失败，auth 用户仍然存在
+    const { error: dbError } = await db.from("users").delete().eq("id", userId);
+    if (dbError) {
+      console.error("[删除学生] 数据库删除失败:", dbError);
+      return NextResponse.json({ error: "数据库删除失败: " + dbError.message }, { status: 500 });
+    }
+
+    // 删除 auth 用户（即使失败也不回滚 DB 删除）
+    try {
+      await db.auth.admin.deleteUser(userId);
+    } catch (authErr: any) {
+      console.error("[删除学生] Auth 删除失败（DB 已删除）:", authErr);
+      // DB 已删除，auth 删除失败不影响返回成功
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {

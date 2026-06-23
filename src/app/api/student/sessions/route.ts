@@ -122,6 +122,7 @@ export async function DELETE(req: NextRequest) {
 
     if (msgError) {
       console.error("[sessions] 删除消息失败:", msgError);
+      return NextResponse.json({ error: "删除消息失败: " + msgError.message }, { status: 500 });
     }
 
     // 删除对话文档

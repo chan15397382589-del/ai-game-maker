@@ -53,14 +53,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "缺少task_id" }, { status: 400 });
     }
 
-    // 检查是否已存在
-    const { data: existing } = await supabaseAdmin
-      .from("student_tasks")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("task_id", task_id)
-      .single();
-
     const updateData: any = { updated_at: new Date().toISOString() };
     if (design_image !== undefined) updateData.design_image = design_image;
     if (game_rules !== undefined) updateData.game_rules = game_rules;
@@ -71,6 +63,15 @@ export async function POST(req: NextRequest) {
     if (duration_seconds !== undefined) updateData.duration_seconds = duration_seconds;
     if (save_count !== undefined) updateData.save_count = save_count;
     if (undo_count !== undefined) updateData.undo_count = undo_count;
+
+    // 使用 upsert 避免竞态条件（需要数据库有 unique 约束）
+    // 先尝试查询，不存在则插入
+    const { data: existing } = await supabaseAdmin
+      .from("student_tasks")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("task_id", task_id)
+      .maybeSingle();
 
     if (existing) {
       // 更新
@@ -95,7 +96,21 @@ export async function POST(req: NextRequest) {
         .select()
         .single();
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) {
+        // 如果是唯一约束冲突，说明并发请求已插入，尝试更新
+        if (error.code === "23505") {
+          const { data: retryData, error: retryError } = await supabaseAdmin
+            .from("student_tasks")
+            .update(updateData)
+            .eq("user_id", user.id)
+            .eq("task_id", task_id)
+            .select()
+            .single();
+          if (retryError) return NextResponse.json({ error: retryError.message }, { status: 500 });
+          return NextResponse.json(retryData);
+        }
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
       return NextResponse.json(data);
     }
   } catch (err: any) {
