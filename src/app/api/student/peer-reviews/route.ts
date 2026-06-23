@@ -107,10 +107,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ tasks: [], totalReviewed: reviewedIds.length, totalAvailable: 0 });
     }
 
-    // 获取这些同学的有游戏代码的最新对话（不加载 html_code）
+    // 获取这些同学的有游戏代码的最新对话（需要 html_code 用于预览）
     const { data: convs } = await db
       .from("conversations")
-      .select("id, user_id, title, updated_at")
+      .select("id, user_id, title, html_code, updated_at")
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
       .order("updated_at", { ascending: false })
