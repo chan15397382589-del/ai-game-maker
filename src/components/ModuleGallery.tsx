@@ -12,7 +12,7 @@ interface GameItem {
   id: number;
   user_id: string;
   game_title: string;
-  html_code: string;
+  html_code?: string;
   game_rules?: string[];
   author_name: string;
   author_grade: number | null;
@@ -25,10 +25,9 @@ export default function ModuleGallery({ userId }: Props) {
   const [loading, setLoading] = useState(true);
   const [selectedGame, setSelectedGame] = useState<GameItem | null>(null);
   const [gameStarted, setGameStarted] = useState(false);
+  const [loadingGame, setLoadingGame] = useState(false);
 
-  useEffect(() => {
-    fetchGames();
-  }, []);
+  useEffect(() => { fetchGames(); }, []);
 
   const fetchGames = async () => {
     setLoading(true);
@@ -36,31 +35,25 @@ export default function ModuleGallery({ userId }: Props) {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) return;
-
-      const res = await fetch("/api/student/gallery", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setItems(data || []);
-      }
+      const res = await fetch("/api/student/gallery", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setItems(await res.json() || []);
     } catch (err) { console.error(err); } finally { setLoading(false); }
   };
 
-  const loadGameCode = async (gameId: string | number) => {
+  const openGame = async (item: GameItem) => {
+    setSelectedGame(item);
+    setGameStarted(false);
+    setLoadingGame(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) return;
-
-      const res = await fetch(`/api/student/gallery/${String(gameId)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`/api/student/gallery/${item.id}`, { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         const data = await res.json();
-        setSelectedGame((prev: any) => prev ? { ...prev, html_code: data.html_code } : prev);
+        setSelectedGame((prev) => prev ? { ...prev, html_code: data.html_code } : prev);
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err); } finally { setLoadingGame(false); }
   };
 
   if (loading) {
@@ -87,9 +80,16 @@ export default function ModuleGallery({ userId }: Props) {
           </div>
         </div>
         <div className="flex-1 rounded-2xl shadow-lg overflow-hidden relative bg-white">
-          {gameStarted ? (
+          {loadingGame ? (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900">
+              <div className="text-center">
+                <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-white text-sm">加载游戏中...</p>
+              </div>
+            </div>
+          ) : gameStarted ? (
             <iframe
-              srcDoc={injectGameCSS(selectedGame.html_code)}
+              srcDoc={injectGameCSS(selectedGame.html_code || "")}
               className="absolute inset-0 w-full h-full"
               sandbox="allow-scripts allow-same-origin"
               scrolling="no"
@@ -113,7 +113,7 @@ export default function ModuleGallery({ userId }: Props) {
     );
   }
 
-  // 游戏列表
+  // 游戏列表（静态卡片，不用 iframe）
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -138,20 +138,13 @@ export default function ModuleGallery({ userId }: Props) {
             {items.map((item) => (
               <div key={item.id}
                 className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
-                onClick={() => { setSelectedGame(item); loadGameCode(item.id); }}>
-                <div className="aspect-video bg-gray-900 relative overflow-hidden">
-                  {item.html_code ? (
-                    <iframe
-                      srcDoc={injectGameCSS(item.html_code)}
-                      className="w-full h-full border-0 pointer-events-none"
-                      sandbox="allow-scripts allow-same-origin"
-                      scrolling="no"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <span className="text-4xl"> </span>
-                    </div>
-                  )}
+                onClick={() => openGame(item)}>
+                {/* 静态占位卡片 */}
+                <div className="aspect-video bg-gradient-to-br from-indigo-500 to-purple-600 relative flex items-center justify-center">
+                  <div className="text-center">
+                    <span className="text-4xl block mb-1"> </span>
+                    <p className="text-white text-xs font-medium opacity-80">点击试玩</p>
+                  </div>
                 </div>
                 <div className="px-3 py-2.5">
                   <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
