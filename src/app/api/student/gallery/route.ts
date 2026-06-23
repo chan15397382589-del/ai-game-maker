@@ -52,10 +52,10 @@ export async function GET(req: NextRequest) {
     // 获取所有有游戏代码的对话（不加载 html_code，按需获取）
     const { data: allConvs } = await db
       .from("conversations")
-      .select("id, user_id, title, updated_at")
+      .select("id, user_id, title, created_at")
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
-      .order("updated_at", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(500);
 
     // 获取学生的游戏规则
@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
         author_name: author?.name || "未知",
         author_grade: author?.grade,
         author_class_num: author?.class_num,
-        created_at: c.updated_at,
+        created_at: c.created_at,
       });
     }
 
