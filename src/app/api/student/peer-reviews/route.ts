@@ -20,6 +20,25 @@ export async function GET(req: NextRequest) {
     const mode = searchParams.get("mode"); // "tasks" | "my_reviews"
 
     if (mode === "my_reviews") {
+      // 获取我的班级信息
+      const { data: myInfo } = await db
+        .from("users")
+        .select("grade, class_num")
+        .eq("id", user.id)
+        .single();
+
+      // 获取同班同学ID
+      let classmateQuery = db
+        .from("users")
+        .select("id")
+        .eq("grade", myInfo?.grade || 0)
+        .eq("role", "student");
+      if (myInfo?.class_num) {
+        classmateQuery = classmateQuery.eq("class_num", myInfo.class_num);
+      }
+      const { data: classmates } = await classmateQuery;
+      const classmateIds = new Set((classmates || []).map((c: any) => c.id));
+
       // 获取别人对我游戏的评价
       const { data, error } = await db
         .from("peer_reviews")
@@ -29,15 +48,18 @@ export async function GET(req: NextRequest) {
 
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+      // 只保留同班同学的评价
+      const filtered = (data || []).filter((r: any) => classmateIds.has(r.reviewer_id));
+
       // 获取评价者信息
-      const reviewerIds = [...new Set((data || []).map((r: any) => r.reviewer_id))];
+      const reviewerIds = [...new Set(filtered.map((r: any) => r.reviewer_id))];
       const { data: reviewers } = reviewerIds.length > 0
         ? await db.from("users").select("id, name, student_id").in("id", reviewerIds)
         : { data: [] };
       const reviewerMap: Record<string, any> = {};
       (reviewers || []).forEach((r: any) => { reviewerMap[r.id] = r; });
 
-      const result = (data || []).map((r: any) => ({
+      const result = filtered.map((r: any) => ({
         ...r,
         reviewer: reviewerMap[r.reviewer_id] || { name: "匿名" },
       }));
