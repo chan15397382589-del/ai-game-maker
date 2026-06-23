@@ -34,16 +34,24 @@ export async function GET(
       .eq("user_id", userId)
       .order("updated_at", { ascending: false });
 
-    // 获取每个对话的消息数量
-    const convsWithCounts = await Promise.all(
-      (conversations || []).map(async (conv: any) => {
-        const { count } = await db
-          .from("messages")
-          .select("id", { count: "exact", head: true })
-          .eq("session_id", conv.id);
-        return { ...conv, message_count: count || 0, has_game: !!conv.html_code };
-      })
-    );
+    // 批量获取所有对话的消息数量（避免 N+1 查询）
+    const convIds = (conversations || []).map((c: any) => c.id);
+    let messageCountMap: Record<string, number> = {};
+    if (convIds.length > 0) {
+      const { data: allMessages } = await db
+        .from("messages")
+        .select("session_id")
+        .in("session_id", convIds);
+      (allMessages || []).forEach((m: any) => {
+        messageCountMap[m.session_id] = (messageCountMap[m.session_id] || 0) + 1;
+      });
+    }
+
+    const convsWithCounts = (conversations || []).map((conv: any) => ({
+      ...conv,
+      message_count: messageCountMap[conv.id] || 0,
+      has_game: !!conv.html_code,
+    }));
 
     // 获取所有游戏快照（容错处理表不存在的情况）
     let snapshots: any[] = [];

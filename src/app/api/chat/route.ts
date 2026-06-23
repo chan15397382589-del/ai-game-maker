@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, createChatCompletion, saveMessage, classifyAiSuggestion } from "@/lib/deepseek";
 import { chatQueue } from "@/lib/requestQueue";
+import { checkRateLimit } from "@/lib/rateLimit";
 
 export async function POST(req: NextRequest) {
   try {
     const { messages, sessionId, currentCode, srlCondition, inputMethod, skipSave } = await req.json();
+
+    // 从请求头获取 token 并验证用户身份
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
+    if (!token) {
+      return NextResponse.json({ error: "未登录" }, { status: 401 });
+    }
+
+    // 速率限制（每用户每分钟 20 次请求）
+    const rateLimitKey = `chat:${token.substring(0, 20)}`;
+    const { allowed, remaining } = checkRateLimit(rateLimitKey, 20, 60000);
+    if (!allowed) {
+      return NextResponse.json({ error: "请求太频繁，请稍后再试" }, { status: 429 });
+    }
 
     // 输入验证
     if (!Array.isArray(messages)) {
@@ -25,11 +39,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 从请求头获取 token 并验证用户身份（不信任客户端传入的 userId）
-    const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
-    if (!token) {
-      return NextResponse.json({ error: "未登录" }, { status: 401 });
-    }
+    // 防止 prompt 注入：过滤掉用户消息中的 system 消息
+    // 只允许 user 和 assistant 角色的消息
+    const sanitizedMessages = messages.filter((msg: any) => msg.role === "user" || msg.role === "assistant");
 
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) {
@@ -50,7 +62,7 @@ export async function POST(req: NextRequest) {
     let response;
     try {
       // 使用队列控制并发，避免 429 限流
-      response = await chatQueue.add(() => createChatCompletion(messages, currentCode, srlCondition));
+      response = await chatQueue.add(() => createChatCompletion(sanitizedMessages, currentCode, srlCondition));
     } catch (apiError: any) {
       console.error("MIMO API call failed:", apiError.message);
       if (apiError.message?.includes("429")) {

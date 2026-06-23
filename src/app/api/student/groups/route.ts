@@ -55,7 +55,10 @@ export async function POST(req: NextRequest) {
       });
 
     if (memberError) {
-      console.error("Failed to add creator as member:", memberError);
+      // 如果添加成员失败，删除刚创建的小组
+      console.error("Failed to add creator as member, rolling back:", memberError);
+      await supabaseAdmin.from("groups").delete().eq("id", group_id);
+      return NextResponse.json({ error: "创建小组失败，请重试" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, group_id });

@@ -93,6 +93,11 @@ export async function DELETE(
       return NextResponse.json({ error: "无权操作" }, { status: 403 });
     }
 
+    // 先删除关联的评论和点赞
+    await db.from("comments").delete().eq("shared_item_id", id);
+    await db.from("likes").delete().eq("shared_item_id", id);
+
+    // 再删除作品
     const { error } = await db
       .from("shared_items")
       .delete()

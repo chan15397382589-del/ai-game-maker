@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDB } from "@/lib/supabase-admin";
+import { validateComment } from "@/lib/profanity";
 
 
 // GET — 获取评论列表
@@ -75,18 +76,11 @@ export async function POST(
     }
 
     const { content } = await req.json();
-    if (!content || !content.trim()) {
-      return NextResponse.json({ error: "评论不能为空" }, { status: 400 });
-    }
 
-    if (content.length > 500) {
-      return NextResponse.json({ error: "评论太长" }, { status: 400 });
-    }
-
-    const badWords = ["傻逼", "sb", "傻b", "尼玛", "操你", "草你", "艹", "特么", "他妈", "fuck", "shit"];
-    const lower = content.toLowerCase();
-    if (badWords.some((w) => lower.includes(w.toLowerCase()))) {
-      return NextResponse.json({ error: "评论包含不当内容" }, { status: 400 });
+    // 使用统一的评论验证
+    const validation = validateComment(content);
+    if (!validation.valid) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
     }
 
     const { data, error } = await db
