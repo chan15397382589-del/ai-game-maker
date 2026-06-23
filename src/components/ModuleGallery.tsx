@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { injectGameCSS } from "@/utils/gamePreview";
 
@@ -18,6 +18,84 @@ interface GameItem {
   author_grade: number | null;
   author_class_num: number | null;
   created_at: string;
+}
+
+// 单个游戏卡片（带懒加载预览）
+function GameCard({ item, onClick }: { item: GameItem; onClick: () => void }) {
+  const [visible, setVisible] = useState(false);
+  const [previewCode, setPreviewCode] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // IntersectionObserver 控制可见时才渲染 iframe
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" } // 提前 200px 开始加载
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // 可见时加载游戏代码
+  useEffect(() => {
+    if (!visible || previewCode !== null) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token || cancelled) return;
+        const res = await fetch(`/api/student/gallery/${item.id}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setPreviewCode(data.html_code || "");
+        }
+      } catch {}
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [visible, item.id]);
+
+  return (
+    <div ref={ref}
+      className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
+      onClick={onClick}>
+      <div className="aspect-video bg-gray-900 relative overflow-hidden" style={{ contain: "layout style paint" }}>
+        {previewCode ? (
+          <iframe
+            srcDoc={injectGameCSS(previewCode)}
+            className="w-full h-full border-0 pointer-events-none"
+            sandbox="allow-scripts allow-same-origin"
+            scrolling="no"
+            style={{ contentVisibility: "auto" }}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
+            <div className="w-10 h-10 border-3 border-white/30 border-t-white rounded-full animate-spin"></div>
+          </div>
+        )}
+      </div>
+      <div className="px-3 py-2.5">
+        <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
+        <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
+        {item.game_rules && item.game_rules.length > 0 && (
+          <div className="mt-1.5 space-y-0.5">
+            {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
+              <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
+            ))}
+            {item.game_rules.length > 2 && <p className="text-[10px] text-gray-400">+{item.game_rules.length - 2} 条规则</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function ModuleGallery({ userId }: Props) {
@@ -43,6 +121,7 @@ export default function ModuleGallery({ userId }: Props) {
   const openGame = async (item: GameItem) => {
     setSelectedGame(item);
     setGameStarted(false);
+    if (item.html_code) return; // 已有代码
     setLoadingGame(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -113,7 +192,7 @@ export default function ModuleGallery({ userId }: Props) {
     );
   }
 
-  // 游戏列表（静态卡片，不用 iframe）
+  // 游戏列表
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -136,29 +215,7 @@ export default function ModuleGallery({ userId }: Props) {
         <div className="flex-1 overflow-y-auto pb-4">
           <div className="grid grid-cols-4 gap-4">
             {items.map((item) => (
-              <div key={item.id}
-                className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
-                onClick={() => openGame(item)}>
-                {/* 静态占位卡片 */}
-                <div className="aspect-video bg-gradient-to-br from-indigo-500 to-purple-600 relative flex items-center justify-center">
-                  <div className="text-center">
-                    <span className="text-4xl block mb-1"> </span>
-                    <p className="text-white text-xs font-medium opacity-80">点击试玩</p>
-                  </div>
-                </div>
-                <div className="px-3 py-2.5">
-                  <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
-                  {item.game_rules && item.game_rules.length > 0 && (
-                    <div className="mt-1.5 space-y-0.5">
-                      {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
-                        <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
-                      ))}
-                      {item.game_rules.length > 2 && <p className="text-[10px] text-gray-400">+{item.game_rules.length - 2} 条规则</p>}
-                    </div>
-                  )}
-                </div>
-              </div>
+              <GameCard key={item.id} item={item} onClick={() => openGame(item)} />
             ))}
           </div>
         </div>
