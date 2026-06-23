@@ -49,14 +49,14 @@ export async function GET(req: NextRequest) {
 
     if (classmateIds.length === 0) return NextResponse.json([]);
 
-    // 获取每个学生最新的一条有游戏代码的对话（不加载 html_code，按需获取）
+    // 获取所有有游戏代码的对话（不加载 html_code，按需获取）
     const { data: allConvs } = await db
       .from("conversations")
       .select("id, user_id, title, updated_at")
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
       .order("updated_at", { ascending: false })
-      .limit(200);
+      .limit(500);
 
     // 获取学生的游戏规则
     const { data: tasks } = await db
@@ -68,12 +68,9 @@ export async function GET(req: NextRequest) {
     const rulesMap: Record<string, any> = {};
     (tasks || []).forEach((t: any) => { rulesMap[t.user_id] = t; });
 
-    // 每个学生只保留最新的一条
-    const seen = new Set<string>();
+    // 返回所有作品（每个学生可能有多个）
     const games: any[] = [];
     for (const c of allConvs || []) {
-      if (seen.has(c.user_id)) continue;
-      seen.add(c.user_id);
       const author = classmateMap[c.user_id];
       const task = rulesMap[c.user_id];
       games.push({
