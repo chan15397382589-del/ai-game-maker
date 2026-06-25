@@ -1,17 +1,24 @@
 // 游戏预览工具函数
 
-// 注入 CSS 让游戏自适应 iframe（防止拉伸变形和溢出）
+// 注入 CSS 让游戏完整显示在预览框内（缩放适配）
 export function injectGameCSS(html: string): string {
   const css = `<style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
     canvas {
       display: block;
       max-width: 100%;
-      max-height: 100vh;
-      width: auto;
-      height: auto;
-      object-fit: contain;
+      max-height: 100%;
+      width: auto !important;
+      height: auto !important;
     }
   </style>`;
 
