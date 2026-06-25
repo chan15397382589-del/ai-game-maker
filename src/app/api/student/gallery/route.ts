@@ -49,14 +49,14 @@ export async function GET(req: NextRequest) {
 
     if (classmateIds.length === 0) return NextResponse.json([]);
 
-    // 获取所有有游戏代码的对话（不加载 html_code，按需获取）
+    // 获取所有有游戏代码的对话（需要 html_code 用于缩略图预览）
     const { data: allConvs } = await db
       .from("conversations")
-      .select("id, user_id, title, created_at")
+      .select("id, user_id, title, html_code, created_at")
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
       .order("created_at", { ascending: false })
-      .limit(500);
+      .limit(200);
 
     // 获取学生的游戏规则
     const { data: tasks } = await db
@@ -77,6 +77,7 @@ export async function GET(req: NextRequest) {
         id: c.id,
         user_id: c.user_id,
         game_title: task?.game_name || c.title || "未命名游戏",
+        html_code: c.html_code,
         game_rules: task?.game_rules || [],
         author_name: author?.name || "未知",
         author_grade: author?.grade,
