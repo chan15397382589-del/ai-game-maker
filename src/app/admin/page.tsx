@@ -2496,6 +2496,7 @@ const TASK_TABS = [
   { key: "2-2", label: "修改迭代", taskIds: ["2-2"] },
   { key: "3-1", label: "作品展示", taskIds: ["3-1"] },
   { key: "3-2", label: "同伴互评", taskIds: ["3-2"] },
+  { key: "peer-reviews", label: "互评数据", taskIds: [] },
   { key: "designs", label: "设计图", taskIds: [] },
   { key: "discussions", label: "小组讨论", taskIds: [] },
 ] as const;
@@ -2534,6 +2535,8 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
           counts["designs"] = Object.values(tc).reduce((a, b) => a + b, 0) > 0 ? 1 : 0;
           // 小组讨论
           counts["discussions"] = data.groupMessageCount || 0;
+          // 互评数据
+          counts["peer-reviews"] = data.peerReviewCount || 0;
           setTabCounts(counts);
           // 自动选中第一个有数据的标签
           const firstActive = TASK_TABS.find(t => (counts[t.key] || 0) > 0);
@@ -2554,7 +2557,15 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
         const token = await getAuthToken();
         if (!token) return;
 
-        if (activeTab === "discussions") {
+        if (activeTab === "peer-reviews") {
+          const params = new URLSearchParams();
+          if (grade) params.set("grade", grade);
+          if (classNum) params.set("class_num", classNum);
+          const res = await fetch(`/api/admin/peer-reviews?${params}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) setTasks(await res.json());
+        } else if (activeTab === "discussions") {
           const params = new URLSearchParams();
           if (grade) params.set("grade", grade);
           if (classNum) params.set("class_num", classNum);
@@ -2696,6 +2707,8 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
         <DesignCards tasks={tasks} />
       ) : activeTab === "discussions" ? (
         <DiscussionList messages={groupMessages} />
+      ) : activeTab === "peer-reviews" ? (
+        <PeerReviewsTable reviews={tasks} />
       ) : (
         <TaskCards tasks={tasks} />
       )}
@@ -2874,6 +2887,41 @@ function DiscussionList({ messages }: { messages: any[] }) {
 // ============================================================
 // 游戏制作（教师演示用，可切换对照组/实验组）
 // 对齐学生端界面风格
+// 同伴互评数据
+function PeerReviewsTable({ reviews }: { reviews: any[] }) {
+  if (reviews.length === 0) return <div className="text-center py-12 text-gray-400">暂无互评数据</div>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50">
+          <tr>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">评价者</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">学号</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">被评者</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">好玩之处</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">改进建议</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">发现的问题</th>
+            <th className="px-4 py-3 text-left font-medium text-gray-700">时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          {reviews.map((r: any) => (
+            <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
+              <td className="px-4 py-3 font-medium">{r.reviewer?.name || "未知"}</td>
+              <td className="px-4 py-3 text-gray-600">{r.reviewer?.student_id}</td>
+              <td className="px-4 py-3 text-gray-600">{r.reviewee?.name || "未知"}</td>
+              <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">{r.q1_enjoy}</td>
+              <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">{r.q2_suggestion}</td>
+              <td className="px-4 py-3 text-gray-500 max-w-[200px] truncate">{r.q3_bug || "—"}</td>
+              <td className="px-4 py-3 text-gray-400 text-xs">{new Date(r.created_at).toLocaleString("zh-CN")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ============================================================
 interface GameMakerState {
   messages: { role: string; content: string }[];

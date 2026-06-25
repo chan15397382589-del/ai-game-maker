@@ -152,17 +152,26 @@ export async function GET(req: NextRequest) {
         review_count: reviewCountMap[id] || 0,
       }));
 
-    // 随机打乱，但优先选评价少的
-    // 先按评价数分组，每组内随机排序，再拼接
+    // 稳定的分配：基于评价者ID的伪随机排序（同一评价者每次看到相同的顺序）
+    // 使用简单的 hash 函数生成确定性"随机"种子
+    const seed = [...user.id].reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const seededRandom = (() => {
+      let s = seed;
+      return () => {
+        s = (s * 1664525 + 1013904223) & 0xffffffff;
+        return (s >>> 0) / 0xffffffff;
+      };
+    })();
+
+    // 按评价数分组，组内用确定性随机排序
     const groups: Record<number, any[]> = {};
     for (const item of available) {
       const count = item.review_count;
       if (!groups[count]) groups[count] = [];
       groups[count].push(item);
     }
-    // 每组内随机打乱
     for (const key of Object.keys(groups)) {
-      groups[Number(key)].sort(() => Math.random() - 0.5);
+      groups[Number(key)].sort(() => seededRandom() - 0.5);
     }
     // 按评价数从少到多拼接
     const sorted = Object.keys(groups).sort().flatMap((key) => groups[Number(key)]);
