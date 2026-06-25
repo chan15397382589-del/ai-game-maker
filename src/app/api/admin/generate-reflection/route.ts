@@ -8,24 +8,41 @@ const deepseek = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "",
 });
 
+// 检查反思是否完整有效
+function isReflectionValid(reflection: any): boolean {
+  if (!reflection) return false;
+  try {
+    const ref = typeof reflection === "string" ? JSON.parse(reflection) : reflection;
+    const keys = ["q1", "q2", "q3", "q4", "q5"];
+    for (const k of keys) {
+      const v = ref[k];
+      if (!v) return false;
+      // 检查是否为乱填（纯符号、纯数字、过短）
+      const text = typeof v === "string" ? v : Object.values(v).join("");
+      if (!text || text.length < 2) return false;
+      if (/^[\d\s]+$/.test(text)) return false; // 纯数字
+      if (/^[^a-zA-Z一-鿿]+$/.test(text)) return false; // 无中英文
+    }
+    return true;
+  } catch { return false; }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
     const admin = await getVerifiedAdmin(token);
     if (admin instanceof NextResponse) return admin;
 
-    const { userId, grade, classNum } = await req.json();
+    const { userId, grade, class_num } = await req.json();
 
-    // 获取用户ID列表
     let userQuery = supabaseAdmin.from("users").select("id, name, student_id").eq("role", "student");
     if (userId) {
       userQuery = userQuery.eq("id", userId);
     } else if (grade) {
       userQuery = userQuery.eq("grade", parseInt(grade));
-      if (classNum) userQuery = userQuery.eq("class_num", parseInt(classNum));
+      if (class_num) userQuery = userQuery.eq("class_num", parseInt(class_num));
     }
     const { data: students } = await userQuery.limit(100);
-
     if (!students || students.length === 0) {
       return NextResponse.json({ error: "没有找到学生" }, { status: 404 });
     }
@@ -34,21 +51,26 @@ export async function POST(req: NextRequest) {
 
     for (const student of students) {
       try {
-        // 检查是否已有反思
-        const { data: existingRef } = await supabaseAdmin
+        // 获取最新会话和其反思
+        const { data: convs } = await supabaseAdmin
           .from("conversations")
-          .select("id").eq("user_id", student.id)
-          .not("reflection", "is", null).limit(1);
+          .select("id, reflection")
+          .eq("user_id", student.id)
+          .order("updated_at", { ascending: false })
+          .limit(1);
 
-        if (existingRef && existingRef.length > 0) {
-          results.push({ name: student.name, id: student.student_id, status: "跳过", reason: "已有反思" });
+        const existingRef = convs?.[0]?.reflection;
+
+        // 检查已有反思是否完整有效
+        if (existingRef && isReflectionValid(existingRef)) {
+          results.push({ name: student.name, id: student.student_id, status: "跳过", reason: "已有完整反思" });
           continue;
         }
 
-        // 获取学生的对话消息
+        // 获取对话消息
         const { data: messages } = await supabaseAdmin
           .from("messages")
-          .select("role, content, created_at")
+          .select("role, content")
           .eq("user_id", student.id)
           .order("created_at", { ascending: true })
           .limit(200);
@@ -58,6 +80,32 @@ export async function POST(req: NextRequest) {
           continue;
         }
 
+        // 获取游戏设计数据
+        const { data: designTask } = await supabaseAdmin
+          .from("student_tasks")
+          .select("game_name, game_rules, design_reason")
+          .eq("user_id", student.id)
+          .eq("task_id", "1-1")
+          .maybeSingle();
+
+        let designInfo = "";
+        if (designTask) {
+          designInfo = `游戏名称：${designTask.game_name || "未命名"}\n`;
+          if (designTask.game_rules?.length > 0) {
+            designInfo += `游戏规则：${designTask.game_rules.map((r: string) => `如果${r}`).join("；")}\n`;
+          }
+          if (designTask.design_reason) {
+            try {
+              const reason = JSON.parse(designTask.design_reason);
+              if (reason.ai_prompt) designInfo += `设计描述：${reason.ai_prompt}\n`;
+            } catch {
+              if (typeof designTask.design_reason === "string" && designTask.design_reason.length < 200) {
+                designInfo += `设计想法：${designTask.design_reason}\n`;
+              }
+            }
+          }
+        }
+
         // 获取同伴互评
         const { data: peerReviews } = await supabaseAdmin
           .from("peer_reviews")
@@ -65,29 +113,32 @@ export async function POST(req: NextRequest) {
           .eq("reviewee_id", student.id);
 
         const reviewText = (peerReviews || []).map((r: any) =>
-          `同学评价：好玩-${r.q1_enjoy || ""}，建议-${r.q2_suggestion || ""}，问题-${r.q3_bug || ""}`
+          `同学觉得：${r.q1_enjoy || ""}；建议：${r.q2_suggestion || ""}；问题：${r.q3_bug || ""}`
         ).join("\n");
 
-        // 构建对话摘要
+        // 构建对话
         const conversation = messages
-          .map((m: any) => `${m.role === "user" ? "学生" : "AI"}: ${(m.content || "").substring(0, 200)}`)
+          .map((m: any) => `${m.role === "user" ? "学生" : "AI老师"}: ${(m.content || "").substring(0, 150)}`)
           .join("\n");
 
-        const prompt = `你是教育助手。根据学生的AI游戏创作对话，以学生的口吻生成反思。
+        const prompt = `你是教育助手。根据学生的游戏设计和对话记录，以学生自己的口吻生成反思。
 
-对话记录：
-${conversation.substring(0, 6000)}
+【游戏设计】
+${designInfo || "无"}
 
-同伴反馈：
-${reviewText.substring(0, 1000) || "无"}
+【创作对话】
+${conversation.substring(0, 5000)}
 
-只输出 JSON：
+【同伴反馈】
+${reviewText.substring(0, 800) || "暂无"}
+
+只输出 JSON，不作解释：
 {
-  "q1": { "name": "游戏名", "play": "玩法" },
-  "q2": { "cond": "如果什么条件", "result": "就发生什么" },
-  "q3": { "difficulty": "困难", "solve": "解决方法" },
-  "q4": { "feedback": "同伴说xxx", "feel": "我觉得xxx" },
-  "q5": { "redo": "会改xxx" }
+  "q1": { "name": "基于设计信息的游戏名", "play": "学生描述的玩法" },
+  "q2": { "cond": "游戏的核心规则条件", "result": "满足条件后的结果" },
+  "q3": { "difficulty": "从对话中推测的困难", "solve": "如何解决的" },
+  "q4": { "feedback": "同伴的评价", "feel": "学生对评价的感受" },
+  "q5": { "redo": "学生可能想改进的地方" }
 }`;
 
         const response = await deepseek.chat.completions.create({
@@ -105,19 +156,15 @@ ${reviewText.substring(0, 1000) || "无"}
         const reflection = JSON.parse(jsonMatch[0]);
 
         // 保存
-        const { data: convs } = await supabaseAdmin
-          .from("conversations")
-          .select("id").eq("user_id", student.id)
-          .order("updated_at", { ascending: false }).limit(1);
-
         if (convs && convs.length > 0) {
           await supabaseAdmin.from("conversations").update({
             reflection: JSON.stringify(reflection),
             updated_at: new Date().toISOString(),
           }).eq("id", convs[0].id);
+          results.push({ name: student.name, id: student.student_id, status: "成功", reason: existingRef ? "覆盖乱填" : "新生成" });
+        } else {
+          results.push({ name: student.name, id: student.student_id, status: "跳过", reason: "无会话" });
         }
-
-        results.push({ name: student.name, id: student.student_id, status: "成功" });
       } catch (err: any) {
         results.push({ name: student.name, id: student.student_id, status: "失败", reason: err.message });
       }
