@@ -93,20 +93,14 @@ export async function POST(req: NextRequest) {
         resetTimeout();
 
         try {
-          for await (const event of response) {
+          for await (const chunk of response) {
             resetTimeout(); // 收到数据时重置超时
-            // 处理文本内容
-            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
-              const content = event.delta.text;
+            // OpenAI/DeepSeek 流式格式：chunk.choices[0].delta.content
+            const content = chunk.choices?.[0]?.delta?.content;
+            if (content) {
               assistantContent += content;
               chunkCount++;
-              const data = `data: ${JSON.stringify({ content })}\n\n`;
-              controller.enqueue(encoder.encode(data));
-            }
-            // 也处理 thinking 内容（如果只有 thinking 没有 text，也记录）
-            if (event.type === "content_block_delta" && event.delta?.type === "thinking_delta") {
-              // thinking 内容不发送给前端，但计入 chunkCount 避免误判为空
-              chunkCount++;
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
             }
           }
 
