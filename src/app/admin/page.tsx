@@ -2279,6 +2279,41 @@ function PriorKnowledgeView({ grade, classNum }: { grade?: string; classNum?: st
 }
 
 // ============================================================
+// 自动生成反思按钮
+// ============================================================
+function GenReflectionButton({ grade, classNum }: { grade?: string; classNum?: string }) {
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const handleGenerate = async () => {
+    if (!grade || !classNum) { alert("请先选择年级和班级"); return; }
+    if (!confirm(`将为 ${grade}年级${classNum}班所有学生生成反思，确认？`)) return;
+    setRunning(true); setResult(null);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch("/api/admin/generate-reflection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ grade: parseInt(grade), class_num: parseInt(classNum) }),
+      });
+      if (res.ok) setResult(await res.json());
+    } catch (err) { console.error(err); }
+    finally { setRunning(false); }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <button onClick={handleGenerate} disabled={running || !grade || !classNum}
+        className="px-3 py-2 bg-purple-500 hover:bg-purple-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition"
+      >{running ? "生成中..." : "🤖 批量生成反思"}</button>
+      {result && (
+        <span className="text-xs text-green-600">✅ {result.success}/{result.total} 成功</span>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // 修复游戏按钮
 // ============================================================
 function FixGamesButton({ grade, classNum }: { grade?: string; classNum?: string }) {
@@ -2391,6 +2426,8 @@ function DataOverview() {
           </select>
           {/* 修复游戏按钮 */}
           <FixGamesButton grade={selectedGrade} classNum={selectedClass} />
+          {/* 自动生成反思按钮 */}
+          <GenReflectionButton grade={selectedGrade} classNum={selectedClass} />
         </div>
       </div>
       {activeSubTab === "prior" ? (

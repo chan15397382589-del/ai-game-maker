@@ -132,10 +132,7 @@ export default function ModuleReflection({ userId }: Props) {
     <div className="space-y-4 pb-8">
       <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-2xl border border-amber-100">
         <span className="text-3xl"> </span>
-        <div className="flex-1"><h2 className="text-xl font-bold text-amber-800">我的反思</h2><p className="text-sm text-amber-600">回顾你的创作过程</p></div>
-        <button onClick={autoGenerate} disabled={generating}
-          className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition"
-        >{generating ? "生成中..." : "🤖 AI 帮我写"}</button>
+        <div><h2 className="text-xl font-bold text-amber-800">我的反思</h2><p className="text-sm text-amber-600">回顾你的创作过程</p></div>
       </div>
 
       {REFLECTIONS.map((r, idx) => {
