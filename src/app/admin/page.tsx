@@ -2279,6 +2279,60 @@ function PriorKnowledgeView({ grade, classNum }: { grade?: string; classNum?: st
 }
 
 // ============================================================
+// 修复游戏按钮
+// ============================================================
+function FixGamesButton({ grade, classNum }: { grade?: string; classNum?: string }) {
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<any>(null);
+
+  const handleCheck = async () => {
+    if (!grade || !classNum) { alert("请先选择年级和班级"); return; }
+    setChecking(true); setResult(null);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`/api/admin/fix-games?grade=${grade}&class_num=${classNum}&action=check`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setResult(await res.json());
+    } catch (err) { console.error(err); }
+    finally { setChecking(false); }
+  };
+
+  const handleFix = async () => {
+    if (!grade || !classNum) { alert("请先选择年级和班级"); return; }
+    setChecking(true); setResult(null);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`/api/admin/fix-games?grade=${grade}&class_num=${classNum}&action=fix`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setResult(await res.json());
+    } catch (err) { console.error(err); }
+    finally { setChecking(false); }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <button onClick={handleCheck} disabled={checking || !grade || !classNum}
+        className="px-3 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition"
+      >{checking ? "检测中..." : "🔍 检测问题游戏"}</button>
+      {result && result.broken > 0 && (
+        <button onClick={handleFix} disabled={checking}
+          className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-xs font-medium transition"
+        >  修复 {result.broken} 个游戏</button>
+      )}
+      {result && (
+        <span className="text-xs">
+          {result.broken === 0 ? <span className="text-green-600">✅ 全部正常</span> :
+           result.fixed !== undefined ? <span className="text-green-600">✅ 已修复 {result.fixed}/{result.broken} 个</span> :
+           <span className="text-red-500">⚠️ {result.broken}/{result.total} 个有问题</span>}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // 数据总览（整合前测 + 数据采集 + 任务数据）
 // ============================================================
 function DataOverview() {
@@ -2333,13 +2387,10 @@ function DataOverview() {
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm"
           >
             <option value="">全部班级</option>
-            <option value="1">1班</option>
-            <option value="2">2班</option>
-            <option value="3">3班</option>
-            <option value="4">4班</option>
-            <option value="5">5班</option>
-            <option value="6">6班</option>
+            {[1,2,3,4,5,6,7,8,9,10].map(n => <option key={n} value={String(n)}>{n}班</option>)}
           </select>
+          {/* 修复游戏按钮 */}
+          <FixGamesButton grade={selectedGrade} classNum={selectedClass} />
         </div>
       </div>
       {activeSubTab === "prior" ? (
