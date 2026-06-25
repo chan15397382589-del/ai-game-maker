@@ -54,25 +54,54 @@ export default function ModuleReflection({ userId }: Props) {
   const [saved, setSaved] = useState(false);
   const [generating, setGenerating] = useState(false);
 
-  // 加载已有反思数据
+  // 加载已有反思数据和游戏设计数据
   useEffect(() => {
     const loadExisting = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const token = session?.access_token;
         if (!token) return;
-        const convsRes = await fetch("/api/student/sessions", { headers: { Authorization: `Bearer ${token}` } });
-        if (!convsRes.ok) return;
-        const convs = await convsRes.json();
-        if (!convs?.length) return;
 
-        // 最新会话已有 reflection 字段
-        if (convs[0].reflection) {
-          try {
-            const parsed = JSON.parse(convs[0].reflection);
-            setAnswers(parsed);
-            if (Object.keys(parsed).length > 0) setSaved(true);
-          } catch {}
+        // 并行加载反思和游戏设计
+        const [convsRes, tasksRes] = await Promise.all([
+          fetch("/api/student/sessions", { headers: { Authorization: `Bearer ${token}` } }),
+          fetch("/api/student/tasks?task_id=1-1", { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+
+        // 加载已有反思
+        if (convsRes.ok) {
+          const convs = await convsRes.json();
+          if (convs?.length && convs[0].reflection) {
+            try {
+              const parsed = JSON.parse(convs[0].reflection);
+              setAnswers(parsed);
+              if (Object.keys(parsed).length > 0) setSaved(true);
+              return; // 已有反思，不覆盖
+            } catch {}
+          }
+        }
+
+        // 从游戏设计自动填充 q1 和 q2
+        if (tasksRes.ok) {
+          const tasks = await tasksRes.json();
+          if (tasks.length > 0) {
+            const task = tasks[0];
+            const rules = task.game_rules || [];
+            // 解析 design_reason 获取 AI 描述
+            let aiPrompt = "";
+            try {
+              const info = JSON.parse(task.design_reason || "{}");
+              aiPrompt = info.ai_prompt || "";
+            } catch {}
+
+            setAnswers({
+              q1: { name: task.game_name || "", play: aiPrompt || "用键盘/鼠标控制" },
+              q2: { cond: rules[0] || "", result: rules[1] || "" },
+              q3: {},
+              q4: {},
+              q5: {},
+            });
+          }
         }
       } catch (err) { console.error(err); }
     };
