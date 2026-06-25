@@ -34,6 +34,17 @@ export async function POST(req: NextRequest) {
 
     for (const student of students) {
       try {
+        // 检查是否已有反思
+        const { data: existingRef } = await supabaseAdmin
+          .from("conversations")
+          .select("id").eq("user_id", student.id)
+          .not("reflection", "is", null).limit(1);
+
+        if (existingRef && existingRef.length > 0) {
+          results.push({ name: student.name, id: student.student_id, status: "跳过", reason: "已有反思" });
+          continue;
+        }
+
         // 获取学生的对话消息
         const { data: messages } = await supabaseAdmin
           .from("messages")
