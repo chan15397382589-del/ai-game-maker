@@ -213,16 +213,16 @@ export default function ModuleGallery({ userId }: Props) {
           }} className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition">  下载</button>
         </div>
         <div className="flex-1 rounded-2xl shadow-lg overflow-hidden relative bg-white">
-          {gameStarted ? (
-            <iframe
-              srcDoc={injectGameCSS(selectedGame.html_code || "")}
-              className="absolute inset-0 w-full h-full"
-              sandbox="allow-scripts allow-same-origin"
-              scrolling="no"
-              style={{ border: "none" }}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => setGameStarted(true)}>
+          {/* iframe 始终渲染（在背景预加载），点击播放时显示 */}
+          <iframe
+            srcDoc={injectGameCSS(selectedGame.html_code || "")}
+            className="absolute inset-0 w-full h-full"
+            sandbox="allow-scripts allow-same-origin"
+            scrolling="no"
+            style={{ border: "none", visibility: gameStarted ? "visible" : "hidden" }}
+          />
+          {!gameStarted && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer z-10" onClick={() => setGameStarted(true)}>
               <div className="text-center">
                 <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
                   <span className="text-4xl ml-1">▶️</span>
@@ -232,7 +232,7 @@ export default function ModuleGallery({ userId }: Props) {
             </div>
           )}
           {gameStarted && (
-            <button onClick={() => setGameStarted(false)} className="absolute top-3 right-3 bg-white/90 hover:bg-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md border border-gray-200 transition">  重新开始</button>
+            <button onClick={() => setGameStarted(false)} className="absolute top-3 right-3 bg-white/90 hover:bg-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-md border border-gray-200 z-20 transition">  重新开始</button>
           )}
         </div>
       </div>
