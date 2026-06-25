@@ -2850,7 +2850,6 @@ function SurveyTable({ tasks }: { tasks: any[] }) {
           <tr>
             <th className="px-4 py-3 text-left font-medium text-gray-700">姓名</th>
             <th className="px-4 py-3 text-left font-medium text-gray-700">学号</th>
-            <th className="px-4 py-3 text-left font-medium text-gray-700">班级</th>
             <th className="px-4 py-3 text-left font-medium text-gray-700">玩过游戏吗</th>
             <th className="px-4 py-3 text-left font-medium text-gray-700">玩过哪些游戏</th>
             <th className="px-4 py-3 text-left font-medium text-gray-700">接触过编程吗</th>
@@ -2866,12 +2865,11 @@ function SurveyTable({ tasks }: { tasks: any[] }) {
               <tr key={task.id} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="px-4 py-3 font-medium">{task.user?.name || "未知"}</td>
                 <td className="px-4 py-3 text-gray-600 font-mono text-xs">{task.user?.student_id}</td>
-                <td className="px-4 py-3 text-gray-500">{task.user?.grade}年级{task.user?.class_num}班</td>
                 <td className="px-4 py-3 text-gray-600">{answers.q1 || "—"}</td>
-                <td className="px-4 py-3 text-gray-600">{answers.q2 || "—"}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate">{answers.q2 || "—"}</td>
                 <td className="px-4 py-3 text-gray-600">{answers.q3 || "—"}</td>
                 <td className="px-4 py-3 text-gray-600">{answers.q4 || "—"}</td>
-                <td className="px-4 py-3 text-gray-600">{answers.q5 || "—"}</td>
+                <td className="px-4 py-3 text-gray-600 max-w-[200px] truncate">{answers.q5 || "—"}</td>
               </tr>
             );
           })}
