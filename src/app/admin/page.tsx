@@ -2599,6 +2599,7 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
   const [loading, setLoading] = useState(true);
   const [tabCounts, setTabCounts] = useState<Record<string, number>>({});
   const [countsLoaded, setCountsLoaded] = useState(false);
+  const sharedRefData = useRef<any[]>([]);
 
   // 加载标签计数（哪些标签有数据）
   useEffect(() => {
@@ -2654,7 +2655,11 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
           const res = await fetch(`/api/admin/reflections?${params}`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (res.ok) setTasks(await res.json());
+          if (res.ok) {
+            const data = await res.json();
+            setTasks(data);
+            sharedRefData.current = data;
+          }
         } else if (activeTab === "peer-reviews") {
           const params = new URLSearchParams();
           if (grade) params.set("grade", grade);
@@ -2782,14 +2787,33 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
           </button>
         ))}
         <div className="flex-1" />
-        {activeTab !== "discussions" && (
-          <button onClick={exportWord} className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-medium transition">
-              导出
+        {activeTab === "reflection" && (
+          <button onClick={() => {
+            const ref = sharedRefData.current;
+            if (!ref || ref.length === 0) { alert("无数据"); return; }
+            const rows = ref.map((r: any) => {
+              const rd = r.reflection || {};
+              const toTxt = (v: any) => v ? (typeof v === "string" ? v : Object.values(v).filter(Boolean).join("，")) : "";
+              return [r.user?.name||"", r.user?.student_id||"", toTxt(rd.q1), toTxt(rd.q2), toTxt(rd.q3), toTxt(rd.q4), toTxt(rd.q5)];
+            });
+            const csv = ["姓名,学号,Q1描述游戏,Q2说明规则,Q3遇到的困难,Q4同伴反馈,Q5如果重新做",
+              ...rows.map(r => r.map(v => `"${(v||"").replace(/"/g,'""')}"`).join(","))
+            ].join("\n");
+            const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+            const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+            a.download = `学生反思_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+          }} className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition">
+              导出CSV
           </button>
         )}
         {activeTab === "discussions" && (
           <button onClick={exportMessages} className="px-3 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition">
               导出聊天
+          </button>
+        )}
+        {activeTab !== "discussions" && activeTab !== "reflection" && (
+          <button onClick={exportWord} className="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-medium transition">
+              导出
           </button>
         )}
       </div>
@@ -3025,9 +3049,6 @@ function ReflectionTable({ reflections }: { reflections: any[] }) {
 
   return (
     <div>
-      <div className="flex justify-end mb-3">
-        <button onClick={exportCSV} className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium">📊 导出CSV</button>
-      </div>
       <div className="space-y-3">
         {reflections.map((r: any) => {
           const ref = r.reflection || {};
