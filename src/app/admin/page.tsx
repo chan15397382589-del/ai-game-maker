@@ -2585,6 +2585,7 @@ const TASK_TABS = [
   { key: "3-1", label: "作品展示", taskIds: ["3-1"] },
   { key: "3-2", label: "同伴互评", taskIds: ["3-2"] },
   { key: "peer-reviews", label: "互评数据", taskIds: [] },
+  { key: "reflection", label: "学生反思", taskIds: [] },
   { key: "designs", label: "设计图", taskIds: [] },
   { key: "discussions", label: "小组讨论", taskIds: [] },
 ] as const;
@@ -2625,6 +2626,7 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
           counts["discussions"] = data.groupMessageCount || 0;
           // 互评数据
           counts["peer-reviews"] = data.peerReviewCount || 0;
+          counts["reflection"] = data.reflectionCount || 0;
           setTabCounts(counts);
           // 自动选中第一个有数据的标签
           const firstActive = TASK_TABS.find(t => (counts[t.key] || 0) > 0);
@@ -2645,7 +2647,15 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
         const token = await getAuthToken();
         if (!token) return;
 
-        if (activeTab === "peer-reviews") {
+        if (activeTab === "reflection") {
+          const params = new URLSearchParams();
+          if (grade) params.set("grade", grade);
+          if (classNum) params.set("class_num", classNum);
+          const res = await fetch(`/api/admin/reflections?${params}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) setTasks(await res.json());
+        } else if (activeTab === "peer-reviews") {
           const params = new URLSearchParams();
           if (grade) params.set("grade", grade);
           if (classNum) params.set("class_num", classNum);
@@ -2795,6 +2805,8 @@ function TasksDataView({ grade, classNum }: { grade?: string; classNum?: string 
         <DesignCards tasks={tasks} />
       ) : activeTab === "discussions" ? (
         <DiscussionList messages={groupMessages} />
+      ) : activeTab === "reflection" ? (
+        <ReflectionTable reflections={tasks} />
       ) : activeTab === "peer-reviews" ? (
         <PeerReviewsTable reviews={tasks} />
       ) : (
@@ -2975,6 +2987,34 @@ function DiscussionList({ messages }: { messages: any[] }) {
 // ============================================================
 // 游戏制作（教师演示用，可切换对照组/实验组）
 // 对齐学生端界面风格
+// 反思数据
+function ReflectionTable({ reflections }: { reflections: any[] }) {
+  if (reflections.length === 0) return <div className="text-center py-12 text-gray-400">暂无反思数据</div>;
+  return (
+    <div className="space-y-4">
+      {reflections.map((r: any) => {
+        const ref = r.reflection || {};
+        return (
+          <div key={r.id} className="border border-gray-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-sm font-bold text-gray-800">{r.user?.name || "未知"}</span>
+              <span className="text-xs text-gray-400">{r.user?.student_id}</span>
+              <span className="text-xs text-gray-400">{r.user?.grade}年级{r.user?.class_num}班</span>
+            </div>
+            <div className="grid grid-cols-1 gap-2 text-sm">
+              {ref.q1 && <p><strong>Q1 描述游戏：</strong>我的游戏叫 {ref.q1.name || "?"}，玩法是 {ref.q1.play || "?"}</p>}
+              {ref.q2 && <p><strong>Q2 规则：</strong>如果 {ref.q2.cond || "?"}，就 {ref.q2.result || "?"}</p>}
+              {ref.q3 && <p><strong>Q3 困难：</strong>{ref.q3.difficulty || "?"}，用 {ref.q3.solve || "?"} 解决</p>}
+              {ref.q4 && <p><strong>Q4 反馈：</strong>同伴说{ref.q4.feedback || "?"}，我觉得{ref.q4.feel || "?"}</p>}
+              {ref.q5 && <p><strong>Q5 改进：</strong>我会改 {ref.q5.redo || "?"}</p>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // 同伴互评数据
 function PeerReviewsTable({ reviews }: { reviews: any[] }) {
   if (reviews.length === 0) return <div className="text-center py-12 text-gray-400">暂无互评数据</div>;

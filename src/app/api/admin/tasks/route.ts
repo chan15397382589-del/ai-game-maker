@@ -45,13 +45,14 @@ export async function GET(req: NextRequest) {
         counts[t.task_id] = (counts[t.task_id] || 0) + 1;
       });
 
-      // 同时统计小组消息数和互评数
-      const [{ count: groupMsgCount }, { count: reviewCount }] = await Promise.all([
+      // 同时统计小组消息数、互评数、反思数
+      const [{ count: groupMsgCount }, { count: reviewCount }, { count: reflectionCount }] = await Promise.all([
         supabaseAdmin.from("group_messages").select("id", { count: "exact", head: true }),
         supabaseAdmin.from("peer_reviews").select("id", { count: "exact", head: true }),
+        supabaseAdmin.from("conversations").select("id", { count: "exact", head: true }).not("reflection", "is", null),
       ]);
 
-      return NextResponse.json({ taskCounts: counts, groupMessageCount: groupMsgCount || 0, peerReviewCount: reviewCount || 0 });
+      return NextResponse.json({ taskCounts: counts, groupMessageCount: groupMsgCount || 0, peerReviewCount: reviewCount || 0, reflectionCount: reflectionCount || 0 });
     }
 
     // 获取任务数据（只查询符合条件的学生）
