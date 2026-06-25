@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { injectGameCSS, getRawHtml } from "@/utils/gamePreview";
 
@@ -20,6 +20,65 @@ interface GameItem {
   created_at: string;
   like_count?: number;
   liked?: boolean;
+}
+
+// 单卡片 - 进入视口渲染预览，离开则卸载
+function GameCard({ item, onOpen, onLike }: { item: GameItem; onOpen: () => void; onLike: () => void }) {
+  const [showPreview, setShowPreview] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setShowPreview(entry.isIntersecting),
+      { rootMargin: "300px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={ref}
+      className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
+      onClick={onOpen}>
+      <div className="aspect-video bg-black relative overflow-hidden">
+        {showPreview ? (
+          <iframe
+            srcDoc={injectGameCSS(item.html_code || "")}
+            className="w-full h-full border-0 pointer-events-none"
+            sandbox="allow-scripts allow-same-origin"
+            scrolling="no"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
+            <span className="text-5xl"> </span>
+          </div>
+        )}
+      </div>
+      <div className="px-3 py-2.5">
+        <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
+        <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
+        {item.game_rules && item.game_rules.length > 0 && (
+          <div className="mt-1.5 space-y-0.5">
+            {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
+              <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+          <button
+            onClick={(e) => { e.stopPropagation(); onLike(); }}
+            className={`flex items-center gap-1 text-xs font-medium transition ${item.liked ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}
+          >
+            <span>{item.liked ? "❤️" : "🤍"}</span>
+            <span>{item.like_count || 0}</span>
+          </button>
+          <span className="text-[10px] text-gray-400">{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function ModuleGallery({ userId }: Props) {
@@ -53,8 +112,7 @@ export default function ModuleGallery({ userId }: Props) {
 
   useEffect(() => { fetchGames(); }, [fetchGames]);
 
-  const toggleLike = async (e: React.MouseEvent, itemId: number) => {
-    e.stopPropagation();
+  const toggleLike = async (itemId: number) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -78,6 +136,7 @@ export default function ModuleGallery({ userId }: Props) {
   const openGame = async (item: GameItem) => {
     setSelectedGame(item);
     setGameStarted(false);
+    if (item.html_code) { setLoadingGame(false); return; }
     setLoadingGame(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -92,14 +151,9 @@ export default function ModuleGallery({ userId }: Props) {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-120px)]">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-500">正在加载班级作品...</p>
-        </div>
-      </div>
-    );
+    return <div className="flex items-center justify-center h-[calc(100vh-120px)]">
+      <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-500 rounded-full animate-spin mx-auto"></div>
+    </div>;
   }
 
   if (selectedGame) {
@@ -126,9 +180,8 @@ export default function ModuleGallery({ userId }: Props) {
         </div>
         <div className="flex-1 rounded-2xl shadow-lg overflow-hidden bg-white">
           {loadingGame ? (
-            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900">
-              <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
-              <p className="text-white text-sm">加载游戏中...</p>
+            <div className="w-full h-full flex items-center justify-center bg-gray-900">
+              <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
             </div>
           ) : gameStarted ? (
             <iframe
@@ -141,7 +194,7 @@ export default function ModuleGallery({ userId }: Props) {
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900 cursor-pointer" onClick={() => setGameStarted(true)}>
               <div className="text-center">
-                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm">
+                <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
                   <span className="text-4xl ml-1">▶️</span>
                 </div>
                 <p className="text-xl font-bold text-white">点击试玩游戏</p>
@@ -175,41 +228,12 @@ export default function ModuleGallery({ userId }: Props) {
         <div className="flex-1 overflow-y-auto pb-4">
           <div className="grid grid-cols-4 gap-4">
             {items.map((item) => (
-              <div key={item.id}
-                className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
-                onClick={() => openGame(item)}>
-                {/* 游戏缩略图 - content-visibility 优化滚动性能 */}
-                <div className="aspect-video bg-black relative overflow-hidden" style={{ contain: "layout style paint" }}>
-                  <iframe
-                    srcDoc={injectGameCSS(item.html_code || "")}
-                    className="w-full h-full border-0 pointer-events-none"
-                    sandbox="allow-scripts allow-same-origin"
-                    scrolling="no"
-                    style={{ contentVisibility: "auto" }}
-                  />
-                </div>
-                <div className="px-3 py-2.5">
-                  <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
-                  {item.game_rules && item.game_rules.length > 0 && (
-                    <div className="mt-1.5 space-y-0.5">
-                      {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
-                        <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
-                      ))}
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
-                    <button
-                      onClick={(e) => toggleLike(e, item.id)}
-                      className={`flex items-center gap-1 text-xs font-medium transition ${item.liked ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}
-                    >
-                      <span>{item.liked ? "❤️" : "🤍"}</span>
-                      <span>{item.like_count || 0}</span>
-                    </button>
-                    <span className="text-[10px] text-gray-400">{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
-                  </div>
-                </div>
-              </div>
+              <GameCard
+                key={item.id}
+                item={item}
+                onOpen={() => openGame(item)}
+                onLike={() => toggleLike(item.id)}
+              />
             ))}
           </div>
         </div>
