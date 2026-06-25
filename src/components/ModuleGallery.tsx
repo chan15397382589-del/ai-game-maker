@@ -180,22 +180,15 @@ export default function ModuleGallery({ userId }: Props) {
               <div key={item.id}
                 className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg transition-all group"
                 onClick={() => openGame(item)}>
-                {/* 缩略图预览 - 使用缩放 iframe 显示游戏画面 */}
-                <div className="aspect-video bg-gray-900 relative overflow-hidden">
-                  <div className="absolute inset-[-50%] scale-[0.35] origin-top-left" style={{ width: "285%", height: "285%" }}>
-                    <iframe
-                      srcDoc={injectGameCSS(item.html_code || "")}
-                      className="w-full h-full border-0 pointer-events-none"
-                      sandbox="allow-scripts"
-                      scrolling="no"
-                    />
-                  </div>
-                  {/* 点击遮罩 */}
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <div className="bg-white/90 rounded-full w-12 h-12 flex items-center justify-center">
-                      <span className="text-xl ml-0.5">▶️</span>
-                    </div>
-                  </div>
+                {/* 缩略图预览 - iframe 渲染游戏实际画面 */}
+                <div className="aspect-video bg-black relative overflow-hidden pointer-events-none">
+                  <iframe
+                    srcDoc={injectGameCSS(item.html_code || "")}
+                    className="w-full h-full border-0"
+                    sandbox="allow-scripts"
+                    scrolling="no"
+                    style={{ pointerEvents: "none" }}
+                  />
                 </div>
                 <div className="px-3 py-2.5">
                   <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
