@@ -127,10 +127,8 @@ export default function ModuleGallery({ userId }: Props) {
         <div className="flex-1 rounded-2xl shadow-lg overflow-hidden bg-white">
           {loadingGame ? (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900">
-              <div className="text-center">
-                <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-white text-sm">加载游戏中...</p>
-              </div>
+              <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+              <p className="text-white text-sm">加载游戏中...</p>
             </div>
           ) : gameStarted ? (
             <iframe
@@ -180,12 +178,14 @@ export default function ModuleGallery({ userId }: Props) {
               <div key={item.id}
                 className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
                 onClick={() => openGame(item)}>
-                <div className="aspect-video bg-black relative overflow-hidden">
+                {/* 游戏缩略图 - content-visibility 优化滚动性能 */}
+                <div className="aspect-video bg-black relative overflow-hidden" style={{ contain: "layout style paint" }}>
                   <iframe
                     srcDoc={injectGameCSS(item.html_code || "")}
                     className="w-full h-full border-0 pointer-events-none"
                     sandbox="allow-scripts allow-same-origin"
                     scrolling="no"
+                    style={{ contentVisibility: "auto" }}
                   />
                 </div>
                 <div className="px-3 py-2.5">
