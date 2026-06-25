@@ -66,20 +66,12 @@ export default function ModuleReflection({ userId }: Props) {
         const convs = await convsRes.json();
         if (!convs?.length) return;
 
-        // 获取最新会话的反思
-        const fullConvRes = await fetch(`/api/admin/conversations?id=${encodeURIComponent(convs[0].id)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!fullConvRes.ok) return;
-        const data = await fullConvRes.json();
-        if (data?.reflection) {
+        // 最新会话已有 reflection 字段
+        if (convs[0].reflection) {
           try {
-            const parsed = JSON.parse(data.reflection);
+            const parsed = JSON.parse(convs[0].reflection);
             setAnswers(parsed);
-            // 检查是否已有数据（非空对象）
-            if (Object.keys(parsed).length > 0) {
-              setSaved(true);
-            }
+            if (Object.keys(parsed).length > 0) setSaved(true);
           } catch {}
         }
       } catch (err) { console.error(err); }

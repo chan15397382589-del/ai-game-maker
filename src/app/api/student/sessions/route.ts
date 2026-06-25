@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     // 获取所有对话文档
     const { data: conversations, error } = await supabaseAdmin
       .from("conversations")
-      .select("id, title, html_code, created_at, updated_at")
+      .select("id, title, html_code, reflection, created_at, updated_at")
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false })
       .limit(50);
@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
       title: conv.title,
       has_game: !!conv.html_code,
       html_code: conv.html_code,
+      reflection: conv.reflection,
       message_count: countMap[conv.id] || 0,
       created_at: conv.created_at,
       updated_at: conv.updated_at,
