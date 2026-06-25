@@ -109,12 +109,6 @@ export default function ModuleShowcase({ userId }: Props) {
 
       if (res.ok) {
         trackEvent("peer_review_submit", undefined, { revieweeId: task.user_id, itemId: task.id });
-        // 清除当前评价的草稿
-        setDrafts((prev) => {
-          const next = { ...prev };
-          delete next[currentIdx];
-          return next;
-        });
         setGameStarted(false);
         const newTotal = totalReviewed + 1;
         setTotalReviewed(newTotal);
