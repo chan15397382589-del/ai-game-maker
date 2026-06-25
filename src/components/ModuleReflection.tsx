@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import VoiceButton from "@/components/VoiceButton";
 import { isRandomInput } from "@/utils/inputValidation";
@@ -53,6 +53,39 @@ export default function ModuleReflection({ userId }: Props) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [generating, setGenerating] = useState(false);
+
+  // 加载已有反思数据
+  useEffect(() => {
+    const loadExisting = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+        const convsRes = await fetch("/api/student/sessions", { headers: { Authorization: `Bearer ${token}` } });
+        if (!convsRes.ok) return;
+        const convs = await convsRes.json();
+        if (!convs?.length) return;
+
+        // 获取最新会话的反思
+        const fullConvRes = await fetch(`/api/admin/conversations?id=${encodeURIComponent(convs[0].id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!fullConvRes.ok) return;
+        const data = await fullConvRes.json();
+        if (data?.reflection) {
+          try {
+            const parsed = JSON.parse(data.reflection);
+            setAnswers(parsed);
+            // 检查是否已有数据（非空对象）
+            if (Object.keys(parsed).length > 0) {
+              setSaved(true);
+            }
+          } catch {}
+        }
+      } catch (err) { console.error(err); }
+    };
+    loadExisting();
+  }, []);
 
   // AI 自动生成反思
   const autoGenerate = async () => {
