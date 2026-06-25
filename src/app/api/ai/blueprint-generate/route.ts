@@ -5,7 +5,7 @@ import { chatQueue } from "@/lib/requestQueue";
 
 const deepseekAI = new OpenAI({
   baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
-  apiKey: process.env.DEEPSEEK_API_KEY || "placeholder",
+  apiKey: process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "",
 });
 
 async function generateGame(prompt: string, maxRetries = 2): Promise<string | null> {

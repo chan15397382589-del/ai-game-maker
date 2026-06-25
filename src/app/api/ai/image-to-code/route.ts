@@ -5,7 +5,7 @@ import { chatQueue } from "@/lib/requestQueue";
 
 const deepseek = new OpenAI({
   baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
-  apiKey: process.env.DEEPSEEK_API_KEY || "placeholder",
+  apiKey: process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || "",
 });
 
 // SSRF 防护：只允许 HTTPS 外部 URL

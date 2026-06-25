@@ -2,9 +2,11 @@ import OpenAI from "openai";
 import { createClient } from "@supabase/supabase-js";
 
 // DeepSeek API (OpenAI 兼容接口)
+// 优先 DEEPSEEK_API_KEY，其次 ANTHROPIC_AUTH_TOKEN（旧），最后 PROXY_API_KEY
+const deepseekApiKey = process.env.DEEPSEEK_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN || process.env.PROXY_API_KEY || "";
 const deepseek = new OpenAI({
   baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com",
-  apiKey: process.env.DEEPSEEK_API_KEY || "placeholder",
+  apiKey: deepseekApiKey,
 });
 
 // Supabase 服务端客户端单例
