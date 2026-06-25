@@ -40,9 +40,25 @@ export default function ModuleShowcase({ userId }: Props) {
   const [loading, setLoading] = useState(true);
   const [gameStarted, setGameStarted] = useState(false);
 
-  const [q1, setQ1] = useState("");
-  const [q2, setQ2] = useState("");
-  const [q3, setQ3] = useState("");
+  // 每个评价任务的草稿（按 task_index 存储）
+  const [drafts, setDrafts] = useState<Record<number, { q1: string; q2: string; q3: string }>>({});
+  const currentDraft = drafts[currentIdx] || { q1: "", q2: "", q3: "" };
+
+  const setQ1 = (val: string | ((prev: string) => string)) => setDrafts((prev) => {
+    const existing = prev[currentIdx] || { q1: "", q2: "", q3: "" };
+    const newVal = typeof val === "function" ? val(existing.q1) : val;
+    return { ...prev, [currentIdx]: { ...existing, q1: newVal } };
+  });
+  const setQ2 = (val: string | ((prev: string) => string)) => setDrafts((prev) => {
+    const existing = prev[currentIdx] || { q1: "", q2: "", q3: "" };
+    const newVal = typeof val === "function" ? val(existing.q2) : val;
+    return { ...prev, [currentIdx]: { ...existing, q2: newVal } };
+  });
+  const setQ3 = (val: string | ((prev: string) => string)) => setDrafts((prev) => {
+    const existing = prev[currentIdx] || { q1: "", q2: "", q3: "" };
+    const newVal = typeof val === "function" ? val(existing.q3) : val;
+    return { ...prev, [currentIdx]: { ...existing, q3: newVal } };
+  });
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => { fetchTasks(); }, []);
@@ -75,7 +91,7 @@ export default function ModuleShowcase({ userId }: Props) {
   };
 
   const handleSubmitReview = async () => {
-    if (!q1.trim() || !q2.trim()) { alert("请至少填写前两个问题"); return; }
+    if (!currentDraft.q1.trim() || !currentDraft.q2.trim()) { alert("请至少填写前两个问题"); return; }
     const task = tasks[currentIdx];
     if (!task) return;
 
@@ -88,12 +104,18 @@ export default function ModuleShowcase({ userId }: Props) {
       const res = await fetch("/api/student/peer-reviews", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ reviewee_id: task.user_id, shared_item_id: task.id, q1_enjoy: q1.trim(), q2_suggestion: q2.trim(), q3_bug: q3.trim() }),
+        body: JSON.stringify({ reviewee_id: task.user_id, shared_item_id: task.id, q1_enjoy: currentDraft.q1.trim(), q2_suggestion: currentDraft.q2.trim(), q3_bug: currentDraft.q3.trim() }),
       });
 
       if (res.ok) {
         trackEvent("peer_review_submit", undefined, { revieweeId: task.user_id, itemId: task.id });
-        setQ1(""); setQ2(""); setQ3(""); setGameStarted(false);
+        // 清除当前评价的草稿
+        setDrafts((prev) => {
+          const next = { ...prev };
+          delete next[currentIdx];
+          return next;
+        });
+        setGameStarted(false);
         const newTotal = totalReviewed + 1;
         setTotalReviewed(newTotal);
 
@@ -163,7 +185,7 @@ export default function ModuleShowcase({ userId }: Props) {
                   {/* 可点击的进度指示器 */}
                   <div className="flex gap-2">
                     {tasks.map((task, i) => (
-                      <button key={i} onClick={() => { setCurrentIdx(i); setGameStarted(false); setQ1(""); setQ2(""); setQ3(""); }}
+                      <button key={i} onClick={() => { setCurrentIdx(i); setGameStarted(false); }}
                         className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition ${
                           i === currentIdx ? "bg-white text-indigo-600 scale-110" : "bg-white/30 text-white hover:bg-white/50"
                         }`}>
@@ -208,7 +230,7 @@ export default function ModuleShowcase({ userId }: Props) {
                       <label className="text-sm font-bold text-gray-800">哪里最好玩？</label>
                     </div>
                     <div className="flex gap-2">
-                      <textarea value={q1} onChange={(e) => setQ1(e.target.value)} placeholder="比如：画面很酷、玩法有趣..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-green-400 resize-none transition" />
+                      <textarea value={currentDraft.q1} onChange={(e) => setQ1(e.target.value)} placeholder="比如：画面很酷、玩法有趣..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-green-400 resize-none transition" />
                       <VoiceButton onResult={(text) => setQ1((prev) => prev + text)} />
                     </div>
                   </div>
@@ -218,7 +240,7 @@ export default function ModuleShowcase({ userId }: Props) {
                       <label className="text-sm font-bold text-gray-800">有什么建议？</label>
                     </div>
                     <div className="flex gap-2">
-                      <textarea value={q2} onChange={(e) => setQ2(e.target.value)} placeholder="比如：加点音乐、难度调整..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400 resize-none transition" />
+                      <textarea value={currentDraft.q2} onChange={(e) => setQ2(e.target.value)} placeholder="比如：加点音乐、难度调整..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400 resize-none transition" />
                       <VoiceButton onResult={(text) => setQ2((prev) => prev + text)} />
                     </div>
                   </div>
@@ -228,13 +250,13 @@ export default function ModuleShowcase({ userId }: Props) {
                       <label className="text-sm font-bold text-gray-800">发现问题了吗？<span className="text-gray-400 font-normal">（可选）</span></label>
                     </div>
                     <div className="flex gap-2">
-                      <textarea value={q3} onChange={(e) => setQ3(e.target.value)} placeholder="比如：按钮点不到、角色会穿墙..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-orange-400 resize-none transition" />
+                      <textarea value={currentDraft.q3} onChange={(e) => setQ3(e.target.value)} placeholder="比如：按钮点不到、角色会穿墙..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-orange-400 resize-none transition" />
                       <VoiceButton onResult={(text) => setQ3((prev) => prev + text)} />
                     </div>
                   </div>
                 </div>
                 <div className="p-4 border-t border-gray-100">
-                  <button onClick={handleSubmitReview} disabled={submitting || !q1.trim() || !q2.trim()} className="w-full py-3.5 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 disabled:from-gray-200 disabled:to-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition shadow-md">
+                  <button onClick={handleSubmitReview} disabled={submitting || !currentDraft.q1.trim() || !currentDraft.q2.trim()} className="w-full py-3.5 bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 disabled:from-gray-200 disabled:to-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition shadow-md">
                     {submitting ? "提交中..." : currentIdx < tasks.length - 1 ? "提交并评价下一个 →" : "提交完成，查看我的评价 ✅"}
                   </button>
                 </div>
