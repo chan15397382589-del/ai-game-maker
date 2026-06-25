@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
-import { injectGameCSS, getRawHtml } from "@/utils/gamePreview";
+import { getRawHtml } from "@/utils/gamePreview";
 
 interface Props {
   userId: string;
@@ -22,52 +22,40 @@ interface GameItem {
   liked?: boolean;
 }
 
-// 单个游戏卡片（懒加载预览 + 点赞）
-function GameCard({ item, userId, onClick }: { item: GameItem; userId: string; onClick: () => void }) {
-  const [visible, setVisible] = useState(false);
-  const [previewCode, setPreviewCode] = useState<string | null>(null);
-  const [liked, setLiked] = useState(item.liked || false);
-  const [likeCount, setLikeCount] = useState(item.like_count || 0);
-  const ref = useRef<HTMLDivElement>(null);
+export default function ModuleGallery({ userId }: Props) {
+  const [items, setItems] = useState<GameItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedGame, setSelectedGame] = useState<GameItem | null>(null);
+  const [gameStarted, setGameStarted] = useState(false);
+  const [loadingGame, setLoadingGame] = useState(false);
 
-  // IntersectionObserver 控制可见时才渲染 iframe
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
+  // 加载游戏列表（不含 html_code，轻量快速）
+  const fetchGames = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+      const [galleryRes, likesRes] = await Promise.all([
+        fetch("/api/student/gallery", { headers: { Authorization: `Bearer ${token}` } }),
+        fetch("/api/student/gallery/likes", { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      let games: GameItem[] = [];
+      if (galleryRes.ok) games = await galleryRes.json() || [];
+      let likesData: Record<string, { count: number; liked: boolean }> = {};
+      if (likesRes.ok) likesData = await likesRes.json() || {};
+      setItems(games.map((g: any) => ({
+        ...g,
+        like_count: likesData[g.id]?.count || 0,
+        liked: likesData[g.id]?.liked || false,
+      })));
+    } catch (err) { console.error(err); } finally { setLoading(false); }
   }, []);
 
-  // 可见时加载游戏代码
-  useEffect(() => {
-    if (!visible || previewCode !== null) return;
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        if (!token || cancelled) return;
-        const res = await fetch(`/api/student/gallery/${item.id}`, { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok && !cancelled) {
-          const data = await res.json();
-          setPreviewCode(data.html_code || "");
-        }
-      } catch {}
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [visible, item.id]);
+  useEffect(() => { fetchGames(); }, [fetchGames]);
 
-  const toggleLike = async (e: React.MouseEvent) => {
+  // 切换点赞
+  const toggleLike = async (e: React.MouseEvent, itemId: number) => {
     e.stopPropagation();
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -76,78 +64,20 @@ function GameCard({ item, userId, onClick }: { item: GameItem; userId: string; o
       const res = await fetch("/api/student/gallery/like", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ conversation_id: item.id }),
+        body: JSON.stringify({ conversation_id: itemId }),
       });
       if (res.ok) {
         const data = await res.json();
-        setLiked(data.liked);
-        setLikeCount((prev) => prev + (data.liked ? 1 : -1));
+        setItems((prev) => prev.map((item) =>
+          item.id === itemId
+            ? { ...item, liked: data.liked, like_count: (item.like_count || 0) + (data.liked ? 1 : -1) }
+            : item
+        ));
       }
     } catch (err) { console.error(err); }
   };
 
-  return (
-    <div ref={ref}
-      className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
-      onClick={onClick}>
-      <div className="aspect-video bg-gray-900 relative overflow-hidden" style={{ contain: "layout style paint" }}>
-        {previewCode ? (
-          <iframe
-            srcDoc={injectGameCSS(previewCode)}
-            className="w-full h-full border-0 pointer-events-none"
-            sandbox="allow-scripts allow-same-origin"
-            scrolling="no"
-            style={{ contentVisibility: "auto" }}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
-            <span className="text-4xl"> </span>
-          </div>
-        )}
-      </div>
-      <div className="px-3 py-2.5">
-        <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
-        {item.game_rules && item.game_rules.length > 0 && (
-          <div className="mt-1.5 space-y-0.5">
-            {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
-              <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
-            ))}
-          </div>
-        )}
-        {/* 点赞 */}
-        <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
-          <button onClick={toggleLike} className={`flex items-center gap-1 text-xs font-medium transition ${liked ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}>
-            <span>{liked ? "❤️" : "🤍"}</span>
-            <span>{likeCount}</span>
-          </button>
-          <span className="text-[10px] text-gray-400">{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function ModuleGallery({ userId }: Props) {
-  const [items, setItems] = useState<GameItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedGame, setSelectedGame] = useState<GameItem | null>(null);
-  const [gameStarted, setGameStarted] = useState(false);
-  const [loadingGame, setLoadingGame] = useState(false);
-
-  const fetchGames = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) return;
-      const res = await fetch("/api/student/gallery", { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setItems(await res.json() || []);
-    } catch (err) { console.error(err); } finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { fetchGames(); }, [fetchGames]);
-
+  // 点击打开游戏（按需加载 html_code）
   const openGame = async (item: GameItem) => {
     setSelectedGame(item);
     setGameStarted(false);
@@ -175,7 +105,7 @@ export default function ModuleGallery({ userId }: Props) {
     );
   }
 
-  // 游戏详情视图
+  // 游戏详情视图（仅此一个 iframe）
   if (selectedGame) {
     return (
       <div className="h-[calc(100vh-120px)] flex flex-col">
@@ -201,8 +131,10 @@ export default function ModuleGallery({ userId }: Props) {
         <div className="flex-1 rounded-2xl shadow-lg overflow-hidden bg-white">
           {loadingGame ? (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900">
-              <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
-              <p className="text-white text-sm">加载游戏中...</p>
+              <div className="text-center">
+                <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-white text-sm">加载游戏中...</p>
+              </div>
             </div>
           ) : gameStarted ? (
             <iframe
@@ -227,7 +159,7 @@ export default function ModuleGallery({ userId }: Props) {
     );
   }
 
-  // 游戏列表
+  // 游戏列表（静态卡片，零 iframe）
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -250,7 +182,36 @@ export default function ModuleGallery({ userId }: Props) {
         <div className="flex-1 overflow-y-auto pb-4">
           <div className="grid grid-cols-4 gap-4">
             {items.map((item) => (
-              <GameCard key={item.id} item={item} userId={userId} onClick={() => openGame(item)} />
+              <div key={item.id}
+                className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
+                onClick={() => openGame(item)}>
+                {/* 静态占位卡片 */}
+                <div className="aspect-video bg-gradient-to-br from-indigo-500 to-purple-600 relative flex items-center justify-center">
+                  <span className="text-5xl"> </span>
+                </div>
+                <div className="px-3 py-2.5">
+                  <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
+                  {item.game_rules && item.game_rules.length > 0 && (
+                    <div className="mt-1.5 space-y-0.5">
+                      {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
+                        <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
+                      ))}
+                    </div>
+                  )}
+                  {/* 点赞 */}
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+                    <button
+                      onClick={(e) => toggleLike(e, item.id)}
+                      className={`flex items-center gap-1 text-xs font-medium transition ${item.liked ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}
+                    >
+                      <span>{item.liked ? "❤️" : "🤍"}</span>
+                      <span>{item.like_count || 0}</span>
+                    </button>
+                    <span className="text-[10px] text-gray-400">{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
         </div>
