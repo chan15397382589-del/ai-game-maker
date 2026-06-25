@@ -2987,7 +2987,17 @@ function DiscussionList({ messages }: { messages: any[] }) {
 // ============================================================
 // 游戏制作（教师演示用，可切换对照组/实验组）
 // 对齐学生端界面风格
-// 反思数据
+// 反思数据（兼容旧格式string和新格式object）
+function fmtRef(val: any, keys: string[]): string {
+  if (!val) return "?";
+  if (typeof val === "string") return val;
+  if (typeof val === "object") {
+    const parts = keys.map(k => val[k]).filter(Boolean);
+    return parts.length > 0 ? parts.join("，") : "?";
+  }
+  return String(val);
+}
+
 function ReflectionTable({ reflections }: { reflections: any[] }) {
   if (reflections.length === 0) return <div className="text-center py-12 text-gray-400">暂无反思数据</div>;
   return (
@@ -3002,11 +3012,11 @@ function ReflectionTable({ reflections }: { reflections: any[] }) {
               <span className="text-xs text-gray-400">{r.user?.grade}年级{r.user?.class_num}班</span>
             </div>
             <div className="grid grid-cols-1 gap-2 text-sm">
-              {ref.q1 && <p><strong>Q1 描述游戏：</strong>我的游戏叫 {ref.q1.name || "?"}，玩法是 {ref.q1.play || "?"}</p>}
-              {ref.q2 && <p><strong>Q2 规则：</strong>如果 {ref.q2.cond || "?"}，就 {ref.q2.result || "?"}</p>}
-              {ref.q3 && <p><strong>Q3 困难：</strong>{ref.q3.difficulty || "?"}，用 {ref.q3.solve || "?"} 解决</p>}
-              {ref.q4 && <p><strong>Q4 反馈：</strong>同伴说{ref.q4.feedback || "?"}，我觉得{ref.q4.feel || "?"}</p>}
-              {ref.q5 && <p><strong>Q5 改进：</strong>我会改 {ref.q5.redo || "?"}</p>}
+              {ref.q1 && <p><strong>Q1 描述游戏：</strong>{fmtRef(ref.q1, ["name","play"])}</p>}
+              {ref.q2 && <p><strong>Q2 规则：</strong>{fmtRef(ref.q2, ["cond","result"])}</p>}
+              {ref.q3 && <p><strong>Q3 困难：</strong>{fmtRef(ref.q3, ["difficulty","solve"])}</p>}
+              {ref.q4 && <p><strong>Q4 反馈：</strong>{fmtRef(ref.q4, ["feedback","feel"])}</p>}
+              {ref.q5 && <p><strong>Q5 改进：</strong>{fmtRef(ref.q5, ["redo"])}</p>}
             </div>
           </div>
         );
