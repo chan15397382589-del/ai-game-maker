@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
-import { getRawHtml } from "@/utils/gamePreview";
+import { injectGameCSS, getRawHtml } from "@/utils/gamePreview";
 
 interface Props {
   userId: string;
@@ -22,6 +22,85 @@ interface GameItem {
   liked?: boolean;
 }
 
+// 单张卡片（进入可视区才渲染 iframe，滚出则卸载）
+function GameCard({ item, onClick, onToggleLike }: { item: GameItem; onClick: () => void; onToggleLike: () => void }) {
+  const [inView, setInView] = useState(false);
+  const [previewCode, setPreviewCode] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setInView(entry.isIntersecting);
+      },
+      { rootMargin: "100px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // 进入可视区时加载游戏代码
+  useEffect(() => {
+    if (!inView || previewCode !== null) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token || cancelled) return;
+        const res = await fetch(`/api/student/gallery/${item.id}`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok && !cancelled) setPreviewCode((await res.json()).html_code || "");
+      } catch {}
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [inView, item.id]);
+
+  return (
+    <div ref={ref}
+      className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
+      onClick={onClick}>
+      <div className="aspect-video bg-black relative overflow-hidden">
+        {inView && previewCode ? (
+          <iframe
+            srcDoc={injectGameCSS(previewCode)}
+            className="w-full h-full border-0 pointer-events-none"
+            sandbox="allow-scripts allow-same-origin"
+            scrolling="no"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600">
+            <span className="text-5xl"> </span>
+          </div>
+        )}
+      </div>
+      <div className="px-3 py-2.5">
+        <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
+        <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
+        {item.game_rules && item.game_rules.length > 0 && (
+          <div className="mt-1.5 space-y-0.5">
+            {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
+              <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleLike(); }}
+            className={`flex items-center gap-1 text-xs font-medium transition ${item.liked ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}
+          >
+            <span>{item.liked ? "❤️" : "🤍"}</span>
+            <span>{item.like_count || 0}</span>
+          </button>
+          <span className="text-[10px] text-gray-400">{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ModuleGallery({ userId }: Props) {
   const [items, setItems] = useState<GameItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -29,7 +108,6 @@ export default function ModuleGallery({ userId }: Props) {
   const [gameStarted, setGameStarted] = useState(false);
   const [loadingGame, setLoadingGame] = useState(false);
 
-  // 加载游戏列表（不含 html_code，轻量快速）
   const fetchGames = useCallback(async () => {
     setLoading(true);
     try {
@@ -54,9 +132,7 @@ export default function ModuleGallery({ userId }: Props) {
 
   useEffect(() => { fetchGames(); }, [fetchGames]);
 
-  // 切换点赞
-  const toggleLike = async (e: React.MouseEvent, itemId: number) => {
-    e.stopPropagation();
+  const toggleLike = async (itemId: number) => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
@@ -77,7 +153,6 @@ export default function ModuleGallery({ userId }: Props) {
     } catch (err) { console.error(err); }
   };
 
-  // 点击打开游戏（按需加载 html_code）
   const openGame = async (item: GameItem) => {
     setSelectedGame(item);
     setGameStarted(false);
@@ -105,7 +180,6 @@ export default function ModuleGallery({ userId }: Props) {
     );
   }
 
-  // 游戏详情视图（仅此一个 iframe）
   if (selectedGame) {
     return (
       <div className="h-[calc(100vh-120px)] flex flex-col">
@@ -159,7 +233,6 @@ export default function ModuleGallery({ userId }: Props) {
     );
   }
 
-  // 游戏列表（静态卡片，零 iframe）
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -182,36 +255,12 @@ export default function ModuleGallery({ userId }: Props) {
         <div className="flex-1 overflow-y-auto pb-4">
           <div className="grid grid-cols-4 gap-4">
             {items.map((item) => (
-              <div key={item.id}
-                className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
-                onClick={() => openGame(item)}>
-                {/* 静态占位卡片 */}
-                <div className="aspect-video bg-gradient-to-br from-indigo-500 to-purple-600 relative flex items-center justify-center">
-                  <span className="text-5xl"> </span>
-                </div>
-                <div className="px-3 py-2.5">
-                  <p className="text-sm font-bold text-gray-800 truncate">{item.game_title || "未命名游戏"}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{item.author_name} · {item.author_grade}年级{item.author_class_num}班</p>
-                  {item.game_rules && item.game_rules.length > 0 && (
-                    <div className="mt-1.5 space-y-0.5">
-                      {item.game_rules.slice(0, 2).map((rule: string, i: number) => (
-                        <p key={i} className="text-[10px] text-gray-400 truncate">• {rule}</p>
-                      ))}
-                    </div>
-                  )}
-                  {/* 点赞 */}
-                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
-                    <button
-                      onClick={(e) => toggleLike(e, item.id)}
-                      className={`flex items-center gap-1 text-xs font-medium transition ${item.liked ? "text-red-500" : "text-gray-400 hover:text-red-400"}`}
-                    >
-                      <span>{item.liked ? "❤️" : "🤍"}</span>
-                      <span>{item.like_count || 0}</span>
-                    </button>
-                    <span className="text-[10px] text-gray-400">{new Date(item.created_at).toLocaleDateString("zh-CN")}</span>
-                  </div>
-                </div>
-              </div>
+              <GameCard
+                key={item.id}
+                item={item}
+                onClick={() => openGame(item)}
+                onToggleLike={() => toggleLike(item.id)}
+              />
             ))}
           </div>
         </div>
