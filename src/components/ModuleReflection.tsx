@@ -52,6 +52,36 @@ export default function ModuleReflection({ userId }: Props) {
   const [answers, setAnswers] = useState<Record<string, Record<string, string>>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  // AI 自动生成反思
+  const autoGenerate = async () => {
+    setGenerating(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+      const res = await fetch("/api/student/generate-reflection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.reflection) {
+          const newAnswers: Record<string, Record<string, string>> = {};
+          Object.entries(data.reflection).forEach(([qId, vals]: [string, any]) => {
+            newAnswers[qId] = vals;
+          });
+          setAnswers(newAnswers);
+          alert("✅ AI 已根据你的对话生成反思，你可以修改后提交！");
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert("生成失败：" + (err.error || "请重试"));
+      }
+    } catch (err: any) { alert("生成失败：" + err.message); }
+    finally { setGenerating(false); }
+  };
 
   const updateAns = (qId: string, key: string, val: string) => {
     setAnswers((prev) => ({ ...prev, [qId]: { ...(prev[qId] || {}), [key]: val } }));
@@ -102,7 +132,10 @@ export default function ModuleReflection({ userId }: Props) {
     <div className="space-y-4 pb-8">
       <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-2xl border border-amber-100">
         <span className="text-3xl"> </span>
-        <div><h2 className="text-xl font-bold text-amber-800">我的反思</h2><p className="text-sm text-amber-600">回顾你的创作过程</p></div>
+        <div className="flex-1"><h2 className="text-xl font-bold text-amber-800">我的反思</h2><p className="text-sm text-amber-600">回顾你的创作过程</p></div>
+        <button onClick={autoGenerate} disabled={generating}
+          className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition"
+        >{generating ? "生成中..." : "🤖 AI 帮我写"}</button>
       </div>
 
       {REFLECTIONS.map((r, idx) => {
