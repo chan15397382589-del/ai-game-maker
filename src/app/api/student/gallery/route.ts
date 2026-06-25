@@ -49,13 +49,13 @@ export async function GET(req: NextRequest) {
 
     if (classmateIds.length === 0) return NextResponse.json([]);
 
-    // 获取所有有游戏代码的对话（包含 html_code 用于预览）
+    // 获取每个学生最新的一条有游戏代码的对话（不加载 html_code，按需获取）
     const { data: allConvs } = await db
       .from("conversations")
-      .select("id, user_id, title, html_code, created_at")
+      .select("id, user_id, title, updated_at")
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
-      .order("created_at", { ascending: false })
+      .order("updated_at", { ascending: false })
       .limit(200);
 
     // 获取学生的游戏规则
@@ -68,21 +68,23 @@ export async function GET(req: NextRequest) {
     const rulesMap: Record<string, any> = {};
     (tasks || []).forEach((t: any) => { rulesMap[t.user_id] = t; });
 
-    // 返回所有作品（每个学生可能有多个）
+    // 每个学生只保留最新的一条
+    const seen = new Set<string>();
     const games: any[] = [];
     for (const c of allConvs || []) {
+      if (seen.has(c.user_id)) continue;
+      seen.add(c.user_id);
       const author = classmateMap[c.user_id];
       const task = rulesMap[c.user_id];
       games.push({
         id: c.id,
         user_id: c.user_id,
         game_title: task?.game_name || c.title || "未命名游戏",
-        html_code: c.html_code,
         game_rules: task?.game_rules || [],
         author_name: author?.name || "未知",
         author_grade: author?.grade,
         author_class_num: author?.class_num,
-        created_at: c.created_at,
+        created_at: c.updated_at,
       });
     }
 
