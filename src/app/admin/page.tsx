@@ -3004,17 +3004,19 @@ function ReflectionTable({ reflections }: { reflections: any[] }) {
   const exportCSV = () => {
     const rows = reflections.map((r: any) => {
       const ref = r.reflection || {};
-      return {
-        "姓名": r.user?.name || "", "学号": r.user?.student_id || "",
-        "Q1-游戏名": fmtRef(ref.q1, ["name"]), "Q1-玩法": fmtRef(ref.q1, ["play"]),
-        "Q2-条件": fmtRef(ref.q2, ["cond"]), "Q2-结果": fmtRef(ref.q2, ["result"]),
-        "Q3-困难": fmtRef(ref.q3, ["difficulty"]), "Q3-解决": fmtRef(ref.q3, ["solve"]),
-        "Q4-反馈": fmtRef(ref.q4, ["feedback"]), "Q4-感受": fmtRef(ref.q4, ["feel"]),
-        "Q5-改进": fmtRef(ref.q5, ["redo"]),
+      // 将反思内容转为可读文本（兼容新旧格式）
+      const toText = (val: any) => {
+        if (!val) return "";
+        if (typeof val === "string") return val;
+        return Object.values(val).filter(Boolean).join("，");
       };
+      return [
+        r.user?.name || "", r.user?.student_id || "",
+        toText(ref.q1), toText(ref.q2), toText(ref.q3), toText(ref.q4), toText(ref.q5),
+      ];
     });
-    const csv = ["姓名,学号,Q1游戏名,Q1玩法,Q2条件,Q2结果,Q3困难,Q3解决,Q4反馈,Q4感受,Q5改进",
-      ...rows.map((r: any) => Object.values(r).map(v => `"${String(v || "").replace(/"/g, '""')}"`).join(","))
+    const csv = ["姓名,学号,Q1描述游戏,Q2说明规则,Q3遇到的困难,Q4同伴反馈,Q5如果重新做",
+      ...rows.map((r: string[]) => r.map(v => `"${(v || "").replace(/"/g, '""')}"`).join(","))
     ].join("\n");
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
