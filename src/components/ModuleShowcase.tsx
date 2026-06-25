@@ -217,34 +217,61 @@ export default function ModuleShowcase({ userId }: Props) {
                   <h3 className="text-base font-bold text-white">  评价这个游戏</h3>
                   <p className="text-xs text-green-100">认真回答，帮助同学改进游戏</p>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-5">
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {/* Q1: 哪里最好玩 */}
                   <div>
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                      <span className="w-6 h-6 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xs font-bold shrink-0">1</span>
                       <label className="text-sm font-bold text-gray-800">哪里最好玩？</label>
                     </div>
-                    <div className="flex gap-2">
-                      <textarea value={currentDraft.q1} onChange={(e) => setQ1(e.target.value)} placeholder="比如：画面很酷、玩法有趣..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-green-400 resize-none transition" />
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {["画面好看","玩法有趣","操作流畅","规则简单","有挑战性","音效好听","角色可爱","很刺激"].map(opt => (
+                        <button key={opt} onClick={() => setQ1(opt)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${currentDraft.q1 === opt ? "bg-green-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                        >{opt}</button>
+                      ))}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input value={currentDraft.q1 && !["画面好看","玩法有趣","操作流畅","规则简单","有挑战性","音效好听","角色可爱","很刺激"].includes(currentDraft.q1) ? currentDraft.q1 : ""}
+                        onChange={(e) => setQ1(e.target.value)} placeholder="其他：自己写..." className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-green-400" />
                       <VoiceButton onResult={(text) => setQ1((prev) => prev + text)} />
                     </div>
                   </div>
+                  {/* Q2: 有什么建议 */}
                   <div>
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                      <span className="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold shrink-0">2</span>
                       <label className="text-sm font-bold text-gray-800">有什么建议？</label>
                     </div>
-                    <div className="flex gap-2">
-                      <textarea value={currentDraft.q2} onChange={(e) => setQ2(e.target.value)} placeholder="比如：加点音乐、难度调整..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-blue-400 resize-none transition" />
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {["加点音乐音效","调整速度","增加障碍物","颜色更鲜艳","加得分显示","加生命系统","难度递增","加关卡"].map(opt => (
+                        <button key={opt} onClick={() => setQ2(opt)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${currentDraft.q2 === opt ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                        >{opt}</button>
+                      ))}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input value={currentDraft.q2 && !["加点音乐音效","调整速度","增加障碍物","颜色更鲜艳","加得分显示","加生命系统","难度递增","加关卡"].includes(currentDraft.q2) ? currentDraft.q2 : ""}
+                        onChange={(e) => setQ2(e.target.value)} placeholder="其他：自己写..." className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-blue-400" />
                       <VoiceButton onResult={(text) => setQ2((prev) => prev + text)} />
                     </div>
                   </div>
+                  {/* Q3: 发现问题（可选） */}
                   <div>
                     <div className="flex items-center gap-2 mb-2">
-                      <span className="w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-xs font-bold">3</span>
-                      <label className="text-sm font-bold text-gray-800">发现问题了吗？<span className="text-gray-400 font-normal">（可选）</span></label>
+                      <span className="w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-xs font-bold shrink-0">3</span>
+                      <label className="text-sm font-bold text-gray-800">发现问题？<span className="text-gray-400 font-normal">（可选）</span></label>
                     </div>
-                    <div className="flex gap-2">
-                      <textarea value={currentDraft.q3} onChange={(e) => setQ3(e.target.value)} placeholder="比如：按钮点不到、角色会穿墙..." rows={2} className="flex-1 px-3 py-2.5 border-2 border-gray-200 rounded-xl text-sm outline-none focus:border-orange-400 resize-none transition" />
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {["没有问题","按钮点不到","角色穿墙了","分数不增加","画面闪烁","太卡了","太简单了","太难了"].map(opt => (
+                        <button key={opt} onClick={() => setQ3(opt)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${currentDraft.q3 === opt ? "bg-orange-500 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                        >{opt}</button>
+                      ))}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input value={currentDraft.q3 && !["没有问题","按钮点不到","角色穿墙了","分数不增加","画面闪烁","太卡了","太简单了","太难了"].includes(currentDraft.q3) ? currentDraft.q3 : ""}
+                        onChange={(e) => setQ3(e.target.value)} placeholder="其他：自己写..." className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs outline-none focus:border-orange-400" />
                       <VoiceButton onResult={(text) => setQ3((prev) => prev + text)} />
                     </div>
                   </div>
