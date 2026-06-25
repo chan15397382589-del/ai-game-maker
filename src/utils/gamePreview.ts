@@ -4,22 +4,8 @@
 export function injectGameCSS(html: string): string {
   const css = `<style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: #000;
-    }
-    canvas {
-      display: block;
-      max-width: 100%;
-      max-height: 100%;
-      width: auto !important;
-      height: auto !important;
-    }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    canvas { display: block; margin: auto; max-width: 100%; max-height: 100%; }
   </style>`;
 
   if (html.includes('<head>')) {
@@ -29,4 +15,12 @@ export function injectGameCSS(html: string): string {
   } else {
     return `<!DOCTYPE html><html><head>${css}</head><body>${html}</body></html>`;
   }
+}
+
+// 不注入 CSS 的原始版本（用于下载）
+export function getRawHtml(html: string): string {
+  if (html.includes('<html>') || html.includes('<!DOCTYPE')) {
+    return html;
+  }
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${html}</body></html>`;
 }

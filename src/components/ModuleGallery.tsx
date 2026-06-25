@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
-import { injectGameCSS } from "@/utils/gamePreview";
+import { injectGameCSS, getRawHtml } from "@/utils/gamePreview";
 
 interface Props {
   userId: string;
@@ -119,8 +119,23 @@ export default function ModuleGallery({ userId }: Props) {
             <h2 className="text-lg font-bold text-gray-800">{selectedGame.game_title || "未命名游戏"}</h2>
             <p className="text-xs text-gray-500">{selectedGame.author_name} · {selectedGame.author_grade}年级{selectedGame.author_class_num}班</p>
           </div>
+          <button
+            onClick={() => {
+              const code = getRawHtml(selectedGame.html_code || "");
+              const blob = new Blob([code], { type: "text/html" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `${selectedGame.game_title || "游戏"}.html`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium transition"
+          >
+             下载
+          </button>
         </div>
-        <div className="flex-1 rounded-2xl shadow-lg overflow-hidden relative bg-white">
+        <div className="flex-1 rounded-2xl shadow-lg overflow-hidden bg-white">
           {loadingGame ? (
             <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900 to-purple-900">
               <div className="text-center">
@@ -130,8 +145,8 @@ export default function ModuleGallery({ userId }: Props) {
             </div>
           ) : gameStarted ? (
             <iframe
-              srcDoc={injectGameCSS(selectedGame.html_code || "")}
-              className="absolute inset-0 w-full h-full"
+              srcDoc={getRawHtml(selectedGame.html_code || "")}
+              className="w-full h-full"
               sandbox="allow-scripts"
               scrolling="no"
               style={{ border: "none" }}
