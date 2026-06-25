@@ -104,7 +104,29 @@ export default function StudentPage() {
             {MODULES.map((m) => (
               <button
                 key={m.id}
-                onClick={() => setActiveModule(m.id)}
+                onClick={async () => {
+                  if (m.id === "gallery") {
+                    // 检查是否完成了同伴互评
+                    try {
+                      const { data: { session } } = await supabase.auth.getSession();
+                      const token = session?.access_token;
+                      if (token) {
+                        const res = await fetch("/api/student/peer-reviews?mode=tasks", {
+                          headers: { Authorization: `Bearer ${token}` },
+                        });
+                        if (res.ok) {
+                          const data = await res.json();
+                          if (data.totalAvailable > 0 && data.totalReviewed < Math.min(3, data.totalAvailable)) {
+                            alert(`请先完成同伴互评！\n已评 ${data.totalReviewed} 个，还需要评价 ${Math.min(3, data.totalAvailable) - data.totalReviewed} 个同学的游戏。`);
+                            setActiveModule("showcase");
+                            return;
+                          }
+                        }
+                      }
+                    } catch {}
+                  }
+                  setActiveModule(m.id);
+                }}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                   activeModule === m.id
                     ? "bg-white text-indigo-600 shadow-md"
