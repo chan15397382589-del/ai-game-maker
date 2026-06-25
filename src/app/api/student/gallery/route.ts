@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
       .in("user_id", classmateIds)
       .not("html_code", "is", null)
       .order("updated_at", { ascending: false })
-      .limit(200);
+      .limit(1000);
 
     // 获取学生的游戏规则
     const { data: tasks } = await db

@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
       .select("id, user_id, task_id, game_name, game_rules, design_image, design_reason, created_at, updated_at")
       .in("user_id", filteredUserIds)
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(1000);
 
     if (taskId) {
       query = query.eq("task_id", taskId);

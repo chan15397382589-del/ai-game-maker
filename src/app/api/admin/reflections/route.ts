@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       .in("user_id", studentIds)
       .not("reflection", "is", null)
       .order("updated_at", { ascending: false })
-      .limit(200);
+      .limit(1000);
 
     // 获取用户信息
     const userIds = [...new Set((convs || []).map((c: any) => c.user_id))];
