@@ -97,14 +97,12 @@ export async function GET(req: NextRequest) {
         }
       } catch {}
 
-      // survey 任务保留 design_reason（存有前测答案），其他任务删除
-      const isSurvey = t.task_id === "survey";
       return {
         ...t,
         design_image: designImage,
         image_history: imageHistory,
         ai_prompt: aiPrompt,
-        design_reason: isSurvey ? t.design_reason : undefined,
+        // 保留 design_reason（TaskCards 需要 AI prompt，Survey 需要答案）
         user: userMap[t.user_id] || null,
       };
     });
