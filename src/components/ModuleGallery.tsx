@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/components/SupabaseProvider";
 import { injectGameCSS } from "@/utils/gamePreview";
 
@@ -18,6 +18,8 @@ interface GameItem {
   author_grade: number | null;
   author_class_num: number | null;
   created_at: string;
+  like_count?: number;
+  liked?: boolean;
 }
 
 export default function ModuleGallery({ userId }: Props) {
@@ -27,17 +29,56 @@ export default function ModuleGallery({ userId }: Props) {
   const [gameStarted, setGameStarted] = useState(false);
   const [loadingGame, setLoadingGame] = useState(false);
 
-  useEffect(() => { fetchGames(); }, []);
-
-  const fetchGames = async () => {
+  // 加载游戏列表和点赞数据
+  const fetchGames = useCallback(async () => {
     setLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) return;
-      const res = await fetch("/api/student/gallery", { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setItems(await res.json() || []);
+
+      const [galleryRes, likesRes] = await Promise.all([
+        fetch("/api/student/gallery", { headers: { Authorization: `Bearer ${token}` } }),
+        fetch("/api/student/gallery/likes", { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+
+      let games: GameItem[] = [];
+      if (galleryRes.ok) games = await galleryRes.json() || [];
+
+      let likesData: Record<string, { count: number; liked: boolean }> = {};
+      if (likesRes.ok) likesData = await likesRes.json() || {};
+
+      setItems(games.map((g: any) => ({
+        ...g,
+        like_count: likesData[g.id]?.count || 0,
+        liked: likesData[g.id]?.liked || false,
+      })));
     } catch (err) { console.error(err); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchGames(); }, [fetchGames]);
+
+  // 点赞/取消点赞
+  const toggleLike = async (e: React.MouseEvent, itemId: number) => {
+    e.stopPropagation();
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+      const res = await fetch("/api/student/gallery/like", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ conversation_id: itemId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setItems((prev) => prev.map((item) =>
+          item.id === itemId
+            ? { ...item, liked: data.liked, like_count: (item.like_count || 0) + (data.liked ? 1 : -1) }
+            : item
+        ));
+      }
+    } catch (err) { console.error(err); }
   };
 
   const openGame = async (item: GameItem) => {
@@ -113,7 +154,7 @@ export default function ModuleGallery({ userId }: Props) {
     );
   }
 
-  // 游戏列表（静态卡片，无 iframe 缩略图）
+  // 游戏列表
   return (
     <div className="h-[calc(100vh-120px)] flex flex-col">
       <div className="flex items-center justify-between mb-4">
@@ -137,13 +178,14 @@ export default function ModuleGallery({ userId }: Props) {
           <div className="grid grid-cols-4 gap-4">
             {items.map((item) => (
               <div key={item.id}
-                className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg hover:scale-[1.02] transition-all"
+                className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden cursor-pointer hover:shadow-lg transition-all group"
                 onClick={() => openGame(item)}>
-                {/* 静态占位卡片 */}
-                <div className="aspect-video bg-gradient-to-br from-indigo-500 to-purple-600 relative flex items-center justify-center">
-                  <div className="text-center">
-                    <span className="text-4xl block mb-1"> </span>
-                    <p className="text-white text-xs font-medium opacity-80">点击试玩</p>
+                {/* 缩略图预览 */}
+                <div className="aspect-video bg-gray-900 relative overflow-hidden">
+                  <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 opacity-100 group-hover:opacity-0 transition-opacity">
+                    <div className="text-center">
+                      <span className="text-4xl block mb-1"> </span>
+                    </div>
                   </div>
                 </div>
                 <div className="px-3 py-2.5">
@@ -157,6 +199,21 @@ export default function ModuleGallery({ userId }: Props) {
                       {item.game_rules.length > 2 && <p className="text-[10px] text-gray-400">+{item.game_rules.length - 2} 条规则</p>}
                     </div>
                   )}
+                  {/* 点赞按钮 */}
+                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+                    <button
+                      onClick={(e) => toggleLike(e, item.id)}
+                      className={`flex items-center gap-1 text-xs font-medium transition ${
+                        item.liked ? "text-red-500" : "text-gray-400 hover:text-red-400"
+                      }`}
+                    >
+                      <span>{item.liked ? "❤️" : "🤍"}</span>
+                      <span>{item.like_count || 0}</span>
+                    </button>
+                    <span className="text-[10px] text-gray-400">
+                      {new Date(item.created_at).toLocaleDateString("zh-CN")}
+                    </span>
+                  </div>
                 </div>
               </div>
             ))}

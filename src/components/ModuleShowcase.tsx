@@ -115,9 +115,9 @@ export default function ModuleShowcase({ userId }: Props) {
 
         // 最后一个评价完成后，跳转到游戏设计模块
         if (currentIdx >= tasks.length - 1) {
-          alert("✅ 所有评价已完成！即将跳转到游戏设计页面，继续改进你的游戏。");
-          localStorage.setItem("gotoModule", "create");
-          window.location.href = "/student?module=create";
+          alert("✅ 所有评价已完成！即将跳转到班级作品页面，看看同学们的游戏吧！");
+          localStorage.setItem("gotoModule", "gallery");
+          window.location.href = "/student?module=gallery";
         } else {
           // 自动跳到下一个
           setCurrentIdx(currentIdx + 1);
