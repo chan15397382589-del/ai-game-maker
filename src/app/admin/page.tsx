@@ -2987,40 +2987,66 @@ function DiscussionList({ messages }: { messages: any[] }) {
 // ============================================================
 // 游戏制作（教师演示用，可切换对照组/实验组）
 // 对齐学生端界面风格
-// 反思数据（兼容旧格式string和新格式object）
+// 反思数据
 function fmtRef(val: any, keys: string[]): string {
-  if (!val) return "?";
+  if (!val) return "";
   if (typeof val === "string") return val;
   if (typeof val === "object") {
     const parts = keys.map(k => val[k]).filter(Boolean);
-    return parts.length > 0 ? parts.join("，") : "?";
+    return parts.join("，");
   }
   return String(val);
 }
 
 function ReflectionTable({ reflections }: { reflections: any[] }) {
   if (reflections.length === 0) return <div className="text-center py-12 text-gray-400">暂无反思数据</div>;
+
+  const exportCSV = () => {
+    const rows = reflections.map((r: any) => {
+      const ref = r.reflection || {};
+      return {
+        "姓名": r.user?.name || "", "学号": r.user?.student_id || "",
+        "Q1-游戏名": fmtRef(ref.q1, ["name"]), "Q1-玩法": fmtRef(ref.q1, ["play"]),
+        "Q2-条件": fmtRef(ref.q2, ["cond"]), "Q2-结果": fmtRef(ref.q2, ["result"]),
+        "Q3-困难": fmtRef(ref.q3, ["difficulty"]), "Q3-解决": fmtRef(ref.q3, ["solve"]),
+        "Q4-反馈": fmtRef(ref.q4, ["feedback"]), "Q4-感受": fmtRef(ref.q4, ["feel"]),
+        "Q5-改进": fmtRef(ref.q5, ["redo"]),
+      };
+    });
+    const csv = ["姓名,学号,Q1游戏名,Q1玩法,Q2条件,Q2结果,Q3困难,Q3解决,Q4反馈,Q4感受,Q5改进",
+      ...rows.map((r: any) => Object.values(r).map(v => `"${String(v || "").replace(/"/g, '""')}"`).join(","))
+    ].join("\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `学生反思_${new Date().toISOString().slice(0,10)}.csv`; a.click();
+  };
+
   return (
-    <div className="space-y-4">
-      {reflections.map((r: any) => {
-        const ref = r.reflection || {};
-        return (
-          <div key={r.id} className="border border-gray-200 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-sm font-bold text-gray-800">{r.user?.name || "未知"}</span>
-              <span className="text-xs text-gray-400">{r.user?.student_id}</span>
-              <span className="text-xs text-gray-400">{r.user?.grade}年级{r.user?.class_num}班</span>
+    <div>
+      <div className="flex justify-end mb-3">
+        <button onClick={exportCSV} className="px-3 py-1.5 bg-green-500 hover:bg-green-600 text-white rounded-lg text-xs font-medium">📊 导出CSV</button>
+      </div>
+      <div className="space-y-3">
+        {reflections.map((r: any) => {
+          const ref = r.reflection || {};
+          return (
+            <div key={r.id} className="border border-gray-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-sm font-bold text-gray-800">{r.user?.name || "未知"}</span>
+                <span className="text-xs text-gray-400">({r.user?.student_id})</span>
+                <span className="text-xs text-gray-400">{r.user?.grade}年级{r.user?.class_num}班</span>
+              </div>
+              <div className="grid grid-cols-1 gap-1.5 text-sm">
+                <p><strong>Q1：</strong>我的游戏叫 {fmtRef(ref.q1, ["name"]) || "?"}，玩法是 {fmtRef(ref.q1, ["play"]) || "?"}</p>
+                <p><strong>Q2：</strong>如果 {fmtRef(ref.q2, ["cond"]) || "?"}，就 {fmtRef(ref.q2, ["result"]) || "?"}</p>
+                <p><strong>Q3：</strong>困难 {fmtRef(ref.q3, ["difficulty"]) || "?"}，解决 {fmtRef(ref.q3, ["solve"]) || "?"}</p>
+                <p><strong>Q4：</strong>同伴说{fmtRef(ref.q4, ["feedback"]) || "?"}，我觉得{fmtRef(ref.q4, ["feel"]) || "?"}</p>
+                <p><strong>Q5：</strong>会改 {fmtRef(ref.q5, ["redo"]) || "?"}</p>
+              </div>
             </div>
-            <div className="grid grid-cols-1 gap-2 text-sm">
-              {ref.q1 && <p><strong>Q1 描述游戏：</strong>{fmtRef(ref.q1, ["name","play"])}</p>}
-              {ref.q2 && <p><strong>Q2 规则：</strong>{fmtRef(ref.q2, ["cond","result"])}</p>}
-              {ref.q3 && <p><strong>Q3 困难：</strong>{fmtRef(ref.q3, ["difficulty","solve"])}</p>}
-              {ref.q4 && <p><strong>Q4 反馈：</strong>{fmtRef(ref.q4, ["feedback","feel"])}</p>}
-              {ref.q5 && <p><strong>Q5 改进：</strong>{fmtRef(ref.q5, ["redo"])}</p>}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
