@@ -158,8 +158,8 @@ export default function AdminDashboard() {
               try {
                 const token = await getAuthToken();
                 if (!token) { alert("请先登录"); return; }
-                const grade = prompt("请输入年级（3-6，留空=全部）：");
-                const classNum = grade ? prompt("请输入班级（1-10，留空=全部）：") : "";
+                const grade = prompt("请输入年级（3-6，留空=全部年级）：");
+                const classNum = grade ? prompt("请输入班级（1-10，留空=该年级全部班级）：") : "";
                 const params = new URLSearchParams();
                 if (grade) params.set("grade", grade);
                 if (classNum) params.set("class_num", classNum);
@@ -175,7 +175,7 @@ export default function AdminDashboard() {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `班级数据导出_${grade || "全部"}${classNum ? "年级" + classNum + "班" : ""}_${new Date().toISOString().slice(0,10)}.zip`;
+                a.download = `全部数据导出_${grade || "全年级"}_${new Date().toISOString().slice(0,10)}.zip`;
                 a.click();
                 URL.revokeObjectURL(url);
               } catch (err: any) {
