@@ -155,15 +155,32 @@ export default function AdminDashboard() {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={async () => {
-              const token = await getAuthToken();
-              if (!token) { alert("请先登录"); return; }
-              const grade = prompt("请输入年级（3-6，留空=全部）：");
-              const classNum = grade ? prompt("请输入班级（1-10，留空=全部）：") : "";
-              const url = `/api/admin/export-all?grade=${grade || ""}&class_num=${classNum || ""}`;
-              const a = document.createElement("a");
-              a.href = url + "&token=" + encodeURIComponent(token);
-              a.download = "data.zip";
-              a.click();
+              try {
+                const token = await getAuthToken();
+                if (!token) { alert("请先登录"); return; }
+                const grade = prompt("请输入年级（3-6，留空=全部）：");
+                const classNum = grade ? prompt("请输入班级（1-10，留空=全部）：") : "";
+                const params = new URLSearchParams();
+                if (grade) params.set("grade", grade);
+                if (classNum) params.set("class_num", classNum);
+                const res = await fetch(`/api/admin/export-all?${params.toString()}`, {
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!res.ok) {
+                  const err = await res.json().catch(() => ({}));
+                  alert(err.error || `导出失败: ${res.status}`);
+                  return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `班级数据导出_${grade || "全部"}${classNum ? "年级" + classNum + "班" : ""}_${new Date().toISOString().slice(0,10)}.zip`;
+                a.click();
+                URL.revokeObjectURL(url);
+              } catch (err: any) {
+                alert("导出失败: " + err.message);
+              }
             }} className="bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm transition">📦 导出全部数据</button>
             <button onClick={handleLogout} className="bg-indigo-500 hover:bg-indigo-400 px-4 py-2 rounded-lg text-sm transition">
               退出登录
