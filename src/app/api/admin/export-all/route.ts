@@ -6,14 +6,13 @@ import { getDB } from "@/lib/supabase-admin";
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
+    const grade = searchParams.get("grade");
+    const classNum = searchParams.get("class_num");
+    const type = searchParams.get("type") || "all";
     const token = req.headers.get("Authorization")?.replace("Bearer ", "")
       || searchParams.get("token") || "";
     const admin = await getVerifiedAdmin(token);
     if (admin instanceof NextResponse) return admin;
-
-    const grade = searchParams.get("grade");
-    const classNum = searchParams.get("class_num");
-    const type = searchParams.get("type") || "all";
 
     // 筛选学生
     let userQuery = supabaseAdmin.from("users").select("id, name, student_id, grade, class_num, srl_condition").eq("role", "student");
