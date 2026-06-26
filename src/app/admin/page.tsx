@@ -155,9 +155,15 @@ export default function AdminDashboard() {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={async () => {
+              const token = await getAuthToken();
+              if (!token) { alert("请先登录"); return; }
               const grade = prompt("请输入年级（3-6，留空=全部）：");
               const classNum = grade ? prompt("请输入班级（1-10，留空=全部）：") : "";
-              window.open(`/api/admin/export-all?grade=${grade || ""}&class_num=${classNum || ""}`, "_blank");
+              const url = `/api/admin/export-all?grade=${grade || ""}&class_num=${classNum || ""}`;
+              const a = document.createElement("a");
+              a.href = url + "&token=" + encodeURIComponent(token);
+              a.download = "data.zip";
+              a.click();
             }} className="bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm transition">📦 导出全部数据</button>
             <button onClick={handleLogout} className="bg-indigo-500 hover:bg-indigo-400 px-4 py-2 rounded-lg text-sm transition">
               退出登录

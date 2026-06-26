@@ -5,7 +5,8 @@ import { getDB } from "@/lib/supabase-admin";
 
 export async function GET(req: NextRequest) {
   try {
-    const token = req.headers.get("Authorization")?.replace("Bearer ", "") || "";
+    const token = req.headers.get("Authorization")?.replace("Bearer ", "")
+      || searchParams.get("token") || "";
     const admin = await getVerifiedAdmin(token);
     if (admin instanceof NextResponse) return admin;
 
