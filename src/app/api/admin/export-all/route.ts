@@ -5,12 +5,12 @@ import { getDB } from "@/lib/supabase-admin";
 
 export async function GET(req: NextRequest) {
   try {
+    const { searchParams } = new URL(req.url);
     const token = req.headers.get("Authorization")?.replace("Bearer ", "")
       || searchParams.get("token") || "";
     const admin = await getVerifiedAdmin(token);
     if (admin instanceof NextResponse) return admin;
 
-    const { searchParams } = new URL(req.url);
     const grade = searchParams.get("grade");
     const classNum = searchParams.get("class_num");
     const type = searchParams.get("type") || "all";
