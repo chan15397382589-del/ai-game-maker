@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
     let userQuery = supabaseAdmin.from("users").select("id, name, student_id, grade, class_num, srl_condition").eq("role", "student");
     if (grade) userQuery = userQuery.eq("grade", parseInt(grade));
     if (classNum) userQuery = userQuery.eq("class_num", parseInt(classNum));
-    const { data: students } = await userQuery.limit(500);
+    const { data: students } = await userQuery.limit(5000);
     if (!students || students.length === 0) {
       return NextResponse.json({ error: "没有学生数据" }, { status: 404 });
     }
@@ -29,11 +29,11 @@ export async function GET(req: NextRequest) {
     const [
       tasksRes, surveyRes, messagesRes, gamesRes, reviewsRes, groupsRes,
     ] = await Promise.all([
-      supabaseAdmin.from("student_tasks").select("*").in("user_id", studentIds).limit(2000),
+      supabaseAdmin.from("student_tasks").select("*").in("user_id", studentIds).limit(5000),
       supabaseAdmin.from("student_tasks").select("user_id,design_reason").eq("task_id", "survey").in("user_id", studentIds),
-      supabaseAdmin.from("messages").select("user_id,role,content,created_at").in("user_id", studentIds).order("created_at", { ascending: true }).limit(10000),
-      supabaseAdmin.from("conversations").select("id,user_id,title,html_code,reflection").in("user_id", studentIds).not("html_code", "is", null).limit(500),
-      supabaseAdmin.from("peer_reviews").select("*").in("reviewer_id", studentIds).limit(2000),
+      supabaseAdmin.from("messages").select("user_id,role,content,created_at").in("user_id", studentIds).order("created_at", { ascending: true }).limit(50000),
+      supabaseAdmin.from("conversations").select("id,user_id,title,html_code,reflection").in("user_id", studentIds).not("html_code", "is", null).limit(2000),
+      supabaseAdmin.from("peer_reviews").select("*").in("reviewer_id", studentIds).limit(5000),
       supabaseAdmin.from("group_members").select("user_id,group_id,g:groups(id,name)").in("user_id", studentIds),
     ]);
 
@@ -145,8 +145,8 @@ export async function GET(req: NextRequest) {
 
 async function getTrackingData(studentIds: string[]) {
   const [convRes, msgRes] = await Promise.all([
-    supabaseAdmin.from("conversations").select("user_id,html_code").in("user_id", studentIds).limit(5000),
-    supabaseAdmin.from("messages").select("user_id,input_method,has_code").in("user_id", studentIds).limit(50000),
+    supabaseAdmin.from("conversations").select("user_id,html_code").in("user_id", studentIds).limit(50000),
+    supabaseAdmin.from("messages").select("user_id,input_method,has_code").in("user_id", studentIds).limit(100000),
   ]);
 
   const convCount: Record<string, number> = {};
