@@ -121,15 +121,20 @@ export async function GET(req: NextRequest) {
     });
     addCsv(zip, "学生反思", reflectionRows);
 
-    // 8. 游戏成品 HTML
+    // 8. 游戏成品 HTML（按班级分文件夹，文件名去除特殊字符）
     const gameFolder = zip.folder("游戏成品")!;
     (gamesRes.data || []).forEach((c: any) => {
       const s = studentMap[c.user_id] || {};
-      const safeName = `${s.student_id}_${(c.title || "game").replace(/[<>:"/\\|?*\s]/g, "_").substring(0, 30)}.html`;
-      gameFolder.file(safeName, c.html_code || "");
+      // 安全文件名：只用字母数字下划线
+      const safeTitle = (c.title || "game").replace(/[^\w一-鿿]/g, "_").substring(0, 30);
+      const safeName = (s.name || "unknown").replace(/[^\w一-鿿]/g, "_");
+      const classFolder = s.grade && s.class_num ? `G${s.grade}_C${s.class_num}` : "Unknown";
+      const studentFolder = gameFolder.folder(classFolder)!;
+      const fileName = `${safeName}_${safeTitle}.html`;
+      studentFolder.file(fileName, c.html_code || "");
     });
 
-    const zipData = await zip.generateAsync({ type: "uint8array" });
+    const zipData = await zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
 
     return new NextResponse(zipData as any, {
       headers: {
