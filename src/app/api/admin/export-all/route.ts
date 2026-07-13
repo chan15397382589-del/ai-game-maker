@@ -65,14 +65,14 @@ export async function GET(req: NextRequest) {
       let a: any = {};
       try { a = JSON.parse(t.design_reason || "{}"); } catch {}
       const s = studentMap[t.user_id] || {};
-      return { 姓名: s.name, 学号: s.student_id, Q1: a.q1 || "", Q2: a.q2 || "", Q3: a.q3 || "", Q4: a.q4 || "", Q5: a.q5 || "" };
+      return { 年级: s.grade ? s.grade + "年级" : "", 班级: s.class_num ? s.class_num + "班" : "", 姓名: s.name, 学号: s.student_id, Q1: a.q1 || "", Q2: a.q2 || "", Q3: a.q3 || "", Q4: a.q4 || "", Q5: a.q5 || "" };
     });
     addCsv(zip, "前测数据", surveyRows);
 
     // 3. 任务数据
     const taskRows = (tasksRes.data || []).map((t: any) => {
       const s = studentMap[t.user_id] || {};
-      return { 姓名: s.name, 学号: s.student_id, 任务: t.task_id, 游戏名: t.game_name || "", 更新时间: new Date(t.updated_at).toLocaleString("zh-CN") };
+      return { 年级: s.grade ? s.grade + "年级" : "", 班级: s.class_num ? s.class_num + "班" : "", 姓名: s.name, 学号: s.student_id, 任务: t.task_id, 游戏名: t.game_name || "", 更新时间: new Date(t.updated_at).toLocaleString("zh-CN") };
     });
     addCsv(zip, "任务数据", taskRows);
 
@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
     const reviewRows = (reviewsRes.data || []).map((r: any) => {
       const reviewer = studentMap[r.reviewer_id] || {};
       const reviewee = studentMap[r.reviewee_id] || {};
-      return { 评价者: reviewer.name, 被评者: reviewee.name, 好玩之处: r.q1_enjoy, 建议: r.q2_suggestion, 问题: r.q3_bug || "" };
+      return { 评价者年级: reviewer.grade ? reviewer.grade + "年级" : "", 评价者班级: reviewer.class_num ? reviewer.class_num + "班" : "", 评价者: reviewer.name, 被评者: reviewee.name, 好玩之处: r.q1_enjoy, 建议: r.q2_suggestion, 问题: r.q3_bug || "" };
     });
     addCsv(zip, "同伴互评", reviewRows);
 
@@ -117,7 +117,7 @@ export async function GET(req: NextRequest) {
       try { ref = JSON.parse(c.reflection); } catch {}
       const s = studentMap[c.user_id] || {};
       const toTxt = (v: any) => v ? (typeof v === "string" ? v : Object.values(v || {}).filter(Boolean).join("，")) : "";
-      reflectionRows.push({ 姓名: s.name, 学号: s.student_id, Q1: toTxt(ref.q1), Q2: toTxt(ref.q2), Q3: toTxt(ref.q3), Q4: toTxt(ref.q4), Q5: toTxt(ref.q5) });
+      reflectionRows.push({ 年级: s.grade ? s.grade + "年级" : "", 班级: s.class_num ? s.class_num + "班" : "", 姓名: s.name, 学号: s.student_id, Q1: toTxt(ref.q1), Q2: toTxt(ref.q2), Q3: toTxt(ref.q3), Q4: toTxt(ref.q4), Q5: toTxt(ref.q5) });
     });
     addCsv(zip, "学生反思", reflectionRows);
 
