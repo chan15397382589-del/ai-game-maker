@@ -209,6 +209,7 @@ export async function buildResearchExport(
     const lessonNumber = lessonNumberByClassDate.get(`${classKey(student)}:${time.date}`);
     const lesson = lessonNumber ? `第${String(lessonNumber).padStart(2, "0")}课时` : "课时未知";
     const klass = classLabel(student);
+    const srlFolder = `SRL_${safeSegment(student.srl_condition, "组别未知")}`;
     const studentFolder = `${safeSegment(student.student_id, "无学号")}_${safeSegment(student.name, "未知学生")}_${safeSegment(userId, "no_uuid", 12)}`;
     return {
       student,
@@ -217,8 +218,9 @@ export async function buildResearchExport(
       time,
       lesson,
       classFolder: safeSegment(klass),
+      srlFolder,
       studentFolder,
-      base: `01_按日期与班级/${time.date}/${safeSegment(klass)}/${lesson}`,
+      base: `01_按班级/${safeSegment(klass)}/${srlFolder}/${studentFolder}/${time.date}`,
     };
   };
 
@@ -332,10 +334,9 @@ export async function buildResearchExport(
     const sessionId = first.session_id || "无会话ID";
     const context = exportContext(first.user_id, first.created_at);
     const sessionFolder = `session_${safeSegment(sessionId, "no_session", 40)}`;
-    const folder = `${context.base}/01_AI对话平台/${context.studentFolder}/${sessionFolder}`;
-    const fileBase = `${context.time.date}_${sessionFolder}`;
-    const txtPath = `${folder}/${fileBase}_对话.txt`;
-    const csvPath = `${folder}/${fileBase}_消息明细.csv`;
+    const fileBase = `AI对话_${sessionFolder}`;
+    const txtPath = `${context.base}/${fileBase}.txt`;
+    const csvPath = `${context.base}/${fileBase}_消息明细.csv`;
     const header = [
       `学生ID：${context.student.student_id || ""}`,
       `用户UUID：${first.user_id}`,
@@ -400,7 +401,7 @@ export async function buildResearchExport(
     const timestamp = conversation.updated_at || conversation.created_at;
     const context = exportContext(conversation.user_id, timestamp);
     const sessionFolder = `session_${safeSegment(conversation.id, "no_session", 40)}`;
-    const path = `${context.base}/03_阶段作品平台/${context.studentFolder}/${sessionFolder}/current_${context.time.file}_${safeSegment(conversation.title, "未命名游戏")}.html`;
+    const path = `${context.base}/阶段游戏_${sessionFolder}_${context.time.file}_${safeSegment(conversation.title, "未命名游戏")}.html`;
     addIndexedFile(path, conversation.html_code, fileMeta("阶段作品平台", "会话当前游戏版本", "conversations", conversation.id, conversation.user_id, timestamp, conversation.id, "conversations.id = messages.session_id"));
     conversationArtifactPaths.set(conversation.id, [...(conversationArtifactPaths.get(conversation.id) || []), path]);
     artifactIndex.push({
@@ -439,7 +440,7 @@ export async function buildResearchExport(
       const hashKey = `${snapshot.user_id}:${hash}`;
       snapshotHashCandidates.set(hashKey, [...(snapshotHashCandidates.get(hashKey) || []), snapshot]);
       const sessionFolder = `session_${safeSegment(conversationId, "no_session", 40)}`;
-      const path = `${context.base}/03_阶段作品平台/${context.studentFolder}/${sessionFolder}/snapshot_${String(index + 1).padStart(3, "0")}_${context.time.file}_id-${snapshot.id}.html`;
+      const path = `${context.base}/阶段游戏快照_${sessionFolder}_${String(index + 1).padStart(3, "0")}_${context.time.file}_id-${snapshot.id}.html`;
       addIndexedFile(path, snapshot.html_code || "", fileMeta("阶段作品平台", "游戏版本快照", "game_snapshots", snapshot.id, snapshot.user_id, snapshot.created_at, conversationId, "game_snapshots.conversation_id = conversations.id"));
       if (snapshot.conversation_id) conversationArtifactPaths.set(snapshot.conversation_id, [...(conversationArtifactPaths.get(snapshot.conversation_id) || []), path]);
       artifactIndex.push({
@@ -467,8 +468,7 @@ export async function buildResearchExport(
     if (task.task_id === "survey") continue;
     const timestamp = task.updated_at || task.created_at;
     const context = exportContext(task.user_id, timestamp);
-    const folder = `${context.base}/03_阶段作品平台/${context.studentFolder}/构思与任务`;
-    const baseName = `task_${safeSegment(task.task_id)}_${context.time.file}_id-${task.id}`;
+    const baseName = `构思任务_${safeSegment(task.task_id)}_${context.time.file}_id-${task.id}`;
     const taskPayload = {
       record_id: task.id,
       user_id: task.user_id,
@@ -493,11 +493,11 @@ export async function buildResearchExport(
       created_at: task.created_at,
       updated_at: task.updated_at,
     };
-    const jsonPath = `${folder}/${baseName}.json`;
+    const jsonPath = `${context.base}/${baseName}.json`;
     addIndexedFile(jsonPath, JSON.stringify(taskPayload, null, 2), fileMeta("阶段作品平台", "构思任务数据", "student_tasks", task.id, task.user_id, timestamp, "", "student_tasks.user_id = users.id"));
     const image = decodeDataUrl(task.design_image);
     if (image) {
-      const imagePath = `${folder}/${baseName}_设计图.${image.extension}`;
+      const imagePath = `${context.base}/${baseName}_设计图.${image.extension}`;
       addIndexedFile(imagePath, image.bytes, fileMeta("阶段作品平台", "阶段设计图", "student_tasks", task.id, task.user_id, timestamp, "", "student_tasks.user_id = users.id"));
     }
   }
@@ -517,7 +517,7 @@ export async function buildResearchExport(
         : null);
     const linkedConversationId = matchedConversation?.id || matchingSnapshots[0]?.conversation_id || "";
     const relation = linkedConversationId ? "同一学生且HTML_SHA256完全一致" : "仅通过用户UUID关联；projects表没有conversation_id";
-    const path = `${context.base}/04_最终作品平台/${context.studentFolder}/project_${safeSegment(project.id)}_${context.time.file}_${safeSegment(project.game_title, "未命名游戏")}.html`;
+    const path = `${context.base}/最终游戏_project_${safeSegment(project.id)}_${context.time.file}_${safeSegment(project.game_title, "未命名游戏")}.html`;
     addIndexedFile(path, project.html_code || "", fileMeta("最终作品平台", "最终游戏作品", "projects", project.id, project.user_id, timestamp, linkedConversationId, relation));
     artifactIndex.push({
       作品阶段: "最终作品",
@@ -540,7 +540,7 @@ export async function buildResearchExport(
     });
   }
 
-  // 小组协作对话：按组别和活动日期拆分，同时保留每条消息的学生身份。
+  // 小组协作对话：按组别和活动日期拆分，并复制到当天有发言的每位学生目录。
   const groupDailyMessages = new Map<string, Row[]>();
   for (const message of data.groupMessages) {
     const date = timestampParts(message.created_at).date;
@@ -553,12 +553,8 @@ export async function buildResearchExport(
     rows.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || Number(a.id) - Number(b.id));
     const first = rows[0];
     const group = groupMap.get(first.group_id) || {};
-    const context = exportContext(first.user_id, first.created_at);
-    const groupFolder = `${safeSegment(first.group_id)}_${safeSegment(group.name, "未命名小组")}`;
-    const folder = `${context.base}/02_小组协作平台/${groupFolder}`;
-    const txtPath = `${folder}/${context.time.date}_小组对话.txt`;
-    const csvPath = `${folder}/${context.time.date}_小组消息明细.csv`;
-    const detailRows = rows.map((message) => {
+    const groupFile = `${safeSegment(first.group_id)}_${safeSegment(group.name, "未命名小组")}`;
+    const baseDetailRows = rows.map((message) => {
       const member = identity(message.user_id);
       const lessonContext = exportContext(message.user_id, message.created_at);
       return {
@@ -577,31 +573,42 @@ export async function buildResearchExport(
         内容: message.content || "",
         语音转写: message.voice_transcript || "",
         语音URL: message.voice_url || "",
-        对话文件路径: txtPath,
       };
     });
-    const txt = [
-      `组别ID：${first.group_id}`,
-      `组别名称：${group.name || ""}`,
-      `年级班级：${context.classFolder}`,
-      `活动日期：${context.time.date}`,
-      `课时：${context.lesson}`,
-      `消息数：${rows.length}`,
-      "",
-      ...rows.flatMap((message) => {
-        const member = identity(message.user_id);
-        return [
-          `[${timestampParts(message.created_at).display}] [${member.student.student_id || ""}] [${member.student.name || ""}] [message_id=${message.id}]`,
-          String(message.voice_transcript || message.content || ""),
-          "",
-          "---",
-          "",
-        ];
-      }),
-    ].join("\r\n");
-    addIndexedFile(txtPath, txt, fileMeta("小组协作平台", "小组完整对话", "group_messages", `${first.group_id}:${context.time.date}`, first.user_id, first.created_at, "", "group_id + 活动日期"));
-    addIndexedFile(csvPath, toCsv(detailRows), fileMeta("小组协作平台", "小组消息明细CSV", "group_messages", `${first.group_id}:${context.time.date}`, first.user_id, first.created_at, "", "group_id + 活动日期"));
-    groupMessageIndex.push(...detailRows);
+    const participantPaths: string[] = [];
+    const participantIds = [...new Set(rows.map((message) => String(message.user_id)))];
+    for (const participantId of participantIds) {
+      const participantFirst = rows.find((message) => String(message.user_id) === participantId) || first;
+      const context = exportContext(participantId, participantFirst.created_at);
+      const txtPath = `${context.base}/小组对话_${groupFile}.txt`;
+      const csvPath = `${context.base}/小组对话_${groupFile}_消息明细.csv`;
+      const detailRows = baseDetailRows.map((row) => ({ ...row, 对话文件路径: txtPath }));
+      const txt = [
+        `组别ID：${first.group_id}`,
+        `组别名称：${group.name || ""}`,
+        `所属学生：${context.student.student_id || ""} ${context.student.name || ""}`,
+        `年级班级：${context.classFolder}`,
+        `活动日期：${context.time.date}`,
+        `课时：${context.lesson}`,
+        `消息数：${rows.length}`,
+        "",
+        ...rows.flatMap((message) => {
+          const member = identity(message.user_id);
+          return [
+            `[${timestampParts(message.created_at).display}] [${member.student.student_id || ""}] [${member.student.name || ""}] [message_id=${message.id}]`,
+            String(message.voice_transcript || message.content || ""),
+            "",
+            "---",
+            "",
+          ];
+        }),
+      ].join("\r\n");
+      const relation = "group_id + 活动日期；复制到当日有发言的学生目录";
+      addIndexedFile(txtPath, txt, fileMeta("小组协作平台", "小组完整对话", "group_messages", `${first.group_id}:${context.time.date}`, participantId, participantFirst.created_at, "", relation));
+      addIndexedFile(csvPath, toCsv(detailRows), fileMeta("小组协作平台", "小组消息明细CSV", "group_messages", `${first.group_id}:${context.time.date}`, participantId, participantFirst.created_at, "", relation));
+      participantPaths.push(txtPath);
+    }
+    groupMessageIndex.push(...baseDetailRows.map((row) => ({ ...row, 对话文件路径: participantPaths.join(" | ") })));
   }
 
   // 平台行为：按学生和日期合并两类事件，保留 session_id。
@@ -619,7 +626,7 @@ export async function buildResearchExport(
     events.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || Number(a.id) - Number(b.id));
     const first = events[0];
     const context = exportContext(first.user_id, first.created_at);
-    const path = `${context.base}/05_平台行为/${context.studentFolder}/${context.time.date}_平台事件.csv`;
+    const path = `${context.base}/平台行为事件.csv`;
     const rows = events.map((event) => ({
       来源表: event.__source,
       事件ID: event.id,
@@ -786,14 +793,14 @@ export async function buildResearchExport(
     "目录说明：",
     "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系。",
     "2. 00_汇总数据：前测、互评、反思和分类评估。",
-    "3. 01_按日期与班级：日期 → 班级 → 课时 → 平台 → 学生/小组的分层文件。",
+    "3. 01_按班级：班级 → SRL组别 → 学生 → 日期。日期文件夹内直接放置当天对话、游戏、任务和行为文件。",
     "",
     "课时推导规则：",
     "数据库当前没有显式 lesson_id。导出程序按同一班级发生数据活动的日期升序自动编号为第01课时、第02课时……。",
-    "因此课时是可复核的日期级推导值，不代表同一天内的具体节次。",
+    "因此课时是可复核的日期级推导值，不代表同一天内的具体节次。课时信息只保留在索引及文件内容中，不再创建课时子文件夹。",
     "",
     "平台划分规则：",
-    "AI对话平台 = messages；小组协作平台 = group_messages；阶段作品平台 = conversations 当前HTML、game_snapshots 与 student_tasks；最终作品平台 = projects；平台行为 = interaction_events 与 game_events。",
+    "AI对话平台 = messages；小组协作平台 = group_messages；阶段作品平台 = conversations 当前HTML、game_snapshots 与 student_tasks；最终作品平台 = projects；平台行为 = interaction_events 与 game_events。平台类型记录在文件名和索引中，不再创建平台子文件夹。",
     "",
     "作品关联规则：",
     "game_snapshots 通过 conversation_id 与会话精确关联。projects 表没有 conversation_id；只有当同一学生的 HTML SHA256 完全一致时才建立会话关联，否则仅保留用户UUID/学生ID关联，不进行推测。",
