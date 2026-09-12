@@ -95,6 +95,17 @@ function downloadHtml(code: string, title: string) {
   URL.revokeObjectURL(url);
 }
 
+function downloadFilename(response: Response, fallback: string): string {
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const utf8Name = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (!utf8Name) return fallback;
+  try {
+    return decodeURIComponent(utf8Name);
+  } catch {
+    return fallback;
+  }
+}
+
 function gradeLabel(g: number | null): string {
   if (g === null || g === undefined) return "-";
   return GRADES.find((gr) => gr.value === g)?.label || `${g}年级`;
@@ -107,6 +118,7 @@ export default function AdminDashboard() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState("");
   const [ready, setReady] = useState(false);
+  const [exportingAll, setExportingAll] = useState(false);
   const [activeTab, setActiveTab] = useState<"students" | "messages" | "projects" | "data_overview" | "game_maker">("students");
   const router = useRouter();
 
@@ -145,6 +157,40 @@ export default function AdminDashboard() {
     router.push("/login");
   };
 
+  const handleExportAll = async () => {
+    if (exportingAll) return;
+    setExportingAll(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        alert("请先登录");
+        return;
+      }
+      const response = await fetch("/api/admin/export-all", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        alert(error.error || `导出失败: ${response.status}`);
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = downloadFilename(response, `AI游戏课堂_研究数据包_${new Date().toISOString().slice(0, 10)}.zip`);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error: any) {
+      alert("导出失败: " + error.message);
+    } finally {
+      setExportingAll(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-indigo-600 text-white shadow-lg">
@@ -154,29 +200,14 @@ export default function AdminDashboard() {
             <h1 className="text-xl font-bold">教师管理后台</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={async () => {
-              try {
-                const token = await getAuthToken();
-                if (!token) { alert("请先登录"); return; }
-                const res = await fetch("/api/admin/export-all", {
-                  headers: { Authorization: `Bearer ${token}` },
-                });
-                if (!res.ok) {
-                  const err = await res.json().catch(() => ({}));
-                  alert(err.error || `导出失败: ${res.status}`);
-                  return;
-                }
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `全部数据导出_${new Date().toISOString().slice(0,10)}.zip`;
-                a.click();
-                URL.revokeObjectURL(url);
-              } catch (err: any) {
-                alert("导出失败: " + err.message);
-              }
-            }} className="bg-emerald-500 hover:bg-emerald-600 px-4 py-2 rounded-lg text-sm transition">📦 导出全部数据</button>
+            <button
+              onClick={handleExportAll}
+              disabled={exportingAll}
+              title="按日期、班级、课时和平台导出完整研究数据包"
+              className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-sm transition"
+            >
+              {exportingAll ? "正在整理数据..." : "📦 导出研究数据包"}
+            </button>
             <button onClick={handleLogout} className="bg-indigo-500 hover:bg-indigo-400 px-4 py-2 rounded-lg text-sm transition">
               退出登录
             </button>
@@ -3575,4 +3606,3 @@ function GameMaker() {
     </div>
   );
 }
-
