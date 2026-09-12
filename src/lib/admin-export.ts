@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import JSZip from "jszip";
 
 const TIME_ZONE = "Asia/Shanghai";
+const LEGACY_SESSION_GAP_MS = 30 * 60 * 1000;
 
 type Row = Record<string, any>;
 
@@ -10,6 +11,7 @@ export interface ResearchExportData {
   messages: Row[];
   conversations: Row[];
   projects: Row[];
+  sharedItems?: Row[];
   snapshots: Row[];
   tasks: Row[];
   groups: Row[];
@@ -40,12 +42,26 @@ interface FileIndexRow {
   组别ID: string;
   组别名称: string;
   会话ID: string;
+  原始会话ID: string;
   时间戳: string;
   活动日期: string;
   课时: string;
   关联方式: string;
+  关联置信度: string;
   文件路径: string;
   SHA256: string;
+}
+
+interface ExportSession {
+  key: string;
+  userId: string;
+  sessionId: string;
+  originalSessionId: string;
+  relation: string;
+  confidence: "高" | "中" | "低";
+  messages: Row[];
+  firstAt: string;
+  lastAt: string;
 }
 
 function safeSegment(value: unknown, fallback = "unknown", maxLength = 80): string {
@@ -100,6 +116,142 @@ function hashContent(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+function normalizedHtmlHash(content: unknown): string {
+  const normalized = String(content || "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/>\s+</g, "><")
+    .trim();
+  return hashContent(normalized);
+}
+
+function extractHtmlFromMessage(content: unknown): string {
+  const text = String(content || "");
+  const htmlFence = text.match(/```html\s*([\s\S]*?)```/i);
+  if (htmlFence) return htmlFence[1].trim();
+  const genericFence = text.match(/```\s*([\s\S]*?)```/);
+  if (genericFence && /<!doctype|<html/i.test(genericFence[1])) return genericFence[1].trim();
+  const start = text.search(/<!doctype|<html/i);
+  const end = text.toLowerCase().lastIndexOf("</html>");
+  return start >= 0 && end >= start ? text.slice(start, end + 7).trim() : "";
+}
+
+function buildMessageSessions(messages: Row[]): { sessions: ExportSession[]; messages: Row[] } {
+  const sessions: ExportSession[] = [];
+  const exportedMessages: Row[] = [];
+  const messagesByUser = new Map<string, Row[]>();
+  for (const message of messages) {
+    const rows = messagesByUser.get(message.user_id) || [];
+    rows.push(message);
+    messagesByUser.set(message.user_id, rows);
+  }
+
+  const addSession = (
+    userId: string,
+    sessionId: string,
+    originalSessionId: string,
+    rows: Row[],
+    relation: string,
+    confidence: "高" | "中" | "低",
+  ) => {
+    if (!rows.length) return;
+    rows.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || Number(a.id) - Number(b.id));
+    const normalizedRows: Row[] = rows.map((message) => ({
+      ...message,
+      __session_id: sessionId,
+      __session_relation: relation,
+      __session_confidence: confidence,
+    }));
+    sessions.push({
+      key: `${userId}:${sessionId}`,
+      userId,
+      sessionId,
+      originalSessionId,
+      relation,
+      confidence,
+      messages: normalizedRows,
+      firstAt: normalizedRows[0].created_at,
+      lastAt: normalizedRows[normalizedRows.length - 1].created_at,
+    });
+    exportedMessages.push(...normalizedRows);
+  };
+
+  for (const [userId, userMessages] of messagesByUser) {
+    const explicitGroups = new Map<string, Row[]>();
+    const legacyRows: Row[] = [];
+    for (const message of userMessages) {
+      if (message.session_id) {
+        const sessionId = String(message.session_id);
+        const rows = explicitGroups.get(sessionId) || [];
+        rows.push(message);
+        explicitGroups.set(sessionId, rows);
+      } else {
+        legacyRows.push(message);
+      }
+    }
+    for (const [sessionId, rows] of explicitGroups) {
+      addSession(userId, sessionId, sessionId, rows, "数据库原始session_id", "高");
+    }
+
+    legacyRows.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || Number(a.id) - Number(b.id));
+    let cluster: Row[] = [];
+    for (const message of legacyRows) {
+      const previous = cluster[cluster.length - 1];
+      const gap = previous ? new Date(message.created_at).getTime() - new Date(previous.created_at).getTime() : 0;
+      if (cluster.length && gap > LEGACY_SESSION_GAP_MS) {
+        addSession(userId, `legacy_${cluster[0].id}`, "", cluster, "原始session_id为空；按同一学生30分钟消息间隔重建", "中");
+        cluster = [];
+      }
+      cluster.push(message);
+    }
+    if (cluster.length) {
+      addSession(userId, `legacy_${cluster[0].id}`, "", cluster, "原始session_id为空；按同一学生30分钟消息间隔重建", "中");
+    }
+  }
+
+  return { sessions, messages: exportedMessages };
+}
+
+function buildDialoguePairs(messages: Row[], sessionId: string): Row[] {
+  const pairs: Row[] = [];
+  let studentMessages: Row[] = [];
+  let aiMessages: Row[] = [];
+
+  const flush = () => {
+    if (!studentMessages.length && !aiMessages.length) return;
+    const formatContent = (rows: Row[], label: string) => rows.map((message, index) => (
+      `[${label}${index + 1}｜${timestampParts(message.created_at).display}｜ID:${message.id}]\n${message.content || ""}`
+    )).join("\n\n");
+    pairs.push({
+      对话轮次: pairs.length + 1,
+      会话ID: sessionId,
+      学生消息数: studentMessages.length,
+      学生消息ID: studentMessages.map((message) => message.id).join(" | "),
+      学生发送时间: studentMessages.map((message) => timestampParts(message.created_at).display).join(" | "),
+      学生发言原文: formatContent(studentMessages, "学生发言"),
+      AI消息数: aiMessages.length,
+      AI消息ID: aiMessages.map((message) => message.id).join(" | "),
+      AI回复时间: aiMessages.map((message) => timestampParts(message.created_at).display).join(" | "),
+      AI回复原文: formatContent(aiMessages, "AI回复"),
+      回复状态: studentMessages.length === 0 ? "AI主动消息" : aiMessages.length === 0 ? "学生发言尚无AI回复" : "已回复",
+    });
+    studentMessages = [];
+    aiMessages = [];
+  };
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      if (aiMessages.length) flush();
+      studentMessages.push(message);
+    } else {
+      aiMessages.push(message);
+    }
+  }
+  flush();
+  return pairs;
+}
+
 function normalizeJson(value: unknown): unknown {
   if (typeof value !== "string") return value ?? null;
   try {
@@ -142,11 +294,68 @@ export async function buildResearchExport(
   const artifactIndex: Row[] = [];
   const messageIndex: Row[] = [];
   const groupMessageIndex: Row[] = [];
+  const integrityIssues: Row[] = [];
   const sessionFilePaths = new Map<string, string[]>();
-  const conversationArtifactPaths = new Map<string, string[]>();
 
   const studentMap = new Map(data.students.map((student) => [student.id, student]));
   const groupMap = new Map(data.groups.map((group) => [group.id, group]));
+  const sessionBuild = buildMessageSessions(data.messages);
+  const exportMessages = sessionBuild.messages;
+  const sessionsByKey = new Map(sessionBuild.sessions.map((session) => [session.key, session]));
+  const sessionsByUser = new Map<string, ExportSession[]>();
+  for (const session of sessionBuild.sessions) {
+    const sessions = sessionsByUser.get(session.userId) || [];
+    sessions.push(session);
+    sessionsByUser.set(session.userId, sessions);
+  }
+  const snapshotsByConversationForLink = new Map<string, Row[]>();
+  for (const snapshot of data.snapshots) {
+    if (!snapshot.conversation_id) continue;
+    const rows = snapshotsByConversationForLink.get(snapshot.conversation_id) || [];
+    rows.push(snapshot);
+    snapshotsByConversationForLink.set(snapshot.conversation_id, rows);
+  }
+  const conversationSessionLinks = new Map<string, { session: ExportSession; relation: string; confidence: "高" | "中" | "低" }>();
+  const claimedSessionKeys = new Set<string>();
+  for (const conversation of data.conversations) {
+    const session = sessionsByKey.get(`${conversation.user_id}:${conversation.id}`);
+    if (!session) continue;
+    conversationSessionLinks.set(conversation.id, {
+      session,
+      relation: "conversations.id = messages.session_id",
+      confidence: "高",
+    });
+    claimedSessionKeys.add(session.key);
+  }
+
+  const unmatchedConversations = data.conversations
+    .filter((conversation) => !conversationSessionLinks.has(conversation.id))
+    .sort((a, b) => {
+      const aHasArtifact = a.html_code || snapshotsByConversationForLink.has(a.id) ? 1 : 0;
+      const bHasArtifact = b.html_code || snapshotsByConversationForLink.has(b.id) ? 1 : 0;
+      return bHasArtifact - aHasArtifact || String(a.created_at).localeCompare(String(b.created_at));
+    });
+  for (const conversation of unmatchedConversations) {
+    const referenceTimes = [
+      conversation.created_at,
+      ...(snapshotsByConversationForLink.get(conversation.id) || []).map((snapshot) => snapshot.created_at),
+    ].filter(Boolean);
+    const referenceDates = new Set(referenceTimes.map((value) => timestampParts(value).date));
+    const candidates = (sessionsByUser.get(conversation.user_id) || [])
+      .filter((session) => !claimedSessionKeys.has(session.key) && referenceDates.has(timestampParts(session.firstAt).date))
+      .sort((a, b) => {
+        const distance = (session: ExportSession) => Math.min(...referenceTimes.map((value) => Math.abs(new Date(session.firstAt).getTime() - new Date(value).getTime())));
+        return distance(a) - distance(b);
+      });
+    if (!candidates.length) continue;
+    const session = candidates[0];
+    conversationSessionLinks.set(conversation.id, {
+      session,
+      relation: `${session.relation}；同一学生、同一日期、时间最近的一对一关联`,
+      confidence: "中",
+    });
+    claimedSessionKeys.add(session.key);
+  }
   const membershipsByUser = new Map<string, Row[]>();
   for (const membership of data.groupMembers) {
     const group = groupMap.get(membership.group_id) || { id: membership.group_id, name: membership.group_id };
@@ -164,6 +373,22 @@ export async function buildResearchExport(
       groupNames: groups.map((group) => group.name).join(" | ") || "未分组",
     };
   };
+
+  for (const conversation of data.conversations.filter((row) => !conversationSessionLinks.has(row.id))) {
+    const student = studentMap.get(conversation.user_id) || {};
+    integrityIssues.push({
+      异常类型: "数据库会话没有可对应消息",
+      来源表: "conversations",
+      记录ID: conversation.id,
+      用户UUID: conversation.user_id,
+      学生ID: student.student_id || "",
+      姓名: student.name || "",
+      是否包含游戏: conversation.html_code ? "是" : "否",
+      会话创建时间: timestampParts(conversation.created_at).display,
+      会话更新时间: timestampParts(conversation.updated_at).display,
+      建议: conversation.html_code ? "优先核查历史messages备份" : "可能是创建后未发言的空会话",
+    });
+  }
 
   const classLabel = (student: Row) => {
     if (student.grade !== null && student.grade !== undefined && student.class_num !== null && student.class_num !== undefined) {
@@ -245,8 +470,12 @@ export async function buildResearchExport(
     timestamp: unknown,
     sessionId = "",
     relation = "",
+    confidence = "",
+    originalSessionId = "",
+    archiveTimestamp: unknown = timestamp,
   ): Omit<FileIndexRow, "文件路径" | "SHA256"> => {
-    const context = exportContext(userId, timestamp);
+    const context = exportContext(userId, archiveTimestamp);
+    const sourceTime = timestampParts(timestamp);
     return {
       平台: platform,
       数据类型: type,
@@ -260,10 +489,12 @@ export async function buildResearchExport(
       组别ID: context.groupIds,
       组别名称: context.groupNames,
       会话ID: sessionId,
-      时间戳: context.time.display,
+      原始会话ID: originalSessionId,
+      时间戳: sourceTime.display,
       活动日期: context.time.date,
       课时: context.lesson,
       关联方式: relation,
+      关联置信度: confidence,
     };
   };
 
@@ -314,29 +545,25 @@ export async function buildResearchExport(
 
   // 学生与 AI 对话：按会话、日期拆分，保留完整消息正文。
   const messageGroups = new Map<string, Row[]>();
-  const sessionMessages = new Map<string, Row[]>();
-  for (const message of data.messages) {
-    const sessionId = message.session_id || "无会话ID";
+  for (const message of exportMessages) {
+    const sessionId = message.__session_id;
     const date = timestampParts(message.created_at).date;
     const dailyKey = `${message.user_id}:${sessionId}:${date}`;
-    const sessionKey = `${message.user_id}:${sessionId}`;
     const daily = messageGroups.get(dailyKey) || [];
     daily.push(message);
     messageGroups.set(dailyKey, daily);
-    const session = sessionMessages.get(sessionKey) || [];
-    session.push(message);
-    sessionMessages.set(sessionKey, session);
   }
 
   for (const rows of messageGroups.values()) {
     rows.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || Number(a.id) - Number(b.id));
     const first = rows[0];
-    const sessionId = first.session_id || "无会话ID";
+    const sessionId = first.__session_id;
     const context = exportContext(first.user_id, first.created_at);
     const sessionFolder = `session_${safeSegment(sessionId, "no_session", 40)}`;
     const fileBase = `AI对话_${sessionFolder}`;
     const txtPath = `${context.base}/${fileBase}.txt`;
-    const csvPath = `${context.base}/${fileBase}_消息明细.csv`;
+    const pairCsvPath = `${context.base}/${fileBase}_对话配对.csv`;
+    const rawCsvPath = `${context.base}/${fileBase}_逐条消息.csv`;
     const header = [
       `学生ID：${context.student.student_id || ""}`,
       `用户UUID：${first.user_id}`,
@@ -344,6 +571,8 @@ export async function buildResearchExport(
       `年级班级：${classLabel(context.student)}`,
       `组别：${context.groupNames}（${context.groupIds || "无组别ID"}）`,
       `会话ID：${sessionId}`,
+      `原始会话ID：${first.session_id || "空"}`,
+      `会话识别规则：${first.__session_relation}`,
       `活动日期：${context.time.date}`,
       `课时：${context.lesson}`,
       `消息数：${rows.length}`,
@@ -357,40 +586,67 @@ export async function buildResearchExport(
       "",
     ]);
     const txt = [...header, ...body].join("\r\n");
-    const meta = fileMeta("AI对话平台", "完整对话文本", "messages", `${sessionId}:${context.time.date}`, first.user_id, first.created_at, sessionId, "user_id + session_id + 活动日期");
+    const meta = fileMeta("AI对话平台", "完整对话文本", "messages", `${sessionId}:${context.time.date}`, first.user_id, first.created_at, sessionId, first.__session_relation, first.__session_confidence, first.session_id || "");
     addIndexedFile(txtPath, txt, meta);
 
-    const dailyRows = rows.map((message) => ({
+    const dailyRows = rows.map((message, index) => ({
+      消息序号: index + 1,
       消息ID: message.id,
+      角色: message.role === "user" ? "学生" : "AI",
+      时间戳: timestampParts(message.created_at).display,
+      内容原文: message.content || "",
+      输入方式: message.input_method || "",
+      含代码: message.has_code ?? "",
+      AI建议类型: message.ai_suggestion_type || "",
+      会话ID: sessionId,
+      原始会话ID: message.session_id || "",
+      会话识别规则: message.__session_relation,
       用户UUID: message.user_id,
       学生ID: context.student.student_id || "",
       姓名: context.student.name || "",
       年级: context.student.grade ?? "",
       班级: context.student.class_num ?? context.student.class_name ?? "",
-      组别ID: context.groupIds,
-      组别名称: context.groupNames,
-      会话ID: sessionId,
-      时间戳: timestampParts(message.created_at).display,
+      SRL组别: context.student.srl_condition || "",
+      小组ID: context.groupIds,
+      小组名称: context.groupNames,
       活动日期: timestampParts(message.created_at).date,
       课时: context.lesson,
-      角色: message.role === "user" ? "学生" : "AI",
-      输入方式: message.input_method || "",
-      含代码: message.has_code ?? "",
-      AI建议类型: message.ai_suggestion_type || "",
-      对话内容: message.content || "",
       对话文件路径: txtPath,
     }));
-    addIndexedFile(csvPath, toCsv(dailyRows), fileMeta("AI对话平台", "消息明细CSV", "messages", `${sessionId}:${context.time.date}`, first.user_id, first.created_at, sessionId, "user_id + session_id + 活动日期"));
+    const pairRows = buildDialoguePairs(rows, sessionId).map((pair) => ({
+      学生ID: context.student.student_id || "",
+      姓名: context.student.name || "",
+      年级: context.student.grade ?? "",
+      班级: context.student.class_num ?? context.student.class_name ?? "",
+      SRL组别: context.student.srl_condition || "",
+      活动日期: context.time.date,
+      课时: context.lesson,
+      ...pair,
+    }));
+    const messageMeta = fileMeta("AI对话平台", "结构化对话CSV", "messages", `${sessionId}:${context.time.date}`, first.user_id, first.created_at, sessionId, first.__session_relation, first.__session_confidence, first.session_id || "");
+    addIndexedFile(pairCsvPath, toCsv(pairRows), { ...messageMeta, 数据类型: "学生-AI对话配对CSV" });
+    addIndexedFile(rawCsvPath, toCsv(dailyRows), { ...messageMeta, 数据类型: "逐条消息审计CSV" });
     messageIndex.push(...dailyRows);
     const paths = sessionFilePaths.get(`${first.user_id}:${sessionId}`) || [];
-    paths.push(txtPath);
+    paths.push(txtPath, pairCsvPath, rawCsvPath);
     sessionFilePaths.set(`${first.user_id}:${sessionId}`, paths);
   }
 
+  const closestMessageTime = (session: ExportSession, timestamp: unknown): string => {
+    const target = new Date(String(timestamp)).getTime();
+    if (!Number.isFinite(target)) return session.firstAt;
+    return session.messages.reduce((closest, message) => {
+      const currentDistance = Math.abs(new Date(message.created_at).getTime() - target);
+      const closestDistance = Math.abs(new Date(closest.created_at).getTime() - target);
+      return currentDistance < closestDistance ? message : closest;
+    }, session.messages[0]).created_at;
+  };
   // 阶段作品：对话当前版本、全部游戏快照与构思任务。
   const conversationById = new Map(data.conversations.map((conversation) => [conversation.id, conversation]));
   const conversationHashCandidates = new Map<string, Row[]>();
+  const conversationNormalizedHashCandidates = new Map<string, Row[]>();
   const snapshotHashCandidates = new Map<string, Row[]>();
+  const snapshotNormalizedHashCandidates = new Map<string, Row[]>();
   for (const conversation of data.conversations) {
     if (!conversation.html_code) continue;
     const hash = hashContent(conversation.html_code);
@@ -398,12 +654,31 @@ export async function buildResearchExport(
     const candidates = conversationHashCandidates.get(key) || [];
     candidates.push(conversation);
     conversationHashCandidates.set(key, candidates);
+    const normalizedKey = `${conversation.user_id}:${normalizedHtmlHash(conversation.html_code)}`;
+    conversationNormalizedHashCandidates.set(normalizedKey, [...(conversationNormalizedHashCandidates.get(normalizedKey) || []), conversation]);
     const timestamp = conversation.updated_at || conversation.created_at;
-    const context = exportContext(conversation.user_id, timestamp);
-    const sessionFolder = `session_${safeSegment(conversation.id, "no_session", 40)}`;
-    const path = `${context.base}/阶段游戏_${sessionFolder}_${context.time.file}_${safeSegment(conversation.title, "未命名游戏")}.html`;
-    addIndexedFile(path, conversation.html_code, fileMeta("阶段作品平台", "会话当前游戏版本", "conversations", conversation.id, conversation.user_id, timestamp, conversation.id, "conversations.id = messages.session_id"));
-    conversationArtifactPaths.set(conversation.id, [...(conversationArtifactPaths.get(conversation.id) || []), path]);
+    const sessionLink = conversationSessionLinks.get(conversation.id);
+    const archiveTimestamp = sessionLink ? closestMessageTime(sessionLink.session, conversation.created_at || timestamp) : timestamp;
+    const context = exportContext(conversation.user_id, archiveTimestamp);
+    const effectiveSessionId = sessionLink?.session.sessionId || "未找到对话";
+    const sessionFolder = `session_${safeSegment(effectiveSessionId, "no_session", 40)}`;
+    const exceptionBase = `99_异常_有作品无对话/${context.classFolder}/${context.srlFolder}/${context.studentFolder}`;
+    const base = sessionLink ? context.base : exceptionBase;
+    const path = `${base}/对应阶段游戏_${sessionFolder}_${timestampParts(timestamp).file}_${safeSegment(conversation.title, "未命名游戏")}.html`;
+    const relation = sessionLink?.relation || "未找到可与该阶段作品对应的学生-AI对话";
+    const confidence = sessionLink?.confidence || "需人工核验";
+    addIndexedFile(path, conversation.html_code, fileMeta("阶段作品平台", "会话当前游戏版本", "conversations", conversation.id, conversation.user_id, timestamp, effectiveSessionId, relation, confidence, sessionLink?.session.originalSessionId || "", archiveTimestamp));
+    if (!sessionLink) integrityIssues.push({
+      异常类型: "有阶段作品但未找到对话",
+      来源表: "conversations",
+      记录ID: conversation.id,
+      用户UUID: conversation.user_id,
+      学生ID: context.student.student_id || "",
+      姓名: context.student.name || "",
+      作品时间: timestampParts(timestamp).display,
+      文件路径: path,
+      建议: "核查Supabase messages中该学生的历史记录或备份",
+    });
     artifactIndex.push({
       作品阶段: "阶段作品-会话当前版本",
       来源表: "conversations",
@@ -413,13 +688,15 @@ export async function buildResearchExport(
       姓名: context.student.name || "",
       组别ID: context.groupIds,
       组别名称: context.groupNames,
-      会话ID: conversation.id,
+      数据库会话ID: conversation.id,
+      对应对话会话ID: effectiveSessionId,
       标题: conversation.title || "",
-      时间戳: context.time.display,
-      活动日期: context.time.date,
+      时间戳: timestampParts(timestamp).display,
+      对话归档日期: context.time.date,
       课时: context.lesson,
       HTML_SHA256: hash,
-      关联方式: "conversations.id = messages.session_id",
+      关联方式: relation,
+      关联置信度: confidence,
       文件路径: path,
     });
   }
@@ -434,15 +711,35 @@ export async function buildResearchExport(
   for (const snapshots of snapshotsByConversation.values()) {
     snapshots.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || Number(a.id) - Number(b.id));
     snapshots.forEach((snapshot, index) => {
-      const context = exportContext(snapshot.user_id, snapshot.created_at);
       const conversationId = snapshot.conversation_id || "无会话ID";
+      const sessionLink = snapshot.conversation_id ? conversationSessionLinks.get(snapshot.conversation_id) : undefined;
+      const archiveTimestamp = sessionLink ? closestMessageTime(sessionLink.session, snapshot.created_at) : snapshot.created_at;
+      const context = exportContext(snapshot.user_id, archiveTimestamp);
+      const effectiveSessionId = sessionLink?.session.sessionId || "未找到对话";
       const hash = hashContent(snapshot.html_code || "");
       const hashKey = `${snapshot.user_id}:${hash}`;
       snapshotHashCandidates.set(hashKey, [...(snapshotHashCandidates.get(hashKey) || []), snapshot]);
-      const sessionFolder = `session_${safeSegment(conversationId, "no_session", 40)}`;
-      const path = `${context.base}/阶段游戏快照_${sessionFolder}_${String(index + 1).padStart(3, "0")}_${context.time.file}_id-${snapshot.id}.html`;
-      addIndexedFile(path, snapshot.html_code || "", fileMeta("阶段作品平台", "游戏版本快照", "game_snapshots", snapshot.id, snapshot.user_id, snapshot.created_at, conversationId, "game_snapshots.conversation_id = conversations.id"));
-      if (snapshot.conversation_id) conversationArtifactPaths.set(snapshot.conversation_id, [...(conversationArtifactPaths.get(snapshot.conversation_id) || []), path]);
+      const normalizedHashKey = `${snapshot.user_id}:${normalizedHtmlHash(snapshot.html_code)}`;
+      snapshotNormalizedHashCandidates.set(normalizedHashKey, [...(snapshotNormalizedHashCandidates.get(normalizedHashKey) || []), snapshot]);
+      const sessionFolder = `session_${safeSegment(effectiveSessionId, "no_session", 40)}`;
+      const exceptionBase = `99_异常_有作品无对话/${context.classFolder}/${context.srlFolder}/${context.studentFolder}`;
+      const base = sessionLink ? context.base : exceptionBase;
+      const path = `${base}/对应阶段游戏快照_${sessionFolder}_${String(index + 1).padStart(3, "0")}_${timestampParts(snapshot.created_at).file}_id-${snapshot.id}.html`;
+      const relation = sessionLink ? `game_snapshots.conversation_id = conversations.id；${sessionLink.relation}` : "快照有conversation_id，但未找到可对应的学生-AI对话";
+      const confidence = sessionLink?.confidence || "需人工核验";
+      addIndexedFile(path, snapshot.html_code || "", fileMeta("阶段作品平台", "游戏版本快照", "game_snapshots", snapshot.id, snapshot.user_id, snapshot.created_at, effectiveSessionId, relation, confidence, sessionLink?.session.originalSessionId || "", archiveTimestamp));
+      if (!sessionLink) integrityIssues.push({
+        异常类型: "有游戏快照但未找到对话",
+        来源表: "game_snapshots",
+        记录ID: snapshot.id,
+        用户UUID: snapshot.user_id,
+        学生ID: context.student.student_id || "",
+        姓名: context.student.name || "",
+        数据库会话ID: conversationId,
+        作品时间: timestampParts(snapshot.created_at).display,
+        文件路径: path,
+        建议: "核查conversation_id对应会话及messages历史记录",
+      });
       artifactIndex.push({
         作品阶段: "阶段作品-游戏快照",
         来源表: "game_snapshots",
@@ -452,13 +749,15 @@ export async function buildResearchExport(
         姓名: context.student.name || "",
         组别ID: context.groupIds,
         组别名称: context.groupNames,
-        会话ID: conversationId,
+        数据库会话ID: conversationId,
+        对应对话会话ID: effectiveSessionId,
         标题: conversationById.get(snapshot.conversation_id)?.title || "",
         时间戳: context.time.display,
-        活动日期: context.time.date,
+        对话归档日期: context.time.date,
         课时: context.lesson,
         HTML_SHA256: hash,
-        关联方式: "game_snapshots.conversation_id = conversations.id",
+        关联方式: relation,
+        关联置信度: confidence,
         文件路径: path,
       });
     });
@@ -502,23 +801,113 @@ export async function buildResearchExport(
     }
   }
 
-  // 最终作品：projects 表。若没有 conversation_id，则只用完全相同的 HTML 哈希建立确定性关联。
+  const sharedItemsByHash = new Map<string, Row[]>();
+  const sharedItemsByNormalizedHash = new Map<string, Row[]>();
+  for (const item of data.sharedItems || []) {
+    if (!item.html_code) continue;
+    const exactKey = `${item.user_id}:${hashContent(item.html_code)}`;
+    const normalizedKey = `${item.user_id}:${normalizedHtmlHash(item.html_code)}`;
+    sharedItemsByHash.set(exactKey, [...(sharedItemsByHash.get(exactKey) || []), item]);
+    sharedItemsByNormalizedHash.set(normalizedKey, [...(sharedItemsByNormalizedHash.get(normalizedKey) || []), item]);
+  }
+  const codeMessageSessionsByHash = new Map<string, ExportSession[]>();
+  const codeMessageSessionsByNormalizedHash = new Map<string, ExportSession[]>();
+  for (const session of sessionBuild.sessions) {
+    for (const message of session.messages) {
+      const html = extractHtmlFromMessage(message.content);
+      if (!html) continue;
+      const exactKey = `${message.user_id}:${hashContent(html)}`;
+      const normalizedKey = `${message.user_id}:${normalizedHtmlHash(html)}`;
+      codeMessageSessionsByHash.set(exactKey, [...(codeMessageSessionsByHash.get(exactKey) || []), session]);
+      codeMessageSessionsByNormalizedHash.set(normalizedKey, [...(codeMessageSessionsByNormalizedHash.get(normalizedKey) || []), session]);
+    }
+  }
+  const conversationIdBySessionKey = new Map<string, string>();
+  for (const [conversationId, link] of conversationSessionLinks) {
+    if (!conversationIdBySessionKey.has(link.session.key)) conversationIdBySessionKey.set(link.session.key, conversationId);
+  }
+
+  // 最终作品：优先使用shared_items中的conversation_id，其次使用HTML、消息代码和时间邻近关系。
   for (const project of data.projects) {
     const timestamp = project.updated_at || project.created_at;
-    const context = exportContext(project.user_id, timestamp);
     const hash = hashContent(project.html_code || "");
     const hashKey = `${project.user_id}:${hash}`;
-    const matchingConversations = conversationHashCandidates.get(hashKey) || [];
-    const matchingSnapshots = snapshotHashCandidates.get(hashKey) || [];
-    const matchedConversation = matchingConversations
-      .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)))[0]
-      || (matchingSnapshots.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0]?.conversation_id
-        ? conversationById.get(matchingSnapshots[0].conversation_id)
-        : null);
-    const linkedConversationId = matchedConversation?.id || matchingSnapshots[0]?.conversation_id || "";
-    const relation = linkedConversationId ? "同一学生且HTML_SHA256完全一致" : "仅通过用户UUID关联；projects表没有conversation_id";
-    const path = `${context.base}/最终游戏_project_${safeSegment(project.id)}_${context.time.file}_${safeSegment(project.game_title, "未命名游戏")}.html`;
-    addIndexedFile(path, project.html_code || "", fileMeta("最终作品平台", "最终游戏作品", "projects", project.id, project.user_id, timestamp, linkedConversationId, relation));
+    const normalizedHashKey = `${project.user_id}:${normalizedHtmlHash(project.html_code)}`;
+    let linkedConversationId = "";
+    let linkedSession: ExportSession | undefined;
+    let relation = "";
+    let confidence: "高" | "中" | "低" | "需人工核验" = "需人工核验";
+
+    const sharedItem = (sharedItemsByHash.get(hashKey) || []).find((item) => item.conversation_id && conversationSessionLinks.has(item.conversation_id));
+    if (sharedItem) {
+      linkedConversationId = sharedItem.conversation_id;
+      linkedSession = conversationSessionLinks.get(linkedConversationId)?.session;
+      relation = "projects与shared_items属于同一学生且HTML_SHA256一致；shared_items.conversation_id精确关联";
+      confidence = "高";
+    }
+
+    const exactConversation = (conversationHashCandidates.get(hashKey) || []).find((conversation) => conversationSessionLinks.has(conversation.id));
+    const exactSnapshot = (snapshotHashCandidates.get(hashKey) || []).find((snapshot) => snapshot.conversation_id && conversationSessionLinks.has(snapshot.conversation_id));
+    if (!linkedSession && (exactConversation || exactSnapshot)) {
+      linkedConversationId = exactConversation?.id || exactSnapshot?.conversation_id || "";
+      linkedSession = conversationSessionLinks.get(linkedConversationId)?.session;
+      relation = `同一学生且HTML_SHA256完全一致（${exactConversation ? "conversations" : "game_snapshots"}）`;
+      confidence = "高";
+    }
+
+    const normalizedSharedItem = (sharedItemsByNormalizedHash.get(normalizedHashKey) || []).find((item) => item.conversation_id && conversationSessionLinks.has(item.conversation_id));
+    const normalizedConversation = (conversationNormalizedHashCandidates.get(normalizedHashKey) || []).find((conversation) => conversationSessionLinks.has(conversation.id));
+    const normalizedSnapshot = (snapshotNormalizedHashCandidates.get(normalizedHashKey) || []).find((snapshot) => snapshot.conversation_id && conversationSessionLinks.has(snapshot.conversation_id));
+    if (!linkedSession && (normalizedSharedItem || normalizedConversation || normalizedSnapshot)) {
+      linkedConversationId = normalizedSharedItem?.conversation_id || normalizedConversation?.id || normalizedSnapshot?.conversation_id || "";
+      linkedSession = conversationSessionLinks.get(linkedConversationId)?.session;
+      relation = "同一学生且标准化HTML一致（仅忽略BOM、换行和标签间空白）";
+      confidence = "中";
+    }
+
+    const codeSession = (codeMessageSessionsByHash.get(hashKey) || [])[0]
+      || (codeMessageSessionsByNormalizedHash.get(normalizedHashKey) || [])[0];
+    if (!linkedSession && codeSession) {
+      linkedSession = codeSession;
+      linkedConversationId = conversationIdBySessionKey.get(codeSession.key) || "";
+      relation = "最终作品HTML与AI消息中的游戏代码一致";
+      confidence = "高";
+    }
+
+    if (!linkedSession) {
+      const userSessions = sessionsByUser.get(project.user_id) || [];
+      const projectTime = new Date(project.created_at || timestamp).getTime();
+      const sameDaySessions = userSessions.filter((session) => timestampParts(session.firstAt).date === timestampParts(project.created_at || timestamp).date);
+      const candidates = sameDaySessions.length ? sameDaySessions : userSessions;
+      linkedSession = [...candidates].sort((a, b) => Math.abs(new Date(a.lastAt).getTime() - projectTime) - Math.abs(new Date(b.lastAt).getTime() - projectTime))[0];
+      if (linkedSession) {
+        linkedConversationId = conversationIdBySessionKey.get(linkedSession.key) || "";
+        relation = sameDaySessions.length
+          ? "同一学生、同一日期、与作品创建时间最近的对话"
+          : "同一学生、与作品创建时间最近的历史对话；缺少直接关联字段";
+        confidence = sameDaySessions.length ? "中" : "低";
+      }
+    }
+
+    const archiveTimestamp = linkedSession ? closestMessageTime(linkedSession, project.created_at || timestamp) : timestamp;
+    const context = exportContext(project.user_id, archiveTimestamp);
+    const effectiveSessionId = linkedSession?.sessionId || "未找到对话";
+    const sessionFolder = `session_${safeSegment(effectiveSessionId, "no_session", 40)}`;
+    const exceptionBase = `99_异常_有作品无对话/${context.classFolder}/${context.srlFolder}/${context.studentFolder}`;
+    const base = linkedSession ? context.base : exceptionBase;
+    const path = `${base}/对应最终游戏_${sessionFolder}_project_${safeSegment(project.id)}_${timestampParts(timestamp).file}_${safeSegment(project.game_title, "未命名游戏")}.html`;
+    addIndexedFile(path, project.html_code || "", fileMeta("最终作品平台", "最终游戏作品", "projects", project.id, project.user_id, timestamp, effectiveSessionId, relation || "未找到可对应的学生-AI对话", confidence, linkedSession?.originalSessionId || "", archiveTimestamp));
+    if (!linkedSession) integrityIssues.push({
+      异常类型: "有最终作品但未找到对话",
+      来源表: "projects",
+      记录ID: project.id,
+      用户UUID: project.user_id,
+      学生ID: context.student.student_id || "",
+      姓名: context.student.name || "",
+      作品时间: timestampParts(timestamp).display,
+      文件路径: path,
+      建议: "核查Supabase messages、shared_items和历史备份",
+    });
     artifactIndex.push({
       作品阶段: "最终作品",
       来源表: "projects",
@@ -528,14 +917,16 @@ export async function buildResearchExport(
       姓名: context.student.name || "",
       组别ID: context.groupIds,
       组别名称: context.groupNames,
-      会话ID: linkedConversationId,
+      数据库会话ID: linkedConversationId,
+      对应对话会话ID: effectiveSessionId,
       标题: project.game_title || "",
       是否发布: project.is_published ?? "",
-      时间戳: context.time.display,
-      活动日期: context.time.date,
+      时间戳: timestampParts(timestamp).display,
+      对话归档日期: context.time.date,
       课时: context.lesson,
       HTML_SHA256: hash,
       关联方式: relation,
+      关联置信度: confidence,
       文件路径: path,
     });
   }
@@ -646,41 +1037,68 @@ export async function buildResearchExport(
   }
 
   // 会话索引在作品文件完成后生成，确保可直接定位全部关联文件。
-  const conversationIds = new Set(data.conversations.map((conversation) => conversation.id));
-  const sessionKeys = new Set([...sessionMessages.keys(), ...data.conversations.map((conversation) => `${conversation.user_id}:${conversation.id}`)]);
   const sessionRows: Row[] = [];
-  for (const sessionKey of sessionKeys) {
-    const splitAt = sessionKey.indexOf(":");
-    const userId = sessionKey.slice(0, splitAt);
-    const sessionId = sessionKey.slice(splitAt + 1);
-    const rows = (sessionMessages.get(sessionKey) || []).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-    const conversation = conversationIds.has(sessionId) ? conversationById.get(sessionId) : null;
-    const firstTimestamp = rows[0]?.created_at || conversation?.created_at;
-    const lastTimestamp = rows[rows.length - 1]?.created_at || conversation?.updated_at;
-    const context = exportContext(userId, firstTimestamp);
-    const snapshots = data.snapshots.filter((snapshot) => snapshot.user_id === userId && snapshot.conversation_id === sessionId);
-    const projects = artifactIndex.filter((artifact) => artifact.来源表 === "projects" && artifact.用户UUID === userId && artifact.会话ID === sessionId);
+  for (const session of sessionBuild.sessions) {
+    const rows = session.messages;
+    const linkedConversations = [...conversationSessionLinks.entries()]
+      .filter(([, link]) => link.session.key === session.key)
+      .map(([conversationId]) => conversationById.get(conversationId))
+      .filter((conversation): conversation is Row => Boolean(conversation));
+    const linkedArtifacts = artifactIndex.filter((artifact) => artifact.用户UUID === session.userId && artifact.对应对话会话ID === session.sessionId);
+    const stageArtifacts = linkedArtifacts.filter((artifact) => artifact.来源表 !== "projects");
+    const finalArtifacts = linkedArtifacts.filter((artifact) => artifact.来源表 === "projects");
+    const context = exportContext(session.userId, session.firstAt);
+    const relationPath = `${context.base}/会话_${safeSegment(session.sessionId, "no_session", 40)}_对话与游戏对应关系.csv`;
+    const relationRows = [
+      ...(sessionFilePaths.get(session.key) || []).map((path) => ({
+        会话ID: session.sessionId,
+        文件类别: path.endsWith(".txt") ? "完整对话TXT" : path.includes("对话配对") ? "学生-AI对话配对CSV" : "逐条消息CSV",
+        作品阶段: "",
+        记录ID: "",
+        数据库会话ID: session.originalSessionId,
+        关联方式: session.relation,
+        关联置信度: session.confidence,
+        文件路径: path,
+      })),
+      ...linkedArtifacts.map((artifact) => ({
+        会话ID: session.sessionId,
+        文件类别: "游戏HTML",
+        作品阶段: artifact.作品阶段,
+        记录ID: artifact.作品ID,
+        数据库会话ID: artifact.数据库会话ID || "",
+        关联方式: artifact.关联方式,
+        关联置信度: artifact.关联置信度,
+        文件路径: artifact.文件路径,
+      })),
+    ];
+    addIndexedFile(relationPath, toCsv(relationRows), fileMeta("关联索引", "会话与游戏一一对应表", "messages + conversations + game_snapshots + projects", session.sessionId, session.userId, session.firstAt, session.sessionId, session.relation, session.confidence, session.originalSessionId));
+    const dialoguePaths = [...(sessionFilePaths.get(session.key) || []), relationPath];
+    sessionFilePaths.set(session.key, dialoguePaths);
     sessionRows.push({
-      用户UUID: userId,
+      用户UUID: session.userId,
       学生ID: context.student.student_id || "",
       姓名: context.student.name || "",
       年级: context.student.grade ?? "",
       班级: context.student.class_num ?? context.student.class_name ?? "",
       组别ID: context.groupIds,
       组别名称: context.groupNames,
-      会话ID: sessionId,
-      会话标题: conversation?.title || "",
-      首条消息时间: timestampParts(firstTimestamp).display,
-      末条消息时间: timestampParts(lastTimestamp).display,
+      会话ID: session.sessionId,
+      原始会话ID: session.originalSessionId,
+      会话识别方式: session.relation,
+      会话识别置信度: session.confidence,
+      数据库会话ID: linkedConversations.map((conversation) => conversation.id).join(" | "),
+      会话标题: linkedConversations.map((conversation) => conversation.title || "").filter(Boolean).join(" | "),
+      首条消息时间: timestampParts(session.firstAt).display,
+      末条消息时间: timestampParts(session.lastAt).display,
       活动日期列表: [...new Set(rows.map((row) => timestampParts(row.created_at).date))].join(" | "),
       消息数: rows.length,
       学生消息数: rows.filter((row) => row.role === "user").length,
       AI消息数: rows.filter((row) => row.role === "assistant").length,
-      阶段快照数: snapshots.length,
-      关联最终作品数: projects.length,
-      对话文件路径: (sessionFilePaths.get(sessionKey) || []).join(" | "),
-      阶段作品文件路径: (conversationArtifactPaths.get(sessionId) || []).join(" | "),
-      最终作品文件路径: projects.map((project) => project.文件路径).join(" | "),
+      阶段作品数: stageArtifacts.length,
+      最终作品数: finalArtifacts.length,
+      对话与配对表路径: dialoguePaths.join(" | "),
+      阶段作品文件路径: stageArtifacts.map((artifact) => artifact.文件路径).join(" | "),
+      最终作品文件路径: finalArtifacts.map((artifact) => artifact.文件路径).join(" | "),
     });
   }
 
@@ -756,6 +1174,7 @@ export async function buildResearchExport(
     ["conversations", data.conversations.length],
     ["game_snapshots", data.snapshots.length],
     ["projects", data.projects.length],
+    ["shared_items", (data.sharedItems || []).length],
     ["student_tasks", data.tasks.length],
     ["groups", data.groups.length],
     ["group_members", data.groupMembers.length],
@@ -774,6 +1193,7 @@ export async function buildResearchExport(
   zip.file("00_索引/小组消息明细索引.csv", toCsv(groupMessageIndex));
   zip.file("00_索引/作品关联索引.csv", toCsv(artifactIndex));
   zip.file("00_索引/文件关联索引.csv", toCsv(fileIndex));
+  zip.file("00_索引/数据完整性异常.csv", toCsv(integrityIssues));
   zip.file("00_索引/数据表计数.csv", toCsv(countRows));
   zip.file("00_汇总数据/前测数据.csv", toCsv(surveyRows));
   zip.file("00_汇总数据/同伴互评.csv", toCsv(peerReviewRows));
@@ -789,11 +1209,15 @@ export async function buildResearchExport(
     `AI对话消息数：${data.messages.length}`,
     `阶段游戏快照数：${data.snapshots.length}`,
     `最终作品数：${data.projects.length}`,
+    `历史空session_id消息数：${data.messages.filter((message) => !message.session_id).length}`,
+    `重建历史对话会话数：${sessionBuild.sessions.filter((session) => !session.originalSessionId).length}`,
+    `完整性异常数：${integrityIssues.length}`,
     "",
     "目录说明：",
-    "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系。",
+    "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系；数据完整性异常.csv列出无法可靠恢复的数据。",
     "2. 00_汇总数据：前测、互评、反思和分类评估。",
-    "3. 01_按班级：班级 → SRL组别 → 学生 → 日期。日期文件夹内直接放置当天对话、游戏、任务和行为文件。",
+    "3. 01_按班级：班级 → SRL组别 → 学生 → 对话日期。日期文件夹内直接放置完整对话TXT、学生-AI对话配对CSV、逐条消息CSV、对应游戏和对应关系表。",
+    "4. 99_异常_有作品无对话：只有在messages中确实找不到该学生任何可关联对话时才进入此目录，不会伪造对话。",
     "",
     "课时推导规则：",
     "数据库当前没有显式 lesson_id。导出程序按同一班级发生数据活动的日期升序自动编号为第01课时、第02课时……。",
@@ -802,11 +1226,14 @@ export async function buildResearchExport(
     "平台划分规则：",
     "AI对话平台 = messages；小组协作平台 = group_messages；阶段作品平台 = conversations 当前HTML、game_snapshots 与 student_tasks；最终作品平台 = projects；平台行为 = interaction_events 与 game_events。平台类型记录在文件名和索引中，不再创建平台子文件夹。",
     "",
-    "作品关联规则：",
-    "game_snapshots 通过 conversation_id 与会话精确关联。projects 表没有 conversation_id；只有当同一学生的 HTML SHA256 完全一致时才建立会话关联，否则仅保留用户UUID/学生ID关联，不进行推测。",
+    "会话重建规则：",
+    "messages.session_id存在时使用原值；历史session_id为空的消息，按同一学生相邻消息不超过30分钟重建为legacy会话。原始ID、重建规则和置信度均写入索引。",
+    "",
+    "作品关联规则（按优先级）：",
+    "shared_items.conversation_id精确关联 → 同一学生HTML SHA256一致 → 标准化HTML一致 → AI消息代码一致 → 同一学生同日时间最近 → 同一学生历史时间最近。每个作品只选择一个对话，关联方式和置信度写入作品索引。",
     "",
     "完整性说明：",
-    "对话正文和HTML作品均完整导出，不截断。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM，便于Excel直接打开。",
+    "对话正文和HTML作品均完整导出，不截断。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM。",
     warnings.length ? `\n查询警告：\n- ${warnings.join("\n- ")}` : "\n查询警告：无",
   ].join("\r\n");
   zip.file("导出说明.txt", readme);
@@ -817,6 +1244,11 @@ export async function buildResearchExport(
     exported_files: fileIndex.length,
     lesson_mapping_count: uniqueLessonRows.length,
     session_count: sessionRows.length,
+    message_count_matches: messageIndex.length === data.messages.length,
+    derived_legacy_session_count: sessionBuild.sessions.filter((session) => !session.originalSessionId).length,
+    integrity_issue_count: integrityIssues.length,
+    games_without_dialogue_count: artifactIndex.filter((artifact) => artifact.对应对话会话ID === "未找到对话").length,
+    low_confidence_game_link_count: artifactIndex.filter((artifact) => artifact.关联置信度 === "低").length,
     warnings,
   }, null, 2));
 
@@ -828,6 +1260,7 @@ export async function buildResearchExport(
       conversations: data.conversations.length,
       snapshots: data.snapshots.length,
       finalProjects: data.projects.length,
+      sharedItems: (data.sharedItems || []).length,
       indexedFiles: fileIndex.length,
       sessions: sessionRows.length,
     },

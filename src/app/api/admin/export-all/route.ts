@@ -101,10 +101,11 @@ export async function GET(req: NextRequest) {
     }
 
     const studentIds = students.map((student) => student.id);
-    const queries = await Promise.all([
+    const [messages, conversations, projects, sharedItems, snapshots, tasks, groups, groupMembers, groupMessages, interactionEvents, gameEvents, peerReviews, classifications] = await Promise.all([
       optionalQuery("messages", fetchByStudentIds("messages", "id,user_id,role,content,created_at,session_id,input_method,has_code,ai_suggestion_type", "user_id", studentIds, { orderColumn: "id" }), warnings),
       optionalQuery("conversations", fetchByStudentIds("conversations", "id,user_id,title,html_code,reflection,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }), warnings),
       optionalQuery("projects", fetchByStudentIds("projects", "id,user_id,game_title,html_code,is_published,reflection,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }), warnings),
+      optionalQuery("shared_items", fetchByStudentIds("shared_items", "id,user_id,conversation_id,game_title,html_code,created_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }), warnings),
       optionalQuery("game_snapshots", fetchByStudentIds("game_snapshots", "id,user_id,conversation_id,html_code,created_at", "user_id", studentIds, { orderColumn: "id", pageSize: 250 }), warnings),
       optionalQuery("student_tasks", fetchByStudentIds("student_tasks", "id,user_id,task_id,design_image,game_rules,game_name,design_reason,discussion_notes,revision_notes,duration_seconds,save_count,undo_count,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }), warnings),
       optionalQuery("groups", fetchPaged({ table: "groups", select: "id,name,grade,class_num,created_at", orderColumn: "id" }), warnings),
@@ -118,18 +119,19 @@ export async function GET(req: NextRequest) {
 
     const data: ResearchExportData = {
       students,
-      messages: queries[0],
-      conversations: queries[1],
-      projects: queries[2],
-      snapshots: queries[3],
-      tasks: queries[4],
-      groups: queries[5],
-      groupMembers: queries[6],
-      groupMessages: queries[7],
-      interactionEvents: queries[8],
-      gameEvents: queries[9],
-      peerReviews: queries[10],
-      classifications: queries[11],
+      messages,
+      conversations,
+      projects,
+      sharedItems,
+      snapshots,
+      tasks,
+      groups,
+      groupMembers,
+      groupMessages,
+      interactionEvents,
+      gameEvents,
+      peerReviews,
+      classifications,
     };
 
     const exportResult = await buildResearchExport(data, warnings);
