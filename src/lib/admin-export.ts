@@ -457,8 +457,9 @@ export async function buildResearchExport(
     path: string,
     content: string | Uint8Array,
     meta: Omit<FileIndexRow, "文件路径" | "SHA256">,
+    compression?: "STORE" | "DEFLATE",
   ) => {
-    zip.file(path, content);
+    zip.file(path, content, compression ? { compression } : undefined);
     const hash = typeof content === "string"
       ? hashContent(content)
       : createHash("sha256").update(content).digest("hex");
@@ -908,8 +909,11 @@ export async function buildResearchExport(
     const image = decodeDataUrl(task.design_image);
     if (image) {
       const imagePath = `${context.base}/${baseName}_设计图.${image.extension}`;
-      addIndexedFile(imagePath, image.bytes, fileMeta("阶段作品平台", "阶段设计图", "student_tasks", task.id, task.user_id, timestamp, "", "student_tasks.user_id = users.id"));
+      // PNG/JPEG/WebP/GIF本身已压缩，使用STORE可避免服务器对大型图片重复压缩。
+      addIndexedFile(imagePath, image.bytes, fileMeta("阶段作品平台", "阶段设计图", "student_tasks", task.id, task.user_id, timestamp, "", "student_tasks.user_id = users.id"), "STORE");
     }
+    // ZIP已持有图片字节后立即释放体积更大的base64字符串，降低导出峰值内存。
+    delete task.design_image;
   }
 
   const sharedItemsByHash = new Map<string, Row[]>();

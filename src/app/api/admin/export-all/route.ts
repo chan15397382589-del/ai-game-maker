@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Readable } from "node:stream";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
 import { buildResearchExport, researchExportFilename, type ResearchExportData } from "@/lib/admin-export";
 import { supabaseAdmin } from "@/lib/deepseek";
@@ -153,14 +154,17 @@ export async function GET(req: NextRequest) {
     };
 
     const exportResult = await buildResearchExport(data, warnings);
-    const zipData = await exportResult.zip.generateAsync({
-      type: "uint8array",
+    // 以流式响应生成ZIP，避免同时在服务器内存中保留完整ZIP缓冲区，
+    // 并持续向客户端发送数据，适配大型研究数据包。
+    const zipStream = exportResult.zip.generateNodeStream({
+      type: "nodebuffer",
+      streamFiles: true,
       compression: "DEFLATE",
-      compressionOptions: { level: 6 },
+      compressionOptions: { level: 3 },
     });
     const filename = researchExportFilename();
 
-    return new NextResponse(zipData as any, {
+    return new NextResponse(Readable.toWeb(zipStream as unknown as Readable) as any, {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename="research_export.zip"; filename*=UTF-8''${encodeURIComponent(filename)}`,

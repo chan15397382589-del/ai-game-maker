@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Readable } from "node:stream";
 import JSZip from "jszip";
 import { buildResearchExport } from "../src/lib/admin-export.ts";
 
@@ -38,7 +39,20 @@ const data = {
 };
 
 const result = await buildResearchExport(data, [], new Date("2026-05-23T00:00:00Z"));
-const generated = await result.zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+const generatedChunks = [];
+const zipNodeStream = result.zip.generateNodeStream({
+  type: "nodebuffer",
+  streamFiles: true,
+  compression: "DEFLATE",
+  compressionOptions: { level: 3 },
+});
+const zipWebReader = Readable.toWeb(zipNodeStream).getReader();
+for (;;) {
+  const { done, value } = await zipWebReader.read();
+  if (done) break;
+  generatedChunks.push(Buffer.from(value));
+}
+const generated = Buffer.concat(generatedChunks);
 const zip = await JSZip.loadAsync(generated);
 const files = Object.keys(zip.files).filter((path) => !zip.files[path].dir);
 const studentRoot = "01_按班级/3年级_4班/SRL_control/S001_测试学生_u1/";
