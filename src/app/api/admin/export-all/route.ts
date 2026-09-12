@@ -3,13 +3,14 @@ import { Readable } from "node:stream";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
 import { buildResearchExport, researchExportFilename, type ResearchExportData } from "@/lib/admin-export";
 import { supabaseAdmin } from "@/lib/deepseek";
+import { runWithTransientRetry } from "@/lib/supabase-query-retry";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const PAGE_SIZE = 1000;
 const STUDENT_ID_CHUNK_SIZE = 100;
-const TASK_ID_CHUNK_SIZE = 10;
+const TASK_ID_CHUNK_SIZE = 5;
 
 interface FetchOptions {
   table: string;
@@ -18,6 +19,7 @@ interface FetchOptions {
   orderColumn?: string;
   ascending?: boolean;
   pageSize?: number;
+  context?: string;
 }
 
 async function fetchPaged(options: FetchOptions): Promise<any[]> {
@@ -25,12 +27,19 @@ async function fetchPaged(options: FetchOptions): Promise<any[]> {
   const pageSize = options.pageSize || PAGE_SIZE;
 
   for (let from = 0; ; from += pageSize) {
-    let query = supabaseAdmin.from(options.table).select(options.select);
-    if (options.configure) query = options.configure(query);
-    if (options.orderColumn) query = query.order(options.orderColumn, { ascending: options.ascending ?? true });
-    const { data, error } = await query.range(from, from + pageSize - 1);
-    if (error) throw new Error(`${options.table}: ${error.message}`);
-    const page = data || [];
+    const to = from + pageSize - 1;
+    const page = await runWithTransientRetry(async () => {
+      // 每次重试都重建查询构造器，避免复用已执行的PostgREST请求。
+      let query = supabaseAdmin.from(options.table).select(options.select);
+      if (options.configure) query = options.configure(query);
+      if (options.orderColumn) query = query.order(options.orderColumn, { ascending: options.ascending ?? true });
+      const { data, error } = await query.range(from, to);
+      if (error) throw error;
+      return data || [];
+    }, {
+      context: `${options.context || options.table}，分页${from}-${to}`,
+      maxAttempts: 3,
+    });
     rows.push(...page);
     if (page.length < pageSize) break;
   }
@@ -59,6 +68,7 @@ async function fetchByStudentIds(
       configure: (query) => query.in(foreignKey, idChunk),
       orderColumn: options.orderColumn,
       pageSize: options.pageSize,
+      context: `${table}，${foreignKey}批次[${idChunk.join(",")}]`,
     }));
   }
   return result;
@@ -120,13 +130,16 @@ export async function GET(req: NextRequest) {
     }
 
     const studentIds = students.map((student) => student.id);
-    const [messages, conversations, projects, sharedItems, snapshots, tasks, groups, groupMembers, groupMessages, interactionEvents, gameEvents, peerReviews, classifications] = await Promise.all([
+    // student_tasks的design_image体积最大，先单独完成，避免与其他核心表并发争用
+    // Supabase连接和传输资源。失败时立即终止，严禁继续生成残缺ZIP。
+    const tasks = await fetchStudentTasks(studentIds);
+
+    const [messages, conversations, projects, sharedItems, snapshots, groups, groupMembers, groupMessages, interactionEvents, gameEvents, peerReviews, classifications] = await Promise.all([
       fetchByStudentIds("messages", "id,user_id,role,content,created_at,session_id,input_method,has_code,ai_suggestion_type", "user_id", studentIds, { orderColumn: "id" }),
       fetchByStudentIds("conversations", "id,user_id,title,html_code,reflection,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }),
       fetchByStudentIds("projects", "id,user_id,game_title,html_code,is_published,reflection,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }),
       fetchByStudentIds("shared_items", "id,user_id,conversation_id,game_title,html_code,created_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }),
       fetchByStudentIds("game_snapshots", "id,user_id,conversation_id,html_code,created_at", "user_id", studentIds, { orderColumn: "id", pageSize: 250 }),
-      fetchStudentTasks(studentIds),
       fetchPaged({ table: "groups", select: "id,name,grade,class_num,created_at", orderColumn: "id" }),
       fetchByStudentIds("group_members", "group_id,user_id,joined_at", "user_id", studentIds, { orderColumn: "group_id" }),
       fetchByStudentIds("group_messages", "id,group_id,user_id,content,message_type,voice_url,voice_transcript,created_at", "user_id", studentIds, { orderColumn: "id" }),
