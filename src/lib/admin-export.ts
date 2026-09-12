@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
+import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
 const TIME_ZONE = "Asia/Shanghai";
 const LEGACY_SESSION_GAP_MS = 30 * 60 * 1000;
+// Excel单元格最多容纳32,767个字符。ExcelJS在写入包含大量Emoji的超长单元格时，
+// 可能在内部XML缓冲区边界损坏代理项；使用8,000个UTF-16字符的保守分段。
+const EXCEL_CELL_CHUNK_SIZE = 8_000;
 
 type Row = Record<string, any>;
 
@@ -73,6 +77,18 @@ function safeSegment(value: unknown, fallback = "unknown", maxLength = 80): stri
     .replace(/_+/g, "_")
     .slice(0, maxLength);
   return cleaned || fallback;
+}
+
+function classDisplayLabel(student: Row): string {
+  const gradeNumber = Number(student.grade);
+  const gradeChinese = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"][gradeNumber];
+  const grade = gradeChinese ? `${gradeChinese}年级` : student.grade ? `${student.grade}年级` : "年级未知";
+  if (student.class_num !== null && student.class_num !== undefined) {
+    const classNumber = String(student.class_num).trim();
+    return `${grade}${classNumber.endsWith("班") ? classNumber : `${classNumber}班`}`;
+  }
+  const className = String(student.class_name ?? "").trim();
+  return className || `${grade}班级未知`;
 }
 
 function timestampParts(value: unknown) {
@@ -250,6 +266,186 @@ function buildDialoguePairs(messages: Row[], sessionId: string): Row[] {
   }
   flush();
   return pairs;
+}
+
+function splitExcelCellText(value: unknown): string[] {
+  const text = String(value ?? "");
+  if (!text) return [""];
+  const chunks: string[] = [];
+  for (let start = 0; start < text.length;) {
+    let end = Math.min(text.length, start + EXCEL_CELL_CHUNK_SIZE);
+    // 不在emoji等代理项字符中间切分。
+    if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]) && /[\uDC00-\uDFFF]/.test(text[end])) {
+      end -= 1;
+    }
+    chunks.push(text.slice(start, end));
+    start = end;
+  }
+  return chunks;
+}
+
+function excelDate(value: unknown, includeTime: boolean): Date | string {
+  const text = String(value ?? "");
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}):(\d{2}))?/);
+  if (!match) return text;
+  return new Date(Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    includeTime ? Number(match[4] || 0) : 0,
+    includeTime ? Number(match[5] || 0) : 0,
+    includeTime ? Number(match[6] || 0) : 0,
+  ));
+}
+
+function styleDialogueWorksheet(worksheet: ExcelJS.Worksheet, widths: number[], contentColumns: number[]) {
+  worksheet.views = [{ state: "frozen", xSplit: 6, ySplit: 1 }];
+  worksheet.autoFilter = { from: "A1", to: worksheet.getRow(1).getCell(widths.length).address };
+  worksheet.pageSetup = {
+    orientation: "landscape",
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    printTitlesRow: "1:1",
+  };
+  worksheet.properties.defaultRowHeight = 22;
+  worksheet.columns.forEach((column, index) => { column.width = widths[index]; });
+
+  const header = worksheet.getRow(1);
+  header.height = 34;
+  header.eachCell((cell) => {
+    cell.font = { name: "Arial", size: 10, bold: true, color: { argb: "FF1F2937" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9EAF7" } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FFD9D9D9" } },
+      bottom: { style: "thin", color: { argb: "FFB7C9D6" } },
+      left: { style: "thin", color: { argb: "FFD9D9D9" } },
+      right: { style: "thin", color: { argb: "FFD9D9D9" } },
+    };
+  });
+
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    let estimatedLines = 1;
+    row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
+      cell.font = { name: "Arial", size: 10, color: { argb: "FF222222" } };
+      cell.alignment = {
+        vertical: "top",
+        horizontal: contentColumns.includes(columnNumber) ? "left" : "center",
+        wrapText: true,
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFE5E7EB" } },
+        bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+        left: { style: "thin", color: { argb: "FFE5E7EB" } },
+        right: { style: "thin", color: { argb: "FFE5E7EB" } },
+      };
+      if (contentColumns.includes(columnNumber)) {
+        const value = String(cell.value ?? "");
+        estimatedLines = Math.max(estimatedLines, value.split(/\r?\n/).length, Math.ceil(value.length / 55));
+      }
+    });
+    row.height = Math.min(240, Math.max(24, estimatedLines * 13));
+  });
+}
+
+async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[]): Promise<Uint8Array> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "AI游戏课堂研究数据导出";
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const dialogueSheet = workbook.addWorksheet("对话轮次", { properties: { defaultRowHeight: 22 } });
+  dialogueSheet.addRow([
+    "学生ID",
+    "姓名",
+    "班级",
+    "SRL组别",
+    "上课日期",
+    "历时轮次序号",
+    "内容分段",
+    "上一轮AI回复 AI(t-1)",
+    "当前学生发言 Student(t)",
+    "当前AI回复 AI(t)",
+  ]);
+
+  let previousAiReply = "";
+  for (const pair of pairRows) {
+    const previous = previousAiReply || "（首轮，无上一轮AI回复）";
+    const student = pair.学生发言原文 || "（无学生发言，AI主动消息）";
+    const current = pair.AI回复原文 || "（无AI回复）";
+    const contentChunks = [previous, student, current].map(splitExcelCellText);
+    const segmentCount = Math.max(...contentChunks.map((chunks) => chunks.length));
+    for (let index = 0; index < segmentCount; index += 1) {
+      dialogueSheet.addRow([
+        pair.学生ID,
+        pair.姓名,
+        pair.班级显示 || pair.班级,
+        pair.SRL组别,
+        excelDate(pair.活动日期, false),
+        pair.学生汇总轮次,
+        `${index + 1}/${segmentCount}`,
+        contentChunks[0][index] || "",
+        contentChunks[1][index] || "",
+        contentChunks[2][index] || "",
+      ]);
+    }
+    if (pair.AI回复原文) previousAiReply = pair.AI回复原文;
+  }
+  styleDialogueWorksheet(dialogueSheet, [16, 12, 14, 16, 13, 13, 11, 60, 48, 60], [8, 9, 10]);
+  dialogueSheet.getColumn(5).numFmt = "yyyy-mm-dd";
+  dialogueSheet.getColumn(8).eachCell((cell, rowNumber) => {
+    if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
+  });
+  dialogueSheet.getColumn(9).eachCell((cell, rowNumber) => {
+    if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF4CC" } };
+  });
+  dialogueSheet.getColumn(10).eachCell((cell, rowNumber) => {
+    if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F4EA" } };
+  });
+
+  const auditSheet = workbook.addWorksheet("消息审计", { properties: { defaultRowHeight: 22 } });
+  const auditHeaders = [
+    "学生内消息序号", "消息ID", "角色", "时间戳", "内容分段", "内容原文", "内容SHA256",
+    "会话ID", "原始会话ID", "会话识别规则", "输入方式", "含代码", "AI建议类型", "活动日期", "课时",
+  ];
+  auditSheet.addRow(auditHeaders);
+  for (const message of messageRows) {
+    const contentChunks = splitExcelCellText(message.内容原文);
+    contentChunks.forEach((chunk, index) => {
+      auditSheet.addRow([
+        message.学生内消息序号,
+        String(message.消息ID ?? ""),
+        message.角色,
+        excelDate(message.时间戳, true),
+        `${index + 1}/${contentChunks.length}`,
+        chunk,
+        message.内容SHA256,
+        message.会话ID,
+        message.原始会话ID,
+        message.会话识别规则,
+        message.输入方式,
+        message.含代码,
+        message.AI建议类型,
+        excelDate(message.活动日期, false),
+        message.课时,
+      ]);
+    });
+  }
+  styleDialogueWorksheet(auditSheet, [13, 14, 10, 20, 11, 80, 66, 42, 42, 42, 12, 10, 16, 13, 12], [6, 7, 8, 9, 10, 13]);
+  auditSheet.views = [{ state: "frozen", xSplit: 5, ySplit: 1 }];
+  auditSheet.getColumn(2).numFmt = "@";
+  auditSheet.getColumn(4).numFmt = "yyyy-mm-dd hh:mm:ss";
+  auditSheet.getColumn(14).numFmt = "yyyy-mm-dd";
+  auditSheet.getColumn(6).eachCell((cell, rowNumber) => {
+    if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
+  });
+
+  // 使用共享字符串可避免ExcelJS以内联字符串写入/读取超长Emoji文本时，
+  // 在内部XML数据块边界将UTF-16代理项替换为U+FFFD。
+  const buffer = await workbook.xlsx.writeBuffer({ useStyles: true, useSharedStrings: true });
+  return new Uint8Array(buffer as ArrayBuffer);
 }
 
 function normalizeJson(value: unknown): unknown {
@@ -657,6 +853,7 @@ export async function buildResearchExport(
     const fullTxtPath = `${root}/00_该学生全部AI对话.txt`;
     const fullPairPath = `${root}/00_该学生全部AI对话_配对.csv`;
     const fullMessagesPath = `${root}/00_该学生全部消息.csv`;
+    const reviewWorkbookPath = `${root}/00_该学生AI对话_人工检查表.xlsx`;
     const dates = [...new Set(allMessages.map((message) => timestampParts(message.created_at).date))];
     const header = [
       `学生ID：${context.student.student_id || ""}`,
@@ -720,6 +917,7 @@ export async function buildResearchExport(
         姓名: context.student.name || "",
         年级: context.student.grade ?? "",
         班级: context.student.class_num ?? context.student.class_name ?? "",
+        班级显示: classDisplayLabel(context.student),
         SRL组别: context.student.srl_condition || "",
         活动日期: sessionContext.time.date,
         课时: sessionContext.lesson,
@@ -737,10 +935,13 @@ export async function buildResearchExport(
       "按messages.user_id汇总全部日期与会话",
       "高",
     );
+    const reviewWorkbook = await buildStudentDialogueWorkbook(fullPairRows, fullMessageRows);
     addIndexedFile(fullTxtPath, fullTxt, { ...summaryMeta, 数据类型: "学生全部对话TXT" });
     addIndexedFile(fullPairPath, toCsv(fullPairRows), { ...summaryMeta, 数据类型: "学生全部对话配对CSV" });
     addIndexedFile(fullMessagesPath, toCsv(fullMessageRows), { ...summaryMeta, 数据类型: "学生全部消息审计CSV" });
-    studentSummaryPaths.set(userId, [fullTxtPath, fullPairPath, fullMessagesPath]);
+    // XLSX自身是ZIP格式，使用STORE避免外层数据包重复压缩。
+    addIndexedFile(reviewWorkbookPath, reviewWorkbook, { ...summaryMeta, 数据类型: "学生AI对话人工检查XLSX" }, "STORE");
+    studentSummaryPaths.set(userId, [fullTxtPath, fullPairPath, fullMessagesPath, reviewWorkbookPath]);
     studentsWithCompleteDialogueFiles += 1;
   }
 
@@ -1227,7 +1428,13 @@ export async function buildResearchExport(
     const relationRows = [
       ...summaryFiles.map((path) => ({
         会话ID: "全部会话",
-        文件类别: path.endsWith(".txt") ? "学生全部对话TXT" : path.includes("_配对.csv") ? "学生全部对话配对CSV" : "学生全部消息CSV",
+        文件类别: path.endsWith(".txt")
+          ? "学生全部对话TXT"
+          : path.endsWith(".xlsx")
+            ? "学生AI对话人工检查XLSX"
+            : path.includes("_配对.csv")
+              ? "学生全部对话配对CSV"
+              : "学生全部消息CSV",
         作品阶段: "",
         记录ID: "",
         数据库会话ID: "",
@@ -1384,7 +1591,7 @@ export async function buildResearchExport(
     "目录说明：",
     "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系；数据完整性异常.csv列出无法可靠恢复的数据。",
     "2. 00_汇总数据：前测、互评、反思和分类评估。",
-    "3. 01_按班级：班级 → SRL组别 → 学生。每个学生目录首先提供00_该学生全部AI对话.txt、全部对话配对CSV、全部消息CSV及对话与作品总索引；各日期文件夹保留会话级对话、消息、对应游戏和对应关系表。",
+    "3. 01_按班级：班级 → SRL组别 → 学生。每个有对话学生目录提供AI(t-1)→Student(t)→AI(t)人工检查XLSX、完整TXT、配对CSV、逐条消息CSV及对话与作品总索引；各日期文件夹保留会话级对话、消息、对应游戏和对应关系表。",
     "4. 99_异常_有作品无对话：只有在messages中确实找不到该学生任何可关联对话时才进入此目录，不会伪造对话。",
     "",
     "课时推导规则：",
@@ -1401,7 +1608,7 @@ export async function buildResearchExport(
     "shared_items.conversation_id精确关联 → 同一学生HTML SHA256一致 → 标准化HTML一致 → AI消息代码一致 → 同一学生同日时间最近 → 同一学生历史时间最近。每个作品只选择一个对话，关联方式和置信度写入作品索引。",
     "",
     "完整性说明：",
-    "对话正文和HTML作品均完整导出，不截断。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM。",
+    "对话正文和HTML作品均完整导出，不截断。人工检查XLSX采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构；超过Excel单元格上限的原文拆分到连续行并标明分段。消息审计工作表保留ID、完整时间戳、会话标识和SHA256。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM。",
     warnings.length ? `\n查询警告：\n- ${warnings.join("\n- ")}` : "\n查询警告：无",
   ].join("\r\n");
   zip.file("导出说明.txt", readme);

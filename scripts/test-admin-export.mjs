@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
+import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { buildResearchExport } from "../src/lib/admin-export.ts";
 
 const html = "<!doctype html><html><body><canvas></canvas></body></html>";
+const longStudentText = "超长学生发言😊".repeat(4500);
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const data = {
   students: [{
     id: "u1",
@@ -20,6 +24,7 @@ const data = {
     { id: 2, user_id: "u1", session_id: "c1", role: "assistant", content: `第一天回复\n${"长文本".repeat(300)}`, created_at: "2026-05-21T07:01:00Z" },
     { id: 3, user_id: "u1", session_id: "c2", role: "user", content: "第二天继续修改🎮", created_at: "2026-05-22T07:00:00Z" },
     { id: 4, user_id: "u1", session_id: "c2", role: "assistant", content: "第二天完整回复🍎", created_at: "2026-05-22T07:01:00Z" },
+    { id: 5, user_id: "u1", session_id: "c2", role: "user", content: longStudentText, created_at: "2026-05-22T07:02:00Z" },
   ],
   conversations: [
     { id: "c1", user_id: "u1", title: "第一版", html_code: html, created_at: "2026-05-21T07:00:00Z", updated_at: "2026-05-21T07:02:00Z", reflection: null },
@@ -61,13 +66,14 @@ const fullTxtPath = `${studentRoot}00_该学生全部AI对话.txt`;
 const fullPairPath = `${studentRoot}00_该学生全部AI对话_配对.csv`;
 const fullMessagesPath = `${studentRoot}00_该学生全部消息.csv`;
 const fullRelationsPath = `${studentRoot}00_该学生对话与作品总索引.csv`;
+const reviewWorkbookPath = `${studentRoot}00_该学生AI对话_人工检查表.xlsx`;
 
-for (const path of [fullTxtPath, fullPairPath, fullMessagesPath, fullRelationsPath]) {
+for (const path of [fullTxtPath, fullPairPath, fullMessagesPath, fullRelationsPath, reviewWorkbookPath]) {
   assert(files.includes(path), `缺少学生级完整汇总文件：${path}`);
 }
 
 const fullTxt = await zip.file(fullTxtPath).async("string");
-for (const id of [1, 2, 3, 4]) {
+for (const id of [1, 2, 3, 4, 5]) {
   assert.equal([...fullTxt.matchAll(new RegExp(`message_id=${id}\\]`, "g"))].length, 1, `消息${id}应在学生完整TXT中且仅出现一次`);
 }
 assert(fullTxt.includes("第一天回复"));
@@ -75,9 +81,69 @@ assert(fullTxt.includes("第二天完整回复🍎"));
 assert(fullTxt.includes("我要做游戏😊"));
 assert(fullTxt.includes("第二天继续修改🎮"));
 assert(fullTxt.includes("长文本".repeat(300)), "完整汇总不得截断长回复");
+assert(fullTxt.includes(longStudentText), "完整TXT不得截断超过Excel单元格上限的学生发言");
 
 const fullMessages = await zip.file(fullMessagesPath).async("string");
 assert(fullMessages.includes("第二天完整回复🍎"), "ZIP往返后必须保留非BMP字符");
+
+const reviewWorkbookBuffer = await zip.file(reviewWorkbookPath).async("nodebuffer");
+const reviewWorkbookZip = await JSZip.loadAsync(reviewWorkbookBuffer);
+const workbookStringXmlPath = reviewWorkbookZip.file("xl/sharedStrings.xml")
+  ? "xl/sharedStrings.xml"
+  : "xl/worksheets/sheet2.xml";
+const workbookStringXml = await reviewWorkbookZip.file(workbookStringXmlPath).async("nodebuffer");
+assert.equal(
+  workbookStringXml.indexOf(Buffer.from([0xef, 0xbf, 0xbd])),
+  -1,
+  "XLSX内部XML不得出现由Emoji损坏产生的U+FFFD替换字符",
+);
+const reviewWorkbook = new ExcelJS.Workbook();
+await reviewWorkbook.xlsx.load(reviewWorkbookBuffer);
+assert.deepEqual(reviewWorkbook.worksheets.map((sheet) => sheet.name), ["对话轮次", "消息审计"]);
+
+const dialogueSheet = reviewWorkbook.getWorksheet("对话轮次");
+assert.deepEqual(dialogueSheet.getRow(1).values.slice(1), [
+  "学生ID", "姓名", "班级", "SRL组别", "上课日期", "历时轮次序号", "内容分段",
+  "上一轮AI回复 AI(t-1)", "当前学生发言 Student(t)", "当前AI回复 AI(t)",
+]);
+assert.equal(dialogueSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
+assert.equal(dialogueSheet.views[0].state, "frozen");
+assert.equal(dialogueSheet.getCell("C2").value, "三年级4班");
+assert.equal(dialogueSheet.getCell("H2").value, "（首轮，无上一轮AI回复）");
+assert(String(dialogueSheet.getCell("H3").value).includes("第一天回复"));
+const longDialogueRows = [];
+dialogueSheet.eachRow((row, rowNumber) => {
+  if (rowNumber > 1 && row.getCell(6).value === 3) longDialogueRows.push(row);
+});
+assert(longDialogueRows.length > 1, "超过Excel单元格上限的轮次必须拆分到连续行");
+assert(longDialogueRows.map((row) => String(row.getCell(9).value || "")).join("").includes(longStudentText));
+
+const auditSheet = reviewWorkbook.getWorksheet("消息审计");
+const longAuditRows = [];
+auditSheet.eachRow((row, rowNumber) => {
+  if (rowNumber > 1 && String(row.getCell(2).value) === "5") longAuditRows.push(row);
+});
+assert(longAuditRows.length > 1, "消息审计表必须分段保存超长原文");
+const reassembledLongText = longAuditRows.map((row) => String(row.getCell(6).value || "")).join("");
+if (reassembledLongText !== longStudentText) {
+  const firstDifference = [...Array(Math.max(reassembledLongText.length, longStudentText.length)).keys()]
+    .find((index) => reassembledLongText[index] !== longStudentText[index]);
+  assert.fail([
+    "消息审计表超长原文分段重组不一致",
+    `expectedLength=${longStudentText.length}`,
+    `actualLength=${reassembledLongText.length}`,
+    `expectedSHA256=${sha256(longStudentText)}`,
+    `actualSHA256=${sha256(reassembledLongText)}`,
+    `xlsxXml=${workbookStringXmlPath}`,
+    `xlsxReplacementBytes=${workbookStringXml.indexOf(Buffer.from([0xef, 0xbf, 0xbd]))}`,
+    `segmentLengths=${longAuditRows.map((row) => String(row.getCell(6).value || "").length).join(",")}`,
+    `firstDifference=${firstDifference}`,
+    `expectedCodeUnit=${longStudentText.charCodeAt(firstDifference)}`,
+    `actualCodeUnit=${reassembledLongText.charCodeAt(firstDifference)}`,
+  ].join("; "));
+}
+assert(longAuditRows.every((row) => String(row.getCell(6).value || "").length <= 8000));
+assert(longAuditRows.every((row) => row.getCell(7).value === sha256(longStudentText)));
 
 const integrity = JSON.parse(await zip.file("00_索引/数据完整性汇总.json").async("string"));
 assert.equal(integrity.students_with_messages, 1);
