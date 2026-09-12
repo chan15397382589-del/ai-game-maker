@@ -449,6 +449,10 @@ export async function buildResearchExport(
     };
   };
 
+  const studentRoot = (context: ReturnType<typeof exportContext>) => (
+    `01_按班级/${context.classFolder}/${context.srlFolder}/${context.studentFolder}`
+  );
+
   const addIndexedFile = (
     path: string,
     content: string | Uint8Array,
@@ -595,6 +599,7 @@ export async function buildResearchExport(
       角色: message.role === "user" ? "学生" : "AI",
       时间戳: timestampParts(message.created_at).display,
       内容原文: message.content || "",
+      内容SHA256: hashContent(message.content || ""),
       输入方式: message.input_method || "",
       含代码: message.has_code ?? "",
       AI建议类型: message.ai_suggestion_type || "",
@@ -630,6 +635,112 @@ export async function buildResearchExport(
     const paths = sessionFilePaths.get(`${first.user_id}:${sessionId}`) || [];
     paths.push(txtPath, pairCsvPath, rawCsvPath);
     sessionFilePaths.set(`${first.user_id}:${sessionId}`, paths);
+  }
+
+  // 每名学生增加单一、完整的对话汇总，避免研究者在多个日期和会话文件间手工拼接。
+  const studentSummaryPaths = new Map<string, string[]>();
+  const completeDialogueMessageKeys = new Set<string>();
+  let studentsWithCompleteDialogueFiles = 0;
+  for (const [userId, userSessions] of sessionsByUser) {
+    const sortedSessions = [...userSessions].sort((a, b) => (
+      String(a.firstAt).localeCompare(String(b.firstAt)) || a.sessionId.localeCompare(b.sessionId)
+    ));
+    const allMessages = sortedSessions
+      .flatMap((session) => session.messages)
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || Number(a.id) - Number(b.id));
+    if (!allMessages.length) continue;
+
+    const first = allMessages[0];
+    const context = exportContext(userId, first.created_at);
+    const root = studentRoot(context);
+    const fullTxtPath = `${root}/00_该学生全部AI对话.txt`;
+    const fullPairPath = `${root}/00_该学生全部AI对话_配对.csv`;
+    const fullMessagesPath = `${root}/00_该学生全部消息.csv`;
+    const dates = [...new Set(allMessages.map((message) => timestampParts(message.created_at).date))];
+    const header = [
+      `学生ID：${context.student.student_id || ""}`,
+      `用户UUID：${userId}`,
+      `姓名：${context.student.name || ""}`,
+      `年级班级：${classLabel(context.student)}`,
+      `SRL组别：${context.student.srl_condition || "未分组"}`,
+      `小组：${context.groupNames}（${context.groupIds || "无组别ID"}）`,
+      `全部会话数：${sortedSessions.length}`,
+      `全部消息数：${allMessages.length}`,
+      `活动日期：${dates.join(" | ")}`,
+      "说明：本文件按时间顺序汇总该学生在messages表中的全部学生与AI消息；日期和会话明细文件仍保留用于审计。",
+      "",
+    ];
+    const body = allMessages.flatMap((message) => {
+      const messageContext = exportContext(userId, message.created_at);
+      return [
+        `[${timestampParts(message.created_at).display}] [${message.role === "user" ? "学生" : "AI"}] [session_id=${message.__session_id}] [message_id=${message.id}] [${messageContext.lesson}]`,
+        String(message.content || ""),
+        "",
+        "---",
+        "",
+      ];
+    });
+    const fullTxt = [...header, ...body].join("\r\n");
+
+    const fullMessageRows = allMessages.map((message, index) => {
+      const messageContext = exportContext(userId, message.created_at);
+      completeDialogueMessageKeys.add(`${userId}:${message.id}`);
+      return {
+        学生内消息序号: index + 1,
+        消息ID: message.id,
+        角色: message.role === "user" ? "学生" : "AI",
+        时间戳: timestampParts(message.created_at).display,
+        内容原文: message.content || "",
+        内容SHA256: hashContent(message.content || ""),
+        输入方式: message.input_method || "",
+        含代码: message.has_code ?? "",
+        AI建议类型: message.ai_suggestion_type || "",
+        会话ID: message.__session_id,
+        原始会话ID: message.session_id || "",
+        会话识别规则: message.__session_relation,
+        用户UUID: userId,
+        学生ID: context.student.student_id || "",
+        姓名: context.student.name || "",
+        年级: context.student.grade ?? "",
+        班级: context.student.class_num ?? context.student.class_name ?? "",
+        SRL组别: context.student.srl_condition || "",
+        小组ID: context.groupIds,
+        小组名称: context.groupNames,
+        活动日期: messageContext.time.date,
+        课时: messageContext.lesson,
+      };
+    });
+    let studentPairSequence = 0;
+    const fullPairRows = sortedSessions.flatMap((session) => {
+      const sessionContext = exportContext(userId, session.firstAt);
+      return buildDialoguePairs(session.messages, session.sessionId).map((pair) => ({
+        学生汇总轮次: ++studentPairSequence,
+        学生ID: context.student.student_id || "",
+        姓名: context.student.name || "",
+        年级: context.student.grade ?? "",
+        班级: context.student.class_num ?? context.student.class_name ?? "",
+        SRL组别: context.student.srl_condition || "",
+        活动日期: sessionContext.time.date,
+        课时: sessionContext.lesson,
+        ...pair,
+      }));
+    });
+    const summaryMeta = fileMeta(
+      "AI对话平台",
+      "学生全部对话汇总",
+      "messages",
+      userId,
+      userId,
+      first.created_at,
+      "全部会话",
+      "按messages.user_id汇总全部日期与会话",
+      "高",
+    );
+    addIndexedFile(fullTxtPath, fullTxt, { ...summaryMeta, 数据类型: "学生全部对话TXT" });
+    addIndexedFile(fullPairPath, toCsv(fullPairRows), { ...summaryMeta, 数据类型: "学生全部对话配对CSV" });
+    addIndexedFile(fullMessagesPath, toCsv(fullMessageRows), { ...summaryMeta, 数据类型: "学生全部消息审计CSV" });
+    studentSummaryPaths.set(userId, [fullTxtPath, fullPairPath, fullMessagesPath]);
+    studentsWithCompleteDialogueFiles += 1;
   }
 
   const closestMessageTime = (session: ExportSession, timestamp: unknown): string => {
@@ -1102,6 +1213,59 @@ export async function buildResearchExport(
     });
   }
 
+  // 学生级总索引将全部会话文件与全部作品集中列出，便于逐人核对一一对应关系。
+  for (const [userId, userSessions] of sessionsByUser) {
+    if (!userSessions.length) continue;
+    const firstAt = [...userSessions].sort((a, b) => String(a.firstAt).localeCompare(String(b.firstAt)))[0].firstAt;
+    const context = exportContext(userId, firstAt);
+    const relationPath = `${studentRoot(context)}/00_该学生对话与作品总索引.csv`;
+    const summaryFiles = studentSummaryPaths.get(userId) || [];
+    const relationRows = [
+      ...summaryFiles.map((path) => ({
+        会话ID: "全部会话",
+        文件类别: path.endsWith(".txt") ? "学生全部对话TXT" : path.includes("_配对.csv") ? "学生全部对话配对CSV" : "学生全部消息CSV",
+        作品阶段: "",
+        记录ID: "",
+        数据库会话ID: "",
+        关联方式: "按messages.user_id汇总全部日期与会话",
+        关联置信度: "高",
+        文件路径: path,
+      })),
+      ...userSessions.flatMap((session) => (sessionFilePaths.get(session.key) || []).map((path) => ({
+        会话ID: session.sessionId,
+        文件类别: path.endsWith(".txt") ? "会话完整对话TXT" : path.includes("对话配对") ? "会话对话配对CSV" : path.includes("对应关系") ? "会话与游戏对应关系CSV" : "会话逐条消息CSV",
+        作品阶段: "",
+        记录ID: "",
+        数据库会话ID: session.originalSessionId,
+        关联方式: session.relation,
+        关联置信度: session.confidence,
+        文件路径: path,
+      }))),
+      ...artifactIndex.filter((artifact) => artifact.用户UUID === userId).map((artifact) => ({
+        会话ID: artifact.对应对话会话ID,
+        文件类别: "游戏HTML",
+        作品阶段: artifact.作品阶段,
+        记录ID: artifact.作品ID,
+        数据库会话ID: artifact.数据库会话ID || "",
+        关联方式: artifact.关联方式,
+        关联置信度: artifact.关联置信度,
+        文件路径: artifact.文件路径,
+      })),
+    ];
+    addIndexedFile(relationPath, toCsv(relationRows), fileMeta(
+      "关联索引",
+      "学生全部对话与作品总索引",
+      "messages + conversations + game_snapshots + projects",
+      userId,
+      userId,
+      firstAt,
+      "全部会话",
+      "按用户汇总全部会话及作品关联",
+      "高",
+    ));
+    studentSummaryPaths.set(userId, [...summaryFiles, relationPath]);
+  }
+
   const surveyRows = data.tasks.filter((task) => task.task_id === "survey").map((task) => {
     const context = exportContext(task.user_id, task.updated_at || task.created_at);
     return {
@@ -1216,7 +1380,7 @@ export async function buildResearchExport(
     "目录说明：",
     "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系；数据完整性异常.csv列出无法可靠恢复的数据。",
     "2. 00_汇总数据：前测、互评、反思和分类评估。",
-    "3. 01_按班级：班级 → SRL组别 → 学生 → 对话日期。日期文件夹内直接放置完整对话TXT、学生-AI对话配对CSV、逐条消息CSV、对应游戏和对应关系表。",
+    "3. 01_按班级：班级 → SRL组别 → 学生。每个学生目录首先提供00_该学生全部AI对话.txt、全部对话配对CSV、全部消息CSV及对话与作品总索引；各日期文件夹保留会话级对话、消息、对应游戏和对应关系表。",
     "4. 99_异常_有作品无对话：只有在messages中确实找不到该学生任何可关联对话时才进入此目录，不会伪造对话。",
     "",
     "课时推导规则：",
@@ -1245,6 +1409,9 @@ export async function buildResearchExport(
     lesson_mapping_count: uniqueLessonRows.length,
     session_count: sessionRows.length,
     message_count_matches: messageIndex.length === data.messages.length,
+    students_with_messages: sessionsByUser.size,
+    students_with_complete_dialogue_files: studentsWithCompleteDialogueFiles,
+    student_complete_dialogue_message_count_matches: completeDialogueMessageKeys.size === data.messages.length,
     derived_legacy_session_count: sessionBuild.sessions.filter((session) => !session.originalSessionId).length,
     integrity_issue_count: integrityIssues.length,
     games_without_dialogue_count: artifactIndex.filter((artifact) => artifact.对应对话会话ID === "未找到对话").length,

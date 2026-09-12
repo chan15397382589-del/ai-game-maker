@@ -8,6 +8,7 @@ export const maxDuration = 300;
 
 const PAGE_SIZE = 1000;
 const STUDENT_ID_CHUNK_SIZE = 100;
+const TASK_ID_CHUNK_SIZE = 10;
 
 interface FetchOptions {
   table: string;
@@ -47,10 +48,10 @@ async function fetchByStudentIds(
   select: string,
   foreignKey: string,
   studentIds: string[],
-  options: { orderColumn?: string; pageSize?: number } = {},
+  options: { orderColumn?: string; pageSize?: number; chunkSize?: number } = {},
 ): Promise<any[]> {
   const result: any[] = [];
-  for (const idChunk of chunks(studentIds, STUDENT_ID_CHUNK_SIZE)) {
+  for (const idChunk of chunks(studentIds, options.chunkSize || STUDENT_ID_CHUNK_SIZE)) {
     result.push(...await fetchPaged({
       table,
       select,
@@ -62,15 +63,32 @@ async function fetchByStudentIds(
   return result;
 }
 
-async function optionalQuery(name: string, query: Promise<any[]>, warnings: string[]): Promise<any[]> {
-  try {
-    return await query;
-  } catch (error: any) {
-    const message = `${name}读取失败：${error.message || String(error)}`;
-    warnings.push(message);
-    console.warn(`[export-all] ${message}`);
-    return [];
+async function fetchStudentTasks(studentIds: string[]): Promise<any[]> {
+  // design_image可能包含大型base64数据。先读取轻量字段，再按少量任务ID分块读取图片，
+  // 避免单条SQL同时扫描和返回数百个大型字段而触发Supabase语句超时。
+  const tasks = await fetchByStudentIds(
+    "student_tasks",
+    "id,user_id,task_id,game_rules,game_name,design_reason,discussion_notes,revision_notes,duration_seconds,save_count,undo_count,created_at,updated_at",
+    "user_id",
+    studentIds,
+    { orderColumn: "id", pageSize: 250, chunkSize: 50 },
+  );
+  if (!tasks.length) return [];
+
+  const taskIds = tasks.map((task) => task.id);
+  const imageRows = await fetchByStudentIds(
+    "student_tasks",
+    "id,design_image",
+    "id",
+    taskIds,
+    { orderColumn: "id", pageSize: TASK_ID_CHUNK_SIZE + 1, chunkSize: TASK_ID_CHUNK_SIZE },
+  );
+  const imageByTaskId = new Map(imageRows.map((row) => [String(row.id), row.design_image]));
+  if (imageByTaskId.size !== tasks.length) {
+    throw new Error(`student_tasks: 轻量记录${tasks.length}条，但design_image记录仅${imageByTaskId.size}条`);
   }
+
+  return tasks.map((task) => ({ ...task, design_image: imageByTaskId.get(String(task.id)) ?? null }));
 }
 
 export async function GET(req: NextRequest) {
@@ -102,19 +120,19 @@ export async function GET(req: NextRequest) {
 
     const studentIds = students.map((student) => student.id);
     const [messages, conversations, projects, sharedItems, snapshots, tasks, groups, groupMembers, groupMessages, interactionEvents, gameEvents, peerReviews, classifications] = await Promise.all([
-      optionalQuery("messages", fetchByStudentIds("messages", "id,user_id,role,content,created_at,session_id,input_method,has_code,ai_suggestion_type", "user_id", studentIds, { orderColumn: "id" }), warnings),
-      optionalQuery("conversations", fetchByStudentIds("conversations", "id,user_id,title,html_code,reflection,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }), warnings),
-      optionalQuery("projects", fetchByStudentIds("projects", "id,user_id,game_title,html_code,is_published,reflection,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }), warnings),
-      optionalQuery("shared_items", fetchByStudentIds("shared_items", "id,user_id,conversation_id,game_title,html_code,created_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }), warnings),
-      optionalQuery("game_snapshots", fetchByStudentIds("game_snapshots", "id,user_id,conversation_id,html_code,created_at", "user_id", studentIds, { orderColumn: "id", pageSize: 250 }), warnings),
-      optionalQuery("student_tasks", fetchByStudentIds("student_tasks", "id,user_id,task_id,design_image,game_rules,game_name,design_reason,discussion_notes,revision_notes,duration_seconds,save_count,undo_count,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }), warnings),
-      optionalQuery("groups", fetchPaged({ table: "groups", select: "id,name,grade,class_num,created_at", orderColumn: "id" }), warnings),
-      optionalQuery("group_members", fetchByStudentIds("group_members", "group_id,user_id,joined_at", "user_id", studentIds, { orderColumn: "group_id" }), warnings),
-      optionalQuery("group_messages", fetchByStudentIds("group_messages", "id,group_id,user_id,content,message_type,voice_url,voice_transcript,created_at", "user_id", studentIds, { orderColumn: "id" }), warnings),
-      optionalQuery("interaction_events", fetchByStudentIds("interaction_events", "id,user_id,session_id,event_type,metadata,created_at", "user_id", studentIds, { orderColumn: "id" }), warnings),
-      optionalQuery("game_events", fetchByStudentIds("game_events", "id,user_id,session_id,event_type,event_data,created_at", "user_id", studentIds, { orderColumn: "id" }), warnings),
-      optionalQuery("peer_reviews", fetchByStudentIds("peer_reviews", "id,reviewer_id,reviewee_id,shared_item_id,q1_enjoy,q2_suggestion,q3_bug,created_at", "reviewer_id", studentIds, { orderColumn: "id" }), warnings),
-      optionalQuery("student_classifications", fetchByStudentIds("student_classifications", "id,user_id,conversation_id,q1_answers,q2_answer,q3_answer,q1_score,q2_score,q3_score,total_score,srl_group,total_time,created_at,test_type", "user_id", studentIds, { orderColumn: "id" }), warnings),
+      fetchByStudentIds("messages", "id,user_id,role,content,created_at,session_id,input_method,has_code,ai_suggestion_type", "user_id", studentIds, { orderColumn: "id" }),
+      fetchByStudentIds("conversations", "id,user_id,title,html_code,reflection,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }),
+      fetchByStudentIds("projects", "id,user_id,game_title,html_code,is_published,reflection,created_at,updated_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }),
+      fetchByStudentIds("shared_items", "id,user_id,conversation_id,game_title,html_code,created_at", "user_id", studentIds, { orderColumn: "id", pageSize: 500 }),
+      fetchByStudentIds("game_snapshots", "id,user_id,conversation_id,html_code,created_at", "user_id", studentIds, { orderColumn: "id", pageSize: 250 }),
+      fetchStudentTasks(studentIds),
+      fetchPaged({ table: "groups", select: "id,name,grade,class_num,created_at", orderColumn: "id" }),
+      fetchByStudentIds("group_members", "group_id,user_id,joined_at", "user_id", studentIds, { orderColumn: "group_id" }),
+      fetchByStudentIds("group_messages", "id,group_id,user_id,content,message_type,voice_url,voice_transcript,created_at", "user_id", studentIds, { orderColumn: "id" }),
+      fetchByStudentIds("interaction_events", "id,user_id,session_id,event_type,metadata,created_at", "user_id", studentIds, { orderColumn: "id" }),
+      fetchByStudentIds("game_events", "id,user_id,session_id,event_type,event_data,created_at", "user_id", studentIds, { orderColumn: "id" }),
+      fetchByStudentIds("peer_reviews", "id,reviewer_id,reviewee_id,shared_item_id,q1_enjoy,q2_suggestion,q3_bug,created_at", "reviewer_id", studentIds, { orderColumn: "id" }),
+      fetchByStudentIds("student_classifications", "id,user_id,conversation_id,q1_answers,q2_answer,q3_answer,q1_score,q2_score,q3_score,total_score,srl_group,total_time,created_at,test_type", "user_id", studentIds, { orderColumn: "id" }),
     ]);
 
     const data: ResearchExportData = {
