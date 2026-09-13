@@ -65,10 +65,11 @@ const studentRoot = "01_按班级/3年级_4班/SRL_control/S001_测试学生_u1/
 const fullTxtPath = `${studentRoot}00_该学生全部AI对话.txt`;
 const fullPairPath = `${studentRoot}00_该学生全部AI对话_配对.csv`;
 const fullMessagesPath = `${studentRoot}00_该学生全部消息.csv`;
-const fullRelationsPath = `${studentRoot}00_该学生对话与作品总索引.csv`;
-const reviewWorkbookPath = `${studentRoot}00_该学生AI对话_人工检查表.xlsx`;
+const fullRelationsPath = `${studentRoot}00_对话与作品对应索引.csv`;
+const reviewWorkbookPath = `${studentRoot}00_学生的所有对话记录.xlsx`;
+const researchWorkbookPath = `${studentRoot}00_学生研究数据总表.xlsx`;
 
-for (const path of [fullTxtPath, fullPairPath, fullMessagesPath, fullRelationsPath, reviewWorkbookPath]) {
+for (const path of [fullTxtPath, fullPairPath, fullMessagesPath, fullRelationsPath, reviewWorkbookPath, researchWorkbookPath]) {
   assert(files.includes(path), `缺少学生级完整汇总文件：${path}`);
 }
 
@@ -146,6 +147,49 @@ if (reassembledLongText !== longStudentText) {
 }
 assert(longAuditRows.every((row) => String(row.getCell(6).value || "").length <= 8000));
 assert(longAuditRows.every((row) => row.getCell(7).value === sha256(longStudentText)));
+
+const researchWorkbookBuffer = await zip.file(researchWorkbookPath).async("nodebuffer");
+const researchWorkbook = new ExcelJS.Workbook();
+await researchWorkbook.xlsx.load(researchWorkbookBuffer);
+assert.deepEqual(researchWorkbook.worksheets.map((sheet) => sheet.name), [
+  "学生研究概览",
+  "AI预编码人工检查表",
+  "全部消息",
+  "对话与作品索引",
+]);
+
+const overviewSheet = researchWorkbook.getWorksheet("学生研究概览");
+assert.deepEqual(overviewSheet.getRow(1).values.slice(1), [
+  "学生ID", "姓名", "班级", "SRL组别", "用户UUID", "小组名称", "活动日期数", "会话数",
+  "对话轮次数", "消息总数", "学生消息数", "AI消息数", "原始会话ID为空消息数",
+  "阶段作品数", "最终作品数", "未关联对话作品数", "低置信度作品关联数", "数据检查结果",
+]);
+assert.deepEqual(overviewSheet.getRow(2).values.slice(1, 19), [
+  "S001", "测试学生", "三年级4班", "control", "u1", "第一组", 2, 2, 3, 5, 3, 2, 0, 2, 0, 0, 0, "正常",
+]);
+assert.equal(overviewSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
+assert.equal(overviewSheet.views[0].state, "frozen");
+
+const researchDialogueSheet = researchWorkbook.getWorksheet("AI预编码人工检查表");
+assert.equal(researchDialogueSheet.getCell("H2").value, "我要做游戏😊");
+const researchMessageSheet = researchWorkbook.getWorksheet("全部消息");
+const researchLongRows = [];
+researchMessageSheet.eachRow((row, rowNumber) => {
+  if (rowNumber > 1 && String(row.getCell(2).value) === "5") researchLongRows.push(row);
+});
+assert.equal(researchLongRows.map((row) => String(row.getCell(6).value || "")).join(""), longStudentText);
+
+const relationCsv = await zip.file(fullRelationsPath).async("string");
+assert(relationCsv.includes(reviewWorkbookPath));
+assert(relationCsv.includes(researchWorkbookPath));
+assert(relationCsv.includes(fullRelationsPath));
+const relationCsvRows = relationCsv.replace(/^\uFEFF/, "").split("\r\n");
+const relationSheet = researchWorkbook.getWorksheet("对话与作品索引");
+assert.equal(relationSheet.rowCount, relationCsvRows.length, "工作簿关系索引与CSV记录数应一致");
+assert.deepEqual(relationSheet.getRow(1).values.slice(1), [
+  "会话ID", "文件类别", "作品阶段", "记录ID", "数据库会话ID", "关联方式", "关联置信度", "文件路径",
+]);
+assert.equal(relationSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
 
 const integrity = JSON.parse(await zip.file("00_索引/数据完整性汇总.json").async("string"));
 assert.equal(integrity.students_with_messages, 1);

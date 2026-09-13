@@ -303,8 +303,13 @@ function excelDate(value: unknown, includeTime: boolean): Date | string {
   ));
 }
 
-function styleDialogueWorksheet(worksheet: ExcelJS.Worksheet, widths: number[], contentColumns: number[]) {
-  worksheet.views = [{ state: "frozen", xSplit: 6, ySplit: 1 }];
+function styleDialogueWorksheet(
+  worksheet: ExcelJS.Worksheet,
+  widths: number[],
+  contentColumns: number[],
+  frozenColumns = Math.min(6, widths.length),
+) {
+  worksheet.views = [{ state: "frozen", xSplit: frozenColumns, ySplit: 1 }];
   worksheet.autoFilter = { from: "A1", to: worksheet.getRow(1).getCell(widths.length).address };
   worksheet.pageSetup = {
     orientation: "landscape",
@@ -355,12 +360,7 @@ function styleDialogueWorksheet(worksheet: ExcelJS.Worksheet, widths: number[], 
   });
 }
 
-async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[]): Promise<Uint8Array> {
-  const workbook = new ExcelJS.Workbook();
-  workbook.creator = "AI游戏课堂研究数据导出";
-  workbook.created = new Date();
-  workbook.modified = new Date();
-
+function addDialogueReviewWorksheet(workbook: ExcelJS.Workbook, pairRows: Row[]) {
   const dialogueSheet = workbook.addWorksheet("AI预编码人工检查表", { properties: { defaultRowHeight: 22 } });
   dialogueSheet.addRow([
     "学生ID",
@@ -409,8 +409,11 @@ async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[])
   dialogueSheet.getColumn(9).eachCell((cell, rowNumber) => {
     if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F4EA" } };
   });
+  return dialogueSheet;
+}
 
-  const auditSheet = workbook.addWorksheet("消息审计", { properties: { defaultRowHeight: 22 } });
+function addMessageAuditWorksheet(workbook: ExcelJS.Workbook, messageRows: Row[], sheetName: string) {
+  const auditSheet = workbook.addWorksheet(sheetName, { properties: { defaultRowHeight: 22 } });
   const auditHeaders = [
     "学生内消息序号", "消息ID", "角色", "时间戳", "内容分段", "内容原文", "内容SHA256",
     "会话ID", "原始会话ID", "会话识别规则", "输入方式", "含代码", "AI建议类型", "活动日期", "课时",
@@ -438,19 +441,123 @@ async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[])
       ]);
     });
   }
-  styleDialogueWorksheet(auditSheet, [13, 14, 10, 20, 11, 80, 66, 42, 42, 42, 12, 10, 16, 13, 12], [6, 7, 8, 9, 10, 13]);
-  auditSheet.views = [{ state: "frozen", xSplit: 5, ySplit: 1 }];
+  styleDialogueWorksheet(
+    auditSheet,
+    [13, 14, 10, 20, 11, 80, 66, 42, 42, 42, 12, 10, 16, 13, 12],
+    [6, 7, 8, 9, 10, 13],
+    5,
+  );
   auditSheet.getColumn(2).numFmt = "@";
   auditSheet.getColumn(4).numFmt = "yyyy-mm-dd hh:mm:ss";
   auditSheet.getColumn(14).numFmt = "yyyy-mm-dd";
   auditSheet.getColumn(6).eachCell((cell, rowNumber) => {
     if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
   });
+  return auditSheet;
+}
 
+function addFlatResearchWorksheet(
+  workbook: ExcelJS.Workbook,
+  sheetName: string,
+  headers: string[],
+  rows: Row[],
+  widths: number[],
+  contentColumns: number[],
+  frozenColumns: number,
+) {
+  const worksheet = workbook.addWorksheet(sheetName, { properties: { defaultRowHeight: 22 } });
+  worksheet.addRow(headers);
+  for (const row of rows) worksheet.addRow(headers.map((header) => row[header] ?? ""));
+  styleDialogueWorksheet(worksheet, widths, contentColumns, frozenColumns);
+  return worksheet;
+}
+
+function initializeStudentWorkbook(): ExcelJS.Workbook {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = "AI游戏课堂研究数据导出";
+  workbook.created = new Date();
+  workbook.modified = new Date();
+  return workbook;
+}
+
+async function writeStudentWorkbook(workbook: ExcelJS.Workbook): Promise<Uint8Array> {
   // 使用共享字符串可避免ExcelJS以内联字符串写入/读取超长Emoji文本时，
   // 在内部XML数据块边界将UTF-16代理项替换为U+FFFD。
   const buffer = await workbook.xlsx.writeBuffer({ useStyles: true, useSharedStrings: true });
   return new Uint8Array(buffer as ArrayBuffer);
+}
+
+async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[]): Promise<Uint8Array> {
+  const workbook = initializeStudentWorkbook();
+  addDialogueReviewWorksheet(workbook, pairRows);
+  addMessageAuditWorksheet(workbook, messageRows, "消息审计");
+  return writeStudentWorkbook(workbook);
+}
+
+async function buildStudentResearchWorkbook(
+  overviewRow: Row,
+  pairRows: Row[],
+  messageRows: Row[],
+  relationRows: Row[],
+): Promise<Uint8Array> {
+  const workbook = initializeStudentWorkbook();
+  const overviewHeaders = [
+    "学生ID", "姓名", "班级", "SRL组别", "用户UUID", "小组名称", "活动日期数", "会话数",
+    "对话轮次数", "消息总数", "学生消息数", "AI消息数", "原始会话ID为空消息数",
+    "阶段作品数", "最终作品数", "未关联对话作品数", "低置信度作品关联数", "数据检查结果",
+  ];
+  const overviewSheet = addFlatResearchWorksheet(
+    workbook,
+    "学生研究概览",
+    overviewHeaders,
+    [overviewRow],
+    [16, 12, 14, 16, 38, 18, 13, 11, 13, 11, 12, 11, 22, 13, 13, 18, 20, 34],
+    [18],
+    4,
+  );
+  overviewSheet.getColumn(18).eachCell((cell, rowNumber) => {
+    if (rowNumber <= 1) return;
+    const needsReview = String(cell.value || "").startsWith("需核查");
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: needsReview ? "FFFFE4E6" : "FFE8F4EA" },
+    };
+    cell.font = {
+      name: "宋体",
+      size: 10,
+      bold: true,
+      color: { argb: needsReview ? "FFB91C1C" : "FF166534" },
+    };
+  });
+
+  addDialogueReviewWorksheet(workbook, pairRows);
+  addMessageAuditWorksheet(workbook, messageRows, "全部消息");
+
+  const relationHeaders = [
+    "会话ID", "文件类别", "作品阶段", "记录ID", "数据库会话ID", "关联方式", "关联置信度", "文件路径",
+  ];
+  const relationSheet = addFlatResearchWorksheet(
+    workbook,
+    "对话与作品索引",
+    relationHeaders,
+    relationRows,
+    [42, 26, 24, 18, 42, 58, 16, 90],
+    [1, 2, 3, 5, 6, 8],
+    2,
+  );
+  relationSheet.getColumn(7).eachCell((cell, rowNumber) => {
+    if (rowNumber <= 1) return;
+    const confidence = String(cell.value || "");
+    if (confidence === "低") {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE4E6" } };
+      cell.font = { name: "宋体", size: 10, bold: true, color: { argb: "FFB91C1C" } };
+    } else if (confidence === "中") {
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF4CC" } };
+    }
+  });
+
+  return writeStudentWorkbook(workbook);
 }
 
 function normalizeJson(value: unknown): unknown {
@@ -841,6 +948,8 @@ export async function buildResearchExport(
 
   // 每名学生增加单一、完整的对话汇总，避免研究者在多个日期和会话文件间手工拼接。
   const studentSummaryPaths = new Map<string, string[]>();
+  const studentPairRowsByUser = new Map<string, Row[]>();
+  const studentMessageRowsByUser = new Map<string, Row[]>();
   const completeDialogueMessageKeys = new Set<string>();
   let studentsWithCompleteDialogueFiles = 0;
   for (const [userId, userSessions] of sessionsByUser) {
@@ -858,7 +967,7 @@ export async function buildResearchExport(
     const fullTxtPath = `${root}/00_该学生全部AI对话.txt`;
     const fullPairPath = `${root}/00_该学生全部AI对话_配对.csv`;
     const fullMessagesPath = `${root}/00_该学生全部消息.csv`;
-    const reviewWorkbookPath = `${root}/00_该学生AI对话_人工检查表.xlsx`;
+    const reviewWorkbookPath = `${root}/00_学生的所有对话记录.xlsx`;
     const dates = [...new Set(allMessages.map((message) => timestampParts(message.created_at).date))];
     const header = [
       `学生ID：${context.student.student_id || ""}`,
@@ -947,6 +1056,8 @@ export async function buildResearchExport(
     // XLSX自身是ZIP格式，使用STORE避免外层数据包重复压缩。
     addIndexedFile(reviewWorkbookPath, reviewWorkbook, { ...summaryMeta, 数据类型: "学生AI对话人工检查XLSX" }, "STORE");
     studentSummaryPaths.set(userId, [fullTxtPath, fullPairPath, fullMessagesPath, reviewWorkbookPath]);
+    studentPairRowsByUser.set(userId, fullPairRows);
+    studentMessageRowsByUser.set(userId, fullMessageRows);
     studentsWithCompleteDialogueFiles += 1;
   }
 
@@ -1428,18 +1539,26 @@ export async function buildResearchExport(
     if (!userSessions.length) continue;
     const firstAt = [...userSessions].sort((a, b) => String(a.firstAt).localeCompare(String(b.firstAt)))[0].firstAt;
     const context = exportContext(userId, firstAt);
-    const relationPath = `${studentRoot(context)}/00_该学生对话与作品总索引.csv`;
+    const root = studentRoot(context);
+    const relationPath = `${root}/00_对话与作品对应索引.csv`;
+    const researchWorkbookPath = `${root}/00_学生研究数据总表.xlsx`;
     const summaryFiles = studentSummaryPaths.get(userId) || [];
+    const fullPairRows = studentPairRowsByUser.get(userId) || [];
+    const fullMessageRows = studentMessageRowsByUser.get(userId) || [];
+    const studentArtifacts = artifactIndex.filter((artifact) => artifact.用户UUID === userId);
+    const relationSummaryFiles = [...summaryFiles, relationPath, researchWorkbookPath];
+    const studentSummaryFileCategory = (path: string): string => {
+      if (path.endsWith(".txt")) return "学生全部对话TXT";
+      if (path.endsWith("学生研究数据总表.xlsx")) return "学生研究数据总表XLSX";
+      if (path.endsWith(".xlsx")) return "学生全部对话记录XLSX";
+      if (path.endsWith("对话与作品对应索引.csv")) return "学生对话与作品对应索引CSV";
+      if (path.includes("_配对.csv")) return "学生全部对话配对CSV";
+      return "学生全部消息CSV";
+    };
     const relationRows = [
-      ...summaryFiles.map((path) => ({
+      ...relationSummaryFiles.map((path) => ({
         会话ID: "全部会话",
-        文件类别: path.endsWith(".txt")
-          ? "学生全部对话TXT"
-          : path.endsWith(".xlsx")
-            ? "学生AI对话人工检查XLSX"
-            : path.includes("_配对.csv")
-              ? "学生全部对话配对CSV"
-              : "学生全部消息CSV",
+        文件类别: studentSummaryFileCategory(path),
         作品阶段: "",
         记录ID: "",
         数据库会话ID: "",
@@ -1457,7 +1576,7 @@ export async function buildResearchExport(
         关联置信度: session.confidence,
         文件路径: path,
       }))),
-      ...artifactIndex.filter((artifact) => artifact.用户UUID === userId).map((artifact) => ({
+      ...studentArtifacts.map((artifact) => ({
         会话ID: artifact.对应对话会话ID,
         文件类别: "游戏HTML",
         作品阶段: artifact.作品阶段,
@@ -1468,9 +1587,43 @@ export async function buildResearchExport(
         文件路径: artifact.文件路径,
       })),
     ];
+    const unlinkedArtifactCount = studentArtifacts.filter((artifact) => artifact.对应对话会话ID === "未找到对话").length;
+    const lowConfidenceArtifactCount = studentArtifacts.filter((artifact) => artifact.关联置信度 === "低").length;
+    const blankOriginalSessionCount = fullMessageRows.filter((message) => !message.原始会话ID).length;
+    const reviewItems = [
+      unlinkedArtifactCount ? `${unlinkedArtifactCount}个作品未关联对话` : "",
+      lowConfidenceArtifactCount ? `${lowConfidenceArtifactCount}个作品为低置信度关联` : "",
+      blankOriginalSessionCount ? `${blankOriginalSessionCount}条消息原始会话ID为空（已重建）` : "",
+    ].filter(Boolean);
+    const overviewRow = {
+      学生ID: context.student.student_id || "",
+      姓名: context.student.name || "",
+      班级: classDisplayLabel(context.student),
+      SRL组别: context.student.srl_condition || "未分组",
+      用户UUID: userId,
+      小组名称: context.groupNames,
+      活动日期数: new Set(fullMessageRows.map((message) => message.活动日期).filter(Boolean)).size,
+      会话数: userSessions.length,
+      对话轮次数: fullPairRows.length,
+      消息总数: fullMessageRows.length,
+      学生消息数: fullMessageRows.filter((message) => message.角色 === "学生").length,
+      AI消息数: fullMessageRows.filter((message) => message.角色 === "AI").length,
+      原始会话ID为空消息数: blankOriginalSessionCount,
+      阶段作品数: studentArtifacts.filter((artifact) => artifact.来源表 !== "projects").length,
+      最终作品数: studentArtifacts.filter((artifact) => artifact.来源表 === "projects").length,
+      未关联对话作品数: unlinkedArtifactCount,
+      低置信度作品关联数: lowConfidenceArtifactCount,
+      数据检查结果: reviewItems.length ? `需核查：${reviewItems.join("；")}` : "正常",
+    };
+    const researchWorkbook = await buildStudentResearchWorkbook(
+      overviewRow,
+      fullPairRows,
+      fullMessageRows,
+      relationRows,
+    );
     addIndexedFile(relationPath, toCsv(relationRows), fileMeta(
       "关联索引",
-      "学生全部对话与作品总索引",
+      "学生对话与作品对应索引",
       "messages + conversations + game_snapshots + projects",
       userId,
       userId,
@@ -1479,7 +1632,18 @@ export async function buildResearchExport(
       "按用户汇总全部会话及作品关联",
       "高",
     ));
-    studentSummaryPaths.set(userId, [...summaryFiles, relationPath]);
+    addIndexedFile(researchWorkbookPath, researchWorkbook, fileMeta(
+      "研究数据总表",
+      "学生研究数据总表XLSX",
+      "messages + conversations + game_snapshots + projects",
+      userId,
+      userId,
+      firstAt,
+      "全部会话",
+      "按用户汇总全部对话、消息与作品对应关系",
+      "高",
+    ), "STORE");
+    studentSummaryPaths.set(userId, relationSummaryFiles);
   }
 
   const surveyRows = data.tasks.filter((task) => task.task_id === "survey").map((task) => {
@@ -1596,7 +1760,7 @@ export async function buildResearchExport(
     "目录说明：",
     "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系；数据完整性异常.csv列出无法可靠恢复的数据。",
     "2. 00_汇总数据：前测、互评、反思和分类评估。",
-    "3. 01_按班级：班级 → SRL组别 → 学生。每个有对话学生目录提供AI(t-1)→Student(t)→AI(t)人工检查XLSX、完整TXT、配对CSV、逐条消息CSV及对话与作品总索引；各日期文件夹保留会话级对话、消息、对应游戏和对应关系表。",
+    "3. 01_按班级：班级 → SRL组别 → 学生。每个有对话学生目录提供《学生的所有对话记录.xlsx》《学生研究数据总表.xlsx》、完整TXT、配对CSV、逐条消息CSV及《对话与作品对应索引.csv》；各日期文件夹保留会话级对话、消息、对应游戏和对应关系表。",
     "4. 99_异常_有作品无对话：只有在messages中确实找不到该学生任何可关联对话时才进入此目录，不会伪造对话。",
     "",
     "课时推导规则：",
@@ -1613,7 +1777,7 @@ export async function buildResearchExport(
     "shared_items.conversation_id精确关联 → 同一学生HTML SHA256一致 → 标准化HTML一致 → AI消息代码一致 → 同一学生同日时间最近 → 同一学生历史时间最近。每个作品只选择一个对话，关联方式和置信度写入作品索引。",
     "",
     "完整性说明：",
-    "对话正文和HTML作品均完整导出，不截断。人工检查XLSX的“AI预编码人工检查表”工作表采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构，正文列不混入消息ID和时间戳；超过Excel单元格上限的原文拆分到连续行并标明分段。消息审计工作表保留ID、完整时间戳、会话标识和SHA256。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM。",
+    "对话正文和HTML作品均完整导出，不截断。《学生的所有对话记录.xlsx》的“AI预编码人工检查表”工作表采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构，正文列不混入消息ID和时间戳；超过Excel单元格上限的原文拆分到连续行并标明分段。《学生研究数据总表.xlsx》汇总学生概览、人工检查对话、全部消息以及对话与作品索引。消息审计工作表保留ID、完整时间戳、会话标识和SHA256。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM；CSV不支持字体、颜色、列宽等样式，其对应内容已收入美化后的研究数据总表。",
     warnings.length ? `\n查询警告：\n- ${warnings.join("\n- ")}` : "\n查询警告：无",
   ].join("\r\n");
   zip.file("导出说明.txt", readme);
