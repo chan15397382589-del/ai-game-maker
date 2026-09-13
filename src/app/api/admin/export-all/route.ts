@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Readable } from "node:stream";
 import { getVerifiedAdmin } from "@/lib/admin-auth";
-import { buildResearchExport, researchExportFilename, type ResearchExportData } from "@/lib/admin-export";
+import { createResearchExportStream, researchExportFilename, type ResearchExportData } from "@/lib/admin-export";
 import { supabaseAdmin } from "@/lib/deepseek";
 import { runWithTransientRetry } from "@/lib/supabase-query-retry";
 
@@ -10,7 +9,8 @@ export const maxDuration = 300;
 
 const PAGE_SIZE = 1000;
 const STUDENT_ID_CHUNK_SIZE = 100;
-const TASK_ID_CHUNK_SIZE = 5;
+const TASK_IMAGE_STUDENT_CHUNK_SIZE = 10;
+const TASK_IMAGE_PAGE_SIZE = 20;
 
 interface FetchOptions {
   table: string;
@@ -86,17 +86,26 @@ async function fetchStudentTasks(studentIds: string[]): Promise<any[]> {
   );
   if (!tasks.length) return [];
 
-  const taskIds = tasks.map((task) => task.id);
-  const imageRows = await fetchByStudentIds(
-    "student_tasks",
-    "id,design_image",
-    "id",
-    taskIds,
-    { orderColumn: "id", pageSize: TASK_ID_CHUNK_SIZE + 1, chunkSize: TASK_ID_CHUNK_SIZE },
-  );
+  // 只查询design_image非空的任务，并按学生分块。旧实现把全部任务ID按5个一组读取，
+  // 即使图片为空也会产生请求；真实数据374个任务因此需要约75次大字段请求。
+  const imageRows: any[] = [];
+  for (const studentChunk of chunks(studentIds, TASK_IMAGE_STUDENT_CHUNK_SIZE)) {
+    imageRows.push(...await fetchPaged({
+      table: "student_tasks",
+      select: "id,design_image",
+      configure: (query) => query
+        .in("user_id", studentChunk)
+        .not("design_image", "is", null),
+      orderColumn: "id",
+      pageSize: TASK_IMAGE_PAGE_SIZE,
+      context: `student_tasks，design_image非空学生批次[${studentChunk.join(",")}]`,
+    }));
+  }
   const imageByTaskId = new Map(imageRows.map((row) => [String(row.id), row.design_image]));
-  if (imageByTaskId.size !== tasks.length) {
-    throw new Error(`student_tasks: 轻量记录${tasks.length}条，但design_image记录仅${imageByTaskId.size}条`);
+  const taskIdSet = new Set(tasks.map((task) => String(task.id)));
+  const unexpectedImageIds = [...imageByTaskId.keys()].filter((id) => !taskIdSet.has(id));
+  if (unexpectedImageIds.length) {
+    throw new Error(`student_tasks: design_image返回了不属于所选学生的任务：${unexpectedImageIds.join(",")}`);
   }
 
   return tasks.map((task) => ({ ...task, design_image: imageByTaskId.get(String(task.id)) ?? null }));
@@ -166,18 +175,15 @@ export async function GET(req: NextRequest) {
       classifications,
     };
 
-    const exportResult = await buildResearchExport(data, warnings);
-    // 以流式响应生成ZIP，避免同时在服务器内存中保留完整ZIP缓冲区，
-    // 并持续向客户端发送数据，适配大型研究数据包。
-    const zipStream = exportResult.zip.generateNodeStream({
-      type: "nodebuffer",
-      streamFiles: true,
-      compression: "DEFLATE",
-      compressionOptions: { level: 3 },
+    // 工作簿和大图生成后立即写入响应，不再由JSZip同时保留全部文件。
+    // completion不能await；必须先返回响应，让浏览器持续消费归档输出并形成背压。
+    const exportResult = createResearchExportStream(data, warnings);
+    exportResult.completion.catch((error) => {
+      console.error("[export-all] streaming error:", error);
     });
     const filename = researchExportFilename();
 
-    return new NextResponse(Readable.toWeb(zipStream as unknown as Readable) as any, {
+    return new NextResponse(exportResult.stream as any, {
       headers: {
         "Content-Type": "application/zip",
         "Content-Disposition": `attachment; filename="research_export.zip"; filename*=UTF-8''${encodeURIComponent(filename)}`,

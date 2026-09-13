@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { PassThrough, Readable } from "node:stream";
+import { type Archiver, ZipArchive } from "archiver";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 
@@ -32,6 +34,21 @@ export interface ResearchExportResult {
   zip: JSZip;
   counts: Record<string, number>;
   warnings: string[];
+}
+
+type ResearchExportMetadata = Omit<ResearchExportResult, "zip">;
+
+export interface ResearchExportStreamResult {
+  stream: ReadableStream<Uint8Array>;
+  completion: Promise<ResearchExportMetadata>;
+}
+
+interface ResearchArchive {
+  file(
+    path: string,
+    content: string | Uint8Array,
+    options?: { compression?: "STORE" | "DEFLATE" },
+  ): unknown;
 }
 
 interface FileIndexRow {
@@ -596,12 +613,12 @@ function decodeDataUrl(value: unknown): { bytes: Buffer; extension: string } | n
   }
 }
 
-export async function buildResearchExport(
+async function populateResearchExport(
   data: ResearchExportData,
-  queryWarnings: string[] = [],
-  generatedAt = new Date(),
-): Promise<ResearchExportResult> {
-  const zip = new JSZip();
+  queryWarnings: string[],
+  generatedAt: Date,
+  zip: ResearchArchive,
+): Promise<ResearchExportMetadata> {
   const warnings = [...queryWarnings];
   const fileIndex: FileIndexRow[] = [];
   const artifactIndex: Row[] = [];
@@ -1864,7 +1881,6 @@ export async function buildResearchExport(
   }, null, 2));
 
   return {
-    zip,
     counts: {
       students: data.students.length,
       messages: data.messages.length,
@@ -1876,6 +1892,67 @@ export async function buildResearchExport(
       sessions: sessionRows.length,
     },
     warnings,
+  };
+}
+
+export async function buildResearchExport(
+  data: ResearchExportData,
+  queryWarnings: string[] = [],
+  generatedAt = new Date(),
+): Promise<ResearchExportResult> {
+  const zip = new JSZip();
+  const metadata = await populateResearchExport(data, queryWarnings, generatedAt, zip);
+  return { zip, ...metadata };
+}
+
+function archiverTarget(archive: Archiver): ResearchArchive {
+  return {
+    file(path, content, options) {
+      const source = typeof content === "string"
+        ? Buffer.from(content, "utf8")
+        : Buffer.from(content.buffer as ArrayBuffer, content.byteOffset, content.byteLength);
+      archive.append(source, {
+        name: path,
+        store: options?.compression === "STORE",
+      });
+    },
+  };
+}
+
+export function createResearchExportStream(
+  data: ResearchExportData,
+  queryWarnings: string[] = [],
+  generatedAt = new Date(),
+): ResearchExportStreamResult {
+  const output = new PassThrough({ highWaterMark: 1024 * 1024 });
+  const archive = new ZipArchive({ zlib: { level: 3 } });
+  archive.pipe(output);
+
+  const completion = (async () => {
+    try {
+      const metadata = await populateResearchExport(
+        data,
+        queryWarnings,
+        generatedAt,
+        archiverTarget(archive),
+      );
+      await archive.finalize();
+      return metadata;
+    } catch (error) {
+      archive.abort();
+      output.destroy(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  })();
+
+  archive.on("warning", (error) => {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") output.destroy(error);
+  });
+  archive.on("error", (error) => output.destroy(error));
+
+  return {
+    stream: Readable.toWeb(output) as ReadableStream<Uint8Array>,
+    completion,
   };
 }
 
