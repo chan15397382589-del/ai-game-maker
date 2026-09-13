@@ -99,24 +99,26 @@ assert.equal(
 );
 const reviewWorkbook = new ExcelJS.Workbook();
 await reviewWorkbook.xlsx.load(reviewWorkbookBuffer);
-assert.deepEqual(reviewWorkbook.worksheets.map((sheet) => sheet.name), ["对话轮次", "消息审计"]);
+assert.deepEqual(reviewWorkbook.worksheets.map((sheet) => sheet.name), ["AI预编码人工检查表", "消息审计"]);
 
-const dialogueSheet = reviewWorkbook.getWorksheet("对话轮次");
+const dialogueSheet = reviewWorkbook.getWorksheet("AI预编码人工检查表");
 assert.deepEqual(dialogueSheet.getRow(1).values.slice(1), [
-  "学生ID", "姓名", "班级", "SRL组别", "上课日期", "历时轮次序号", "内容分段",
-  "上一轮AI回复 AI(t-1)", "当前学生发言 Student(t)", "当前AI回复 AI(t)",
+  "学生ID", "姓名", "班级", "SRL组别", "上课日期", "历时轮次序号",
+  "上一轮AI回复 AI(t-1)", "当前学生发言 Student(t)", "当前AI回复 AI(t)", "内容分段",
 ]);
 assert.equal(dialogueSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
 assert.equal(dialogueSheet.views[0].state, "frozen");
 assert.equal(dialogueSheet.getCell("C2").value, "三年级4班");
-assert.equal(dialogueSheet.getCell("H2").value, "（首轮，无上一轮AI回复）");
-assert(String(dialogueSheet.getCell("H3").value).includes("第一天回复"));
+assert.equal(dialogueSheet.getCell("G2").value, "（首轮，无上一轮AI回复）");
+assert.equal(dialogueSheet.getCell("H2").value, "我要做游戏😊", "主表正文不得混入消息ID或时间戳");
+assert(String(dialogueSheet.getCell("G3").value).includes("第一天回复"));
 const longDialogueRows = [];
 dialogueSheet.eachRow((row, rowNumber) => {
   if (rowNumber > 1 && row.getCell(6).value === 3) longDialogueRows.push(row);
 });
 assert(longDialogueRows.length > 1, "超过Excel单元格上限的轮次必须拆分到连续行");
-assert(longDialogueRows.map((row) => String(row.getCell(9).value || "")).join("").includes(longStudentText));
+assert.equal(longDialogueRows.map((row) => String(row.getCell(8).value || "")).join(""), longStudentText);
+assert.equal(longDialogueRows[0].getCell(10).value, `1/${longDialogueRows.length}`);
 
 const auditSheet = reviewWorkbook.getWorksheet("消息审计");
 const longAuditRows = [];

@@ -236,9 +236,14 @@ function buildDialoguePairs(messages: Row[], sessionId: string): Row[] {
 
   const flush = () => {
     if (!studentMessages.length && !aiMessages.length) return;
-    const formatContent = (rows: Row[], label: string) => rows.map((message, index) => (
-      `[${label}${index + 1}｜${timestampParts(message.created_at).display}｜ID:${message.id}]\n${message.content || ""}`
-    )).join("\n\n");
+    // 配对表的正文列只保留可读内容；消息ID与时间戳已有独立字段，
+    // 逐条原始记录继续由“消息审计”工作表保存。
+    const formatContent = (rows: Row[], label: string) => {
+      if (rows.length === 1) return String(rows[0].content || "");
+      return rows.map((message, index) => (
+        `【${label}${index + 1}/${rows.length}】\n${message.content || ""}`
+      )).join("\n\n");
+    };
     pairs.push({
       对话轮次: pairs.length + 1,
       会话ID: sessionId,
@@ -314,7 +319,7 @@ function styleDialogueWorksheet(worksheet: ExcelJS.Worksheet, widths: number[], 
   const header = worksheet.getRow(1);
   header.height = 34;
   header.eachCell((cell) => {
-    cell.font = { name: "Arial", size: 10, bold: true, color: { argb: "FF1F2937" } };
+    cell.font = { name: "宋体", size: 10, bold: true, color: { argb: "FF1F2937" } };
     cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9EAF7" } };
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
     cell.border = {
@@ -329,7 +334,7 @@ function styleDialogueWorksheet(worksheet: ExcelJS.Worksheet, widths: number[], 
     if (rowNumber === 1) return;
     let estimatedLines = 1;
     row.eachCell({ includeEmpty: true }, (cell, columnNumber) => {
-      cell.font = { name: "Arial", size: 10, color: { argb: "FF222222" } };
+      cell.font = { name: "宋体", size: 10, color: { argb: "FF222222" } };
       cell.alignment = {
         vertical: "top",
         horizontal: contentColumns.includes(columnNumber) ? "left" : "center",
@@ -356,7 +361,7 @@ async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[])
   workbook.created = new Date();
   workbook.modified = new Date();
 
-  const dialogueSheet = workbook.addWorksheet("对话轮次", { properties: { defaultRowHeight: 22 } });
+  const dialogueSheet = workbook.addWorksheet("AI预编码人工检查表", { properties: { defaultRowHeight: 22 } });
   dialogueSheet.addRow([
     "学生ID",
     "姓名",
@@ -364,10 +369,10 @@ async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[])
     "SRL组别",
     "上课日期",
     "历时轮次序号",
-    "内容分段",
     "上一轮AI回复 AI(t-1)",
     "当前学生发言 Student(t)",
     "当前AI回复 AI(t)",
+    "内容分段",
   ]);
 
   let previousAiReply = "";
@@ -385,23 +390,23 @@ async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[])
         pair.SRL组别,
         excelDate(pair.活动日期, false),
         pair.学生汇总轮次,
-        `${index + 1}/${segmentCount}`,
         contentChunks[0][index] || "",
         contentChunks[1][index] || "",
         contentChunks[2][index] || "",
+        `${index + 1}/${segmentCount}`,
       ]);
     }
     if (pair.AI回复原文) previousAiReply = pair.AI回复原文;
   }
-  styleDialogueWorksheet(dialogueSheet, [16, 12, 14, 16, 13, 13, 11, 60, 48, 60], [8, 9, 10]);
+  styleDialogueWorksheet(dialogueSheet, [16, 12, 14, 16, 13, 13, 60, 48, 60, 11], [7, 8, 9]);
   dialogueSheet.getColumn(5).numFmt = "yyyy-mm-dd";
-  dialogueSheet.getColumn(8).eachCell((cell, rowNumber) => {
+  dialogueSheet.getColumn(7).eachCell((cell, rowNumber) => {
     if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
   });
-  dialogueSheet.getColumn(9).eachCell((cell, rowNumber) => {
+  dialogueSheet.getColumn(8).eachCell((cell, rowNumber) => {
     if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF4CC" } };
   });
-  dialogueSheet.getColumn(10).eachCell((cell, rowNumber) => {
+  dialogueSheet.getColumn(9).eachCell((cell, rowNumber) => {
     if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8F4EA" } };
   });
 
@@ -1608,7 +1613,7 @@ export async function buildResearchExport(
     "shared_items.conversation_id精确关联 → 同一学生HTML SHA256一致 → 标准化HTML一致 → AI消息代码一致 → 同一学生同日时间最近 → 同一学生历史时间最近。每个作品只选择一个对话，关联方式和置信度写入作品索引。",
     "",
     "完整性说明：",
-    "对话正文和HTML作品均完整导出，不截断。人工检查XLSX采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构；超过Excel单元格上限的原文拆分到连续行并标明分段。消息审计工作表保留ID、完整时间戳、会话标识和SHA256。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM。",
+    "对话正文和HTML作品均完整导出，不截断。人工检查XLSX的“AI预编码人工检查表”工作表采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构，正文列不混入消息ID和时间戳；超过Excel单元格上限的原文拆分到连续行并标明分段。消息审计工作表保留ID、完整时间戳、会话标识和SHA256。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM。",
     warnings.length ? `\n查询警告：\n- ${warnings.join("\n- ")}` : "\n查询警告：无",
   ].join("\r\n");
   zip.file("导出说明.txt", readme);
