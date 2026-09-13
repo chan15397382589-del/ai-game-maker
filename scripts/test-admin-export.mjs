@@ -81,10 +81,42 @@ const fullMessagesPath = `${studentRoot}00_该学生全部消息.csv`;
 const fullRelationsPath = `${studentRoot}00_对话与作品对应索引.csv`;
 const reviewWorkbookPath = `${studentRoot}00_学生的所有对话记录.xlsx`;
 const researchWorkbookPath = `${studentRoot}00_学生研究数据总表.xlsx`;
+const sessionPairCsvPath = `${studentRoot}2026-05-21/AI对话_session_c1_对话配对.csv`;
+const sessionPairWorkbookPath = `${studentRoot}2026-05-21/AI对话_session_c1_对话配对.xlsx`;
 
 for (const path of [fullTxtPath, fullPairPath, fullMessagesPath, fullRelationsPath, reviewWorkbookPath, researchWorkbookPath]) {
   assert(files.includes(path), `缺少学生级完整汇总文件：${path}`);
 }
+
+const expectedDialogueHeaders = [
+  "学生ID", "姓名", "班级", "SRL组别", "上课日期", "历时轮次序号",
+  "上一轮AI回复 AI(t-1)", "当前学生发言 Student(t)", "当前AI回复 AI(t)", "内容分段",
+];
+assert(files.includes(sessionPairCsvPath), `缺少会话级对话配对CSV：${sessionPairCsvPath}`);
+const sessionPairCsv = await zip.file(sessionPairCsvPath).async("string");
+assert.deepEqual(
+  sessionPairCsv.replace(/^\uFEFF/, "").split("\r\n", 1)[0].split(",").map((value) => value.replace(/^"|"$/g, "")),
+  expectedDialogueHeaders,
+  "会话级对话配对CSV必须采用案例的AI(t-1)→Student(t)→AI(t)结构",
+);
+assert(files.includes(sessionPairWorkbookPath), `缺少会话级美化对话配对XLSX：${sessionPairWorkbookPath}`);
+const fullPairCsv = await zip.file(fullPairPath).async("string");
+assert.deepEqual(
+  fullPairCsv.replace(/^\uFEFF/, "").split("\r\n", 1)[0].split(",").map((value) => value.replace(/^"|"$/g, "")),
+  expectedDialogueHeaders,
+  "学生级完整对话配对CSV也必须使用统一研究模板",
+);
+const sessionPairWorkbookBuffer = await zip.file(sessionPairWorkbookPath).async("nodebuffer");
+const sessionPairWorkbook = new ExcelJS.Workbook();
+await sessionPairWorkbook.xlsx.load(sessionPairWorkbookBuffer);
+assert.deepEqual(sessionPairWorkbook.worksheets.map((sheet) => sheet.name), ["AI预编码人工检查表"]);
+const sessionPairSheet = sessionPairWorkbook.getWorksheet("AI预编码人工检查表");
+assert.deepEqual(sessionPairSheet.getRow(1).values.slice(1), expectedDialogueHeaders);
+assert.equal(sessionPairSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
+assert.equal(sessionPairSheet.views[0].state, "frozen");
+assert.equal(sessionPairSheet.getCell("G2").value, "（首轮，无上一轮AI回复）");
+assert.equal(sessionPairSheet.getCell("H2").value, "我要做游戏😊");
+assert(String(sessionPairSheet.getCell("I2").value).includes("第一天回复"));
 
 const fullTxt = await zip.file(fullTxtPath).async("string");
 for (const id of [1, 2, 3, 4, 5]) {

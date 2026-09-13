@@ -10,6 +10,18 @@ const RESEARCH_EXPORT_SCHEMA_VERSION = "2.0";
 // Excel单元格最多容纳32,767个字符。ExcelJS在写入包含大量Emoji的超长单元格时，
 // 可能在内部XML缓冲区边界损坏代理项；使用8,000个UTF-16字符的保守分段。
 const EXCEL_CELL_CHUNK_SIZE = 8_000;
+const DIALOGUE_REVIEW_HEADERS = [
+  "学生ID",
+  "姓名",
+  "班级",
+  "SRL组别",
+  "上课日期",
+  "历时轮次序号",
+  "上一轮AI回复 AI(t-1)",
+  "当前学生发言 Student(t)",
+  "当前AI回复 AI(t)",
+  "内容分段",
+] as const;
 
 type Row = Record<string, any>;
 
@@ -321,6 +333,42 @@ function excelDate(value: unknown, includeTime: boolean): Date | string {
   ));
 }
 
+function buildDialogueReviewRows(pairRows: Row[]): Row[] {
+  const reviewRows: Row[] = [];
+  let previousAiReply = "";
+  let previousStudentKey = "";
+
+  for (const pair of pairRows) {
+    const studentKey = String(pair.用户UUID || pair.学生ID || "");
+    if (previousStudentKey && studentKey !== previousStudentKey) previousAiReply = "";
+    previousStudentKey = studentKey;
+
+    const previous = previousAiReply || "（首轮，无上一轮AI回复）";
+    const student = pair.学生发言原文 || "（无学生发言，AI主动消息）";
+    const current = pair.AI回复原文 || "（无AI回复）";
+    const contentChunks = [previous, student, current].map(splitExcelCellText);
+    const segmentCount = Math.max(...contentChunks.map((chunks) => chunks.length));
+
+    for (let index = 0; index < segmentCount; index += 1) {
+      reviewRows.push({
+        学生ID: pair.学生ID,
+        姓名: pair.姓名,
+        班级: pair.班级显示 || pair.班级,
+        SRL组别: pair.SRL组别,
+        上课日期: pair.活动日期,
+        历时轮次序号: pair.学生汇总轮次 ?? pair.对话轮次,
+        "上一轮AI回复 AI(t-1)": contentChunks[0][index] || "",
+        "当前学生发言 Student(t)": contentChunks[1][index] || "",
+        "当前AI回复 AI(t)": contentChunks[2][index] || "",
+        内容分段: `${index + 1}/${segmentCount}`,
+      });
+    }
+    if (pair.AI回复原文) previousAiReply = pair.AI回复原文;
+  }
+
+  return reviewRows;
+}
+
 function styleDialogueWorksheet(
   worksheet: ExcelJS.Worksheet,
   widths: number[],
@@ -380,45 +428,11 @@ function styleDialogueWorksheet(
 
 function addDialogueReviewWorksheet(workbook: ExcelJS.Workbook, pairRows: Row[]) {
   const dialogueSheet = workbook.addWorksheet("AI预编码人工检查表", { properties: { defaultRowHeight: 22 } });
-  dialogueSheet.addRow([
-    "学生ID",
-    "姓名",
-    "班级",
-    "SRL组别",
-    "上课日期",
-    "历时轮次序号",
-    "上一轮AI回复 AI(t-1)",
-    "当前学生发言 Student(t)",
-    "当前AI回复 AI(t)",
-    "内容分段",
-  ]);
-
-  let previousAiReply = "";
-  let previousStudentKey = "";
-  for (const pair of pairRows) {
-    const studentKey = String(pair.用户UUID || pair.学生ID || "");
-    if (previousStudentKey && studentKey !== previousStudentKey) previousAiReply = "";
-    previousStudentKey = studentKey;
-    const previous = previousAiReply || "（首轮，无上一轮AI回复）";
-    const student = pair.学生发言原文 || "（无学生发言，AI主动消息）";
-    const current = pair.AI回复原文 || "（无AI回复）";
-    const contentChunks = [previous, student, current].map(splitExcelCellText);
-    const segmentCount = Math.max(...contentChunks.map((chunks) => chunks.length));
-    for (let index = 0; index < segmentCount; index += 1) {
-      dialogueSheet.addRow([
-        pair.学生ID,
-        pair.姓名,
-        pair.班级显示 || pair.班级,
-        pair.SRL组别,
-        excelDate(pair.活动日期, false),
-        pair.学生汇总轮次,
-        contentChunks[0][index] || "",
-        contentChunks[1][index] || "",
-        contentChunks[2][index] || "",
-        `${index + 1}/${segmentCount}`,
-      ]);
-    }
-    if (pair.AI回复原文) previousAiReply = pair.AI回复原文;
+  dialogueSheet.addRow([...DIALOGUE_REVIEW_HEADERS]);
+  for (const row of buildDialogueReviewRows(pairRows)) {
+    dialogueSheet.addRow(DIALOGUE_REVIEW_HEADERS.map((header) => (
+      header === "上课日期" ? excelDate(row[header], false) : row[header]
+    )));
   }
   styleDialogueWorksheet(dialogueSheet, [16, 12, 14, 16, 13, 13, 60, 48, 60, 11], [7, 8, 9]);
   dialogueSheet.getColumn(5).numFmt = "yyyy-mm-dd";
@@ -513,6 +527,12 @@ async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[])
   const workbook = initializeStudentWorkbook();
   addDialogueReviewWorksheet(workbook, pairRows);
   addMessageAuditWorksheet(workbook, messageRows, "消息审计");
+  return writeStudentWorkbook(workbook);
+}
+
+async function buildSessionDialogueWorkbook(pairRows: Row[]): Promise<Uint8Array> {
+  const workbook = initializeStudentWorkbook();
+  addDialogueReviewWorksheet(workbook, pairRows);
   return writeStudentWorkbook(workbook);
 }
 
@@ -898,6 +918,7 @@ async function populateResearchExport(
     const fileBase = `AI对话_${sessionFolder}`;
     const txtPath = `${context.base}/${fileBase}.txt`;
     const pairCsvPath = `${context.base}/${fileBase}_对话配对.csv`;
+    const pairWorkbookPath = `${context.base}/${fileBase}_对话配对.xlsx`;
     const rawCsvPath = `${context.base}/${fileBase}_逐条消息.csv`;
     const header = [
       `学生ID：${context.student.student_id || ""}`,
@@ -959,12 +980,15 @@ async function populateResearchExport(
       课时: context.lesson,
       ...pair,
     }));
+    const dialogueReviewRows = buildDialogueReviewRows(pairRows);
+    const pairWorkbook = await buildSessionDialogueWorkbook(pairRows);
     const messageMeta = fileMeta("AI对话平台", "结构化对话CSV", "messages", `${sessionId}:${context.time.date}`, first.user_id, first.created_at, sessionId, first.__session_relation, first.__session_confidence, first.session_id || "");
-    addIndexedFile(pairCsvPath, toCsv(pairRows), { ...messageMeta, 数据类型: "学生-AI对话配对CSV" });
+    addIndexedFile(pairCsvPath, toCsv(dialogueReviewRows), { ...messageMeta, 数据类型: "学生-AI对话配对CSV" });
+    addIndexedFile(pairWorkbookPath, pairWorkbook, { ...messageMeta, 数据类型: "学生-AI对话人工检查XLSX" }, "STORE");
     addIndexedFile(rawCsvPath, toCsv(dailyRows), { ...messageMeta, 数据类型: "逐条消息审计CSV" });
     messageIndex.push(...dailyRows);
     const paths = sessionFilePaths.get(`${first.user_id}:${sessionId}`) || [];
-    paths.push(txtPath, pairCsvPath, rawCsvPath);
+    paths.push(txtPath, pairCsvPath, pairWorkbookPath, rawCsvPath);
     sessionFilePaths.set(`${first.user_id}:${sessionId}`, paths);
   }
 
@@ -1074,7 +1098,7 @@ async function populateResearchExport(
     );
     const reviewWorkbook = await buildStudentDialogueWorkbook(fullPairRows, fullMessageRows);
     addIndexedFile(fullTxtPath, fullTxt, { ...summaryMeta, 数据类型: "学生全部对话TXT" });
-    addIndexedFile(fullPairPath, toCsv(fullPairRows), { ...summaryMeta, 数据类型: "学生全部对话配对CSV" });
+    addIndexedFile(fullPairPath, toCsv(buildDialogueReviewRows(fullPairRows)), { ...summaryMeta, 数据类型: "学生全部对话配对CSV" });
     addIndexedFile(fullMessagesPath, toCsv(fullMessageRows), { ...summaryMeta, 数据类型: "学生全部消息审计CSV" });
     // XLSX自身是ZIP格式，使用STORE避免外层数据包重复压缩。
     addIndexedFile(reviewWorkbookPath, reviewWorkbook, { ...summaryMeta, 数据类型: "学生AI对话人工检查XLSX" }, "STORE");
