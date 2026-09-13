@@ -179,7 +179,8 @@ export default function AdminDashboard() {
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = downloadFilename(response, `AI游戏课堂_研究数据包_${new Date().toISOString().slice(0, 10)}.zip`);
+      const fallbackTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      anchor.download = downloadFilename(response, `AI游戏课堂_研究数据包_v2.0_${fallbackTimestamp}.zip`);
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -206,7 +207,7 @@ export default function AdminDashboard() {
               title="按日期、班级、课时和平台导出完整研究数据包"
               className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-2 rounded-lg text-sm transition"
             >
-              {exportingAll ? "正在整理数据..." : "📦 导出研究数据包"}
+              {exportingAll ? "正在生成新版数据包（约需3–5分钟）..." : "📦 导出研究数据包 v2.0"}
             </button>
             <button onClick={handleLogout} className="bg-indigo-500 hover:bg-indigo-400 px-4 py-2 rounded-lg text-sm transition">
               退出登录

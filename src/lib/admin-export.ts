@@ -4,6 +4,7 @@ import JSZip from "jszip";
 
 const TIME_ZONE = "Asia/Shanghai";
 const LEGACY_SESSION_GAP_MS = 30 * 60 * 1000;
+const RESEARCH_EXPORT_SCHEMA_VERSION = "2.0";
 // Excel单元格最多容纳32,767个字符。ExcelJS在写入包含大量Emoji的超长单元格时，
 // 可能在内部XML缓冲区边界损坏代理项；使用8,000个UTF-16字符的保守分段。
 const EXCEL_CELL_CHUNK_SIZE = 8_000;
@@ -376,7 +377,11 @@ function addDialogueReviewWorksheet(workbook: ExcelJS.Workbook, pairRows: Row[])
   ]);
 
   let previousAiReply = "";
+  let previousStudentKey = "";
   for (const pair of pairRows) {
+    const studentKey = String(pair.用户UUID || pair.学生ID || "");
+    if (previousStudentKey && studentKey !== previousStudentKey) previousAiReply = "";
+    previousStudentKey = studentKey;
     const previous = previousAiReply || "（首轮，无上一轮AI回复）";
     const student = pair.学生发言原文 || "（无学生发言，AI主动消息）";
     const current = pair.AI回复原文 || "（无AI回复）";
@@ -494,8 +499,8 @@ async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[])
   return writeStudentWorkbook(workbook);
 }
 
-async function buildStudentResearchWorkbook(
-  overviewRow: Row,
+async function buildResearchWorkbook(
+  overviewRows: Row[],
   pairRows: Row[],
   messageRows: Row[],
   relationRows: Row[],
@@ -510,7 +515,7 @@ async function buildStudentResearchWorkbook(
     workbook,
     "学生研究概览",
     overviewHeaders,
-    [overviewRow],
+    overviewRows,
     [16, 12, 14, 16, 38, 18, 13, 11, 13, 11, 12, 11, 22, 13, 13, 18, 20, 34],
     [18],
     4,
@@ -1027,6 +1032,7 @@ export async function buildResearchExport(
       const sessionContext = exportContext(userId, session.firstAt);
       return buildDialoguePairs(session.messages, session.sessionId).map((pair) => ({
         学生汇总轮次: ++studentPairSequence,
+        用户UUID: userId,
         学生ID: context.student.student_id || "",
         姓名: context.student.name || "",
         年级: context.student.grade ?? "",
@@ -1535,6 +1541,8 @@ export async function buildResearchExport(
   }
 
   // 学生级总索引将全部会话文件与全部作品集中列出，便于逐人核对一一对应关系。
+  const studentOverviewRows: Row[] = [];
+  const allStudentRelationRows: Row[] = [];
   for (const [userId, userSessions] of sessionsByUser) {
     if (!userSessions.length) continue;
     const firstAt = [...userSessions].sort((a, b) => String(a.firstAt).localeCompare(String(b.firstAt)))[0].firstAt;
@@ -1615,8 +1623,10 @@ export async function buildResearchExport(
       低置信度作品关联数: lowConfidenceArtifactCount,
       数据检查结果: reviewItems.length ? `需核查：${reviewItems.join("；")}` : "正常",
     };
-    const researchWorkbook = await buildStudentResearchWorkbook(
-      overviewRow,
+    studentOverviewRows.push(overviewRow);
+    allStudentRelationRows.push(...relationRows);
+    const researchWorkbook = await buildResearchWorkbook(
+      [overviewRow],
       fullPairRows,
       fullMessageRows,
       relationRows,
@@ -1645,6 +1655,58 @@ export async function buildResearchExport(
     ), "STORE");
     studentSummaryPaths.set(userId, relationSummaryFiles);
   }
+
+  // 数据包根级同时提供汇总工作簿，避免研究者必须进入学生深层目录后才能看到新版表格。
+  const allStudentPairRows = [...studentPairRowsByUser.values()].flat();
+  const allStudentMessageRows = [...studentMessageRowsByUser.values()].flat();
+  const packageDialogueWorkbookPath = "00_汇总数据/学生的所有对话记录.xlsx";
+  const packageResearchWorkbookPath = "00_汇总数据/学生研究数据总表.xlsx";
+  const packageRelationsPath = "00_汇总数据/对话与作品对应索引.csv";
+  const packageMessagesPath = "00_汇总数据/全部学生消息.csv";
+  const packageDialogueWorkbook = await buildStudentDialogueWorkbook(allStudentPairRows, allStudentMessageRows);
+  const packageResearchWorkbook = await buildResearchWorkbook(
+    studentOverviewRows,
+    allStudentPairRows,
+    allStudentMessageRows,
+    allStudentRelationRows,
+  );
+  const packageSummaryMeta = fileMeta(
+    "研究数据汇总",
+    "全部学生研究数据",
+    "messages + conversations + game_snapshots + projects",
+    "全部学生",
+    "",
+    generatedAt,
+    "全部会话",
+    `研究数据导出格式v${RESEARCH_EXPORT_SCHEMA_VERSION}`,
+    "高",
+  );
+  addIndexedFile(packageDialogueWorkbookPath, packageDialogueWorkbook, {
+    ...packageSummaryMeta,
+    数据类型: "全部学生对话记录XLSX",
+  }, "STORE");
+  addIndexedFile(packageResearchWorkbookPath, packageResearchWorkbook, {
+    ...packageSummaryMeta,
+    数据类型: "全部学生研究数据总表XLSX",
+  }, "STORE");
+  addIndexedFile(packageRelationsPath, toCsv(allStudentRelationRows), {
+    ...packageSummaryMeta,
+    数据类型: "全部学生对话与作品索引CSV",
+  });
+  addIndexedFile(packageMessagesPath, toCsv(allStudentMessageRows), {
+    ...packageSummaryMeta,
+    数据类型: "全部学生消息CSV",
+  });
+  addIndexedFile("导出格式版本.txt", [
+    `导出格式版本：${RESEARCH_EXPORT_SCHEMA_VERSION}`,
+    `生成时间：${timestampParts(generatedAt.toISOString()).display}（${TIME_ZONE}）`,
+    "新版根级文件：00_汇总数据/学生研究数据总表.xlsx",
+    "新版根级文件：00_汇总数据/学生的所有对话记录.xlsx",
+    "CSV为机器可读数据；样式请查看对应XLSX工作簿。",
+  ].join("\r\n"), {
+    ...packageSummaryMeta,
+    数据类型: "导出格式版本标识",
+  });
 
   const surveyRows = data.tasks.filter((task) => task.task_id === "survey").map((task) => {
     const context = exportContext(task.user_id, task.updated_at || task.created_at);
@@ -1748,6 +1810,7 @@ export async function buildResearchExport(
   const readme = [
     "AI游戏课堂研究数据导出包",
     "",
+    `导出格式版本：${RESEARCH_EXPORT_SCHEMA_VERSION}`,
     `生成时间：${generated}（${TIME_ZONE}）`,
     `学生数：${data.students.length}`,
     `AI对话消息数：${data.messages.length}`,
@@ -1759,7 +1822,7 @@ export async function buildResearchExport(
     "",
     "目录说明：",
     "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系；数据完整性异常.csv列出无法可靠恢复的数据。",
-    "2. 00_汇总数据：前测、互评、反思和分类评估。",
+    "2. 00_汇总数据：新版全部学生研究数据总表、全部对话记录、全部消息、对话与作品索引，以及前测、互评、反思和分类评估。",
     "3. 01_按班级：班级 → SRL组别 → 学生。每个有对话学生目录提供《学生的所有对话记录.xlsx》《学生研究数据总表.xlsx》、完整TXT、配对CSV、逐条消息CSV及《对话与作品对应索引.csv》；各日期文件夹保留会话级对话、消息、对应游戏和对应关系表。",
     "4. 99_异常_有作品无对话：只有在messages中确实找不到该学生任何可关联对话时才进入此目录，不会伪造对话。",
     "",
@@ -1782,6 +1845,7 @@ export async function buildResearchExport(
   ].join("\r\n");
   zip.file("导出说明.txt", readme);
   zip.file("00_索引/数据完整性汇总.json", JSON.stringify({
+    export_schema_version: RESEARCH_EXPORT_SCHEMA_VERSION,
     generated_at: generatedAt.toISOString(),
     timezone: TIME_ZONE,
     counts: Object.fromEntries(countRows.map((row) => [row.数据表, row.记录数])),
@@ -1816,5 +1880,5 @@ export async function buildResearchExport(
 }
 
 export function researchExportFilename(date = new Date()): string {
-  return `AI游戏课堂_研究数据包_${timestampParts(date.toISOString()).date}.zip`;
+  return `AI游戏课堂_研究数据包_v${RESEARCH_EXPORT_SCHEMA_VERSION}_${timestampParts(date.toISOString()).file}.zip`;
 }

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
-import { buildResearchExport } from "../src/lib/admin-export.ts";
+import { buildResearchExport, researchExportFilename } from "../src/lib/admin-export.ts";
 
 const html = "<!doctype html><html><body><canvas></canvas></body></html>";
 const longStudentText = "超长学生发言😊".repeat(4500);
@@ -61,6 +61,19 @@ const generated = Buffer.concat(generatedChunks);
 const zip = await JSZip.loadAsync(generated);
 const files = Object.keys(zip.files).filter((path) => !zip.files[path].dir);
 const studentRoot = "01_按班级/3年级_4班/SRL_control/S001_测试学生_u1/";
+const packageWorkbookPath = "00_汇总数据/学生研究数据总表.xlsx";
+const packageDialogueWorkbookPath = "00_汇总数据/学生的所有对话记录.xlsx";
+const packageRelationsPath = "00_汇总数据/对话与作品对应索引.csv";
+const packageMessagesPath = "00_汇总数据/全部学生消息.csv";
+
+for (const path of [packageWorkbookPath, packageDialogueWorkbookPath, packageRelationsPath, packageMessagesPath, "导出格式版本.txt"]) {
+  assert(files.includes(path), `研究数据包根级汇总缺少新版表格：${path}`);
+}
+assert.equal(
+  researchExportFilename(new Date("2026-05-23T01:02:03Z")),
+  "AI游戏课堂_研究数据包_v2.0_2026-05-23_09-02-03.zip",
+  "文件名必须包含格式版本和精确时间，避免误开同日旧数据包",
+);
 
 const fullTxtPath = `${studentRoot}00_该学生全部AI对话.txt`;
 const fullPairPath = `${studentRoot}00_该学生全部AI对话_配对.csv`;
@@ -191,7 +204,27 @@ assert.deepEqual(relationSheet.getRow(1).values.slice(1), [
 ]);
 assert.equal(relationSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
 
+const packageResearchWorkbook = new ExcelJS.Workbook();
+await packageResearchWorkbook.xlsx.load(await zip.file(packageWorkbookPath).async("nodebuffer"));
+assert.deepEqual(packageResearchWorkbook.worksheets.map((sheet) => sheet.name), [
+  "学生研究概览",
+  "AI预编码人工检查表",
+  "全部消息",
+  "对话与作品索引",
+]);
+assert.equal(packageResearchWorkbook.getWorksheet("学生研究概览").getCell("A2").value, "S001");
+assert.equal(packageResearchWorkbook.getWorksheet("全部消息").getCell("F2").value, "我要做游戏😊");
+
+const packageDialogueWorkbook = new ExcelJS.Workbook();
+await packageDialogueWorkbook.xlsx.load(await zip.file(packageDialogueWorkbookPath).async("nodebuffer"));
+assert.deepEqual(packageDialogueWorkbook.worksheets.map((sheet) => sheet.name), ["AI预编码人工检查表", "消息审计"]);
+assert.equal(packageDialogueWorkbook.getWorksheet("AI预编码人工检查表").getCell("H2").value, "我要做游戏😊");
+assert((await zip.file(packageRelationsPath).async("string")).includes("学生研究数据总表XLSX"));
+assert((await zip.file(packageMessagesPath).async("string")).includes(longStudentText));
+assert((await zip.file("导出格式版本.txt").async("string")).includes("导出格式版本：2.0"));
+
 const integrity = JSON.parse(await zip.file("00_索引/数据完整性汇总.json").async("string"));
+assert.equal(integrity.export_schema_version, "2.0");
 assert.equal(integrity.students_with_messages, 1);
 assert.equal(integrity.students_with_complete_dialogue_files, 1);
 assert.equal(integrity.student_complete_dialogue_message_count_matches, true);
