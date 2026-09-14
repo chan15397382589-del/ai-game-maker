@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin, createChatCompletion, saveMessage, classifyAiSuggestion } from "@/lib/deepseek";
+import { createSingleFlightWrite, formatAssistantFailureRecord } from "@/lib/chat-message-integrity";
 import { chatQueue } from "@/lib/requestQueue";
 import { checkRateLimit } from "@/lib/rateLimit";
 
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
 
     // 速率限制（每用户每分钟 20 次请求）
     const rateLimitKey = `chat:${token.substring(0, 20)}`;
-    const { allowed, remaining } = checkRateLimit(rateLimitKey, 20, 60000);
+    const { allowed } = checkRateLimit(rateLimitKey, 20, 60000);
     if (!allowed) {
       return NextResponse.json({ error: "请求太频繁，请稍后再试" }, { status: 429 });
     }
@@ -64,11 +65,27 @@ export async function POST(req: NextRequest) {
       // 使用队列控制并发，避免 429 限流
       response = await chatQueue.add(() => createChatCompletion(sanitizedMessages, currentCode, srlCondition));
     } catch (apiError: any) {
-      console.error("MIMO API call failed:", apiError.message);
+      console.error("DeepSeek API call failed:", apiError.message);
+      // 学生消息已经落库时，必须为失败的AI请求保留一条可审计记录，
+      // 避免形成无法解释的“学生消息后什么都没有”。
+      try {
+        await saveMessage(
+          userId,
+          "assistant",
+          formatAssistantFailureRecord("AI服务连接失败"),
+          token,
+          sessionId,
+          undefined,
+          false,
+          "system_error",
+        );
+      } catch (saveError) {
+        console.error("Failed to persist AI connection failure record:", saveError);
+      }
       if (apiError.message?.includes("429")) {
         return NextResponse.json({ error: "AI服务繁忙，请稍后重试" }, { status: 429 });
       }
-      return NextResponse.json({ error: "AI服务连接失败：" + apiError.message }, { status: 502 });
+      return NextResponse.json({ error: "AI服务连接失败，请稍后重试" }, { status: 502 });
     }
 
     // 创建流式响应（带 90 秒超时）
@@ -78,15 +95,48 @@ export async function POST(req: NextRequest) {
         let assistantContent = "";
         let chunkCount = 0;
         let streamTimeout: NodeJS.Timeout | null = null;
+        let streamClosed = false;
+        let timedOut = false;
+        let timeoutSave: Promise<void> | null = null;
+
+        const enqueue = (payload: string) => {
+          if (!streamClosed) controller.enqueue(encoder.encode(payload));
+        };
+        const closeStream = () => {
+          if (!streamClosed) {
+            streamClosed = true;
+            controller.close();
+          }
+        };
+        const persistAssistantRecord = createSingleFlightWrite(async (content: string, suggestionType?: string) => {
+          const hasCode = /```html/i.test(content) || /```[\s\S]*?```/.test(content) || /<!doctype|<html/i.test(content);
+          await saveMessage(
+            userId,
+            "assistant",
+            content,
+            token,
+            sessionId,
+            undefined,
+            hasCode,
+            suggestionType || classifyAiSuggestion(content),
+          );
+        });
 
         // 重置超时计时器
         const resetTimeout = () => {
           if (streamTimeout) clearTimeout(streamTimeout);
           streamTimeout = setTimeout(() => {
+            timedOut = true;
             console.warn("[chat] SSE stream timeout (90s)");
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI回复超时，请重试" })}\n\n`));
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-            controller.close();
+            timeoutSave = persistAssistantRecord(
+              formatAssistantFailureRecord("流式响应中断", assistantContent),
+              "system_error",
+            ).catch((saveError) => {
+              console.error("Failed to persist AI timeout record:", saveError);
+            });
+            enqueue(`data: ${JSON.stringify({ error: "AI回复超时，请重试" })}\n\n`);
+            enqueue("data: [DONE]\n\n");
+            closeStream();
           }, 90000);
         };
 
@@ -100,35 +150,41 @@ export async function POST(req: NextRequest) {
             if (content) {
               assistantContent += content;
               chunkCount++;
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+              enqueue(`data: ${JSON.stringify({ content })}\n\n`);
             }
+          }
+
+          if (timedOut) {
+            if (timeoutSave) await timeoutSave;
+            return;
           }
 
           // 流结束后，保存完整的 AI 回复到数据库
           if (assistantContent) {
-            const hasCode = /```html/i.test(assistantContent) || /```[\s\S]*?```/.test(assistantContent);
-            const aiSuggestionType = classifyAiSuggestion(assistantContent);
-            await saveMessage(userId, "assistant", assistantContent, token, sessionId, undefined, hasCode, aiSuggestionType);
-          } else if (chunkCount > 0) {
-            // 有 thinking 内容但没有 text 内容，AI 可能在内部推理但没输出
-            // 发送一个默认回复而不是错误
-            const fallbackContent = "  让我想想...请再说一次你的想法？";
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content: fallbackContent })}\n\n`));
-            await saveMessage(userId, "assistant", fallbackContent, token, sessionId);
+            await persistAssistantRecord(assistantContent);
           } else {
             console.warn("AI returned empty content after", chunkCount, "chunks. Messages:", JSON.stringify(messages).substring(0, 200));
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI服务暂时无法回复，请稍后重试" })}\n\n`));
+            await persistAssistantRecord(formatAssistantFailureRecord("AI返回空内容"), "system_error");
+            enqueue(`data: ${JSON.stringify({ error: "AI服务暂时无法回复，请稍后重试" })}\n\n`);
           }
         } catch (streamError: any) {
-          // 流处理异常，发送错误事件后关闭
+          // 流处理异常时，保留已经生成的全部正文和HTML代码，再追加失败标记。
           console.error("Stream error:", streamError.message, streamError.stack);
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "AI回复中断：" + streamError.message })}\n\n`));
+          try {
+            await persistAssistantRecord(
+              formatAssistantFailureRecord("流式响应中断", assistantContent),
+              "system_error",
+            );
+          } catch (saveError) {
+            console.error("Failed to persist AI stream failure record:", saveError);
+          }
+          enqueue(`data: ${JSON.stringify({ error: "AI回复中断，请重试" })}\n\n`);
         } finally {
           if (streamTimeout) clearTimeout(streamTimeout);
         }
 
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        controller.close();
+        enqueue("data: [DONE]\n\n");
+        closeStream();
       },
     });
 

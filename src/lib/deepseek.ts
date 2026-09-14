@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { runMessageWriteWithRetry } from "@/lib/chat-message-integrity";
 import { createClient } from "@supabase/supabase-js";
 
 // DeepSeek API (OpenAI 兼容接口)
@@ -153,8 +154,7 @@ export async function saveMessage(
   aiSuggestionType?: string
 ) {
   if (!token) {
-    console.error("Save message error: 缺少 token");
-    return;
+    throw new Error("消息保存失败：缺少认证token");
   }
 
   const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId || "");
@@ -170,16 +170,11 @@ export async function saveMessage(
   if (hasCode !== undefined) row.has_code = hasCode;
   if (aiSuggestionType) row.ai_suggestion_type = aiSuggestionType;
 
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
+  await runMessageWriteWithRetry(
+    async () => {
       const { error } = await supabaseAdmin.from("messages").insert(row);
-      if (!error) return;
-      console.error(`Save message attempt ${attempt} failed:`, error.message);
-      if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
-    } catch (err: any) {
-      console.error(`Save message attempt ${attempt} error:`, err.message);
-      if (attempt < 3) await new Promise(r => setTimeout(r, 1000 * attempt));
-    }
-  }
-  console.error("Save message failed after 3 attempts for user:", userId);
+      if (error) throw new Error(error.message);
+    },
+    { context: `${role === "assistant" ? "AI" : "学生"}消息`, maxAttempts: 3, delayMs: 1_000 },
+  );
 }

@@ -6,6 +6,7 @@ import JSZip from "jszip";
 import { buildResearchExport, researchExportFilename } from "../src/lib/admin-export.ts";
 
 const html = "<!doctype html><html><body><canvas></canvas></body></html>";
+const aiReplyWithHtml = `第一天回复\n\`\`\`html\n${html}\n\`\`\`\n代码结束`;
 const longStudentText = "超长学生发言😊".repeat(4500);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const data = {
@@ -21,7 +22,7 @@ const data = {
   }],
   messages: [
     { id: 1, user_id: "u1", session_id: "c1", role: "user", content: "我要做游戏😊", created_at: "2026-05-21T07:00:00Z" },
-    { id: 2, user_id: "u1", session_id: "c1", role: "assistant", content: `第一天回复\n${"长文本".repeat(300)}`, created_at: "2026-05-21T07:01:00Z" },
+    { id: 2, user_id: "u1", session_id: "c1", role: "assistant", content: `${aiReplyWithHtml}\n${"长文本".repeat(300)}`, created_at: "2026-05-21T07:01:00Z" },
     { id: 3, user_id: "u1", session_id: "c2", role: "user", content: "第二天继续修改🎮", created_at: "2026-05-22T07:00:00Z" },
     { id: 4, user_id: "u1", session_id: "c2", role: "assistant", content: "第二天完整回复🍎", created_at: "2026-05-22T07:01:00Z" },
     { id: 5, user_id: "u1", session_id: "c2", role: "user", content: longStudentText, created_at: "2026-05-22T07:02:00Z" },
@@ -71,7 +72,7 @@ for (const path of [packageWorkbookPath, packageDialogueWorkbookPath, packageRel
 }
 assert.equal(
   researchExportFilename(new Date("2026-05-23T01:02:03Z")),
-  "AI游戏课堂_研究数据包_v2.0_2026-05-23_09-02-03.zip",
+  "AI游戏课堂_研究数据包_v2.1_2026-05-23_09-02-03.zip",
   "文件名必须包含格式版本和精确时间，避免误开同日旧数据包",
 );
 
@@ -83,6 +84,8 @@ const reviewWorkbookPath = `${studentRoot}00_学生的所有对话记录.xlsx`;
 const researchWorkbookPath = `${studentRoot}00_学生研究数据总表.xlsx`;
 const sessionPairCsvPath = `${studentRoot}2026-05-21/AI对话_session_c1_对话配对.csv`;
 const sessionPairWorkbookPath = `${studentRoot}2026-05-21/AI对话_session_c1_对话配对.xlsx`;
+const sessionHtmlPath = `${studentRoot}2026-05-21/AI回复_message_2_HTML代码_01.html`;
+const sessionRelationPath = `${studentRoot}2026-05-21/会话_c1_对话与游戏对应关系.csv`;
 
 for (const path of [fullTxtPath, fullPairPath, fullMessagesPath, fullRelationsPath, reviewWorkbookPath, researchWorkbookPath]) {
   assert(files.includes(path), `缺少学生级完整汇总文件：${path}`);
@@ -100,6 +103,15 @@ assert.deepEqual(
   "会话级对话配对CSV必须采用案例的AI(t-1)→Student(t)→AI(t)结构",
 );
 assert(files.includes(sessionPairWorkbookPath), `缺少会话级美化对话配对XLSX：${sessionPairWorkbookPath}`);
+assert(files.includes(sessionHtmlPath), `缺少从AI聊天原文提取的HTML代码文件：${sessionHtmlPath}`);
+assert.equal(await zip.file(sessionHtmlPath).async("string"), html, "独立HTML必须与AI回复代码块逐字一致");
+const sessionRelation = await zip.file(sessionRelationPath).async("string");
+assert(sessionRelation.includes(sessionHtmlPath), "会话与游戏对应关系必须索引AI回复HTML文件");
+assert(sessionRelation.includes("AI回复HTML代码"), "AI回复HTML文件必须使用准确的文件类别");
+const studentRelations = await zip.file(fullRelationsPath).async("string");
+assert(studentRelations.includes(sessionHtmlPath), "学生级对话与作品索引必须索引AI回复HTML文件");
+const fileRelations = await zip.file("00_索引/文件关联索引.csv").async("string");
+assert(fileRelations.includes(sessionHtmlPath), "全局文件关联索引必须索引AI回复HTML文件");
 const fullPairCsv = await zip.file(fullPairPath).async("string");
 assert.deepEqual(
   fullPairCsv.replace(/^\uFEFF/, "").split("\r\n", 1)[0].split(",").map((value) => value.replace(/^"|"$/g, "")),
@@ -109,7 +121,7 @@ assert.deepEqual(
 const sessionPairWorkbookBuffer = await zip.file(sessionPairWorkbookPath).async("nodebuffer");
 const sessionPairWorkbook = new ExcelJS.Workbook();
 await sessionPairWorkbook.xlsx.load(sessionPairWorkbookBuffer);
-assert.deepEqual(sessionPairWorkbook.worksheets.map((sheet) => sheet.name), ["AI预编码人工检查表"]);
+assert.deepEqual(sessionPairWorkbook.worksheets.map((sheet) => sheet.name), ["AI预编码人工检查表", "消息审计"]);
 const sessionPairSheet = sessionPairWorkbook.getWorksheet("AI预编码人工检查表");
 assert.deepEqual(sessionPairSheet.getRow(1).values.slice(1), expectedDialogueHeaders);
 assert.equal(sessionPairSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
@@ -117,12 +129,20 @@ assert.equal(sessionPairSheet.views[0].state, "frozen");
 assert.equal(sessionPairSheet.getCell("G2").value, "（首轮，无上一轮AI回复）");
 assert.equal(sessionPairSheet.getCell("H2").value, "我要做游戏😊");
 assert(String(sessionPairSheet.getCell("I2").value).includes("第一天回复"));
+assert(String(sessionPairSheet.getCell("I2").value).includes(html), "会话配对XLSX必须保留AI回复中的完整HTML代码");
+const sessionAuditSheet = sessionPairWorkbook.getWorksheet("消息审计");
+const sessionAiAuditText = [];
+sessionAuditSheet.eachRow((row, rowNumber) => {
+  if (rowNumber > 1 && String(row.getCell(2).value) === "2") sessionAiAuditText.push(String(row.getCell(6).value || ""));
+});
+assert(sessionAiAuditText.join("").includes(html), "会话消息审计表必须保留AI回复中的完整HTML代码");
 
 const fullTxt = await zip.file(fullTxtPath).async("string");
 for (const id of [1, 2, 3, 4, 5]) {
   assert.equal([...fullTxt.matchAll(new RegExp(`message_id=${id}\\]`, "g"))].length, 1, `消息${id}应在学生完整TXT中且仅出现一次`);
 }
 assert(fullTxt.includes("第一天回复"));
+assert(fullTxt.includes(html), "学生完整TXT必须保留AI回复中的HTML代码");
 assert(fullTxt.includes("第二天完整回复🍎"));
 assert(fullTxt.includes("我要做游戏😊"));
 assert(fullTxt.includes("第二天继续修改🎮"));
@@ -131,6 +151,7 @@ assert(fullTxt.includes(longStudentText), "完整TXT不得截断超过Excel单�
 
 const fullMessages = await zip.file(fullMessagesPath).async("string");
 assert(fullMessages.includes("第二天完整回复🍎"), "ZIP往返后必须保留非BMP字符");
+assert(fullMessages.includes(html), "学生完整消息CSV必须保留AI回复中的HTML代码");
 
 const reviewWorkbookBuffer = await zip.file(reviewWorkbookPath).async("nodebuffer");
 const reviewWorkbookZip = await JSZip.loadAsync(reviewWorkbookBuffer);
@@ -252,11 +273,15 @@ await packageDialogueWorkbook.xlsx.load(await zip.file(packageDialogueWorkbookPa
 assert.deepEqual(packageDialogueWorkbook.worksheets.map((sheet) => sheet.name), ["AI预编码人工检查表", "消息审计"]);
 assert.equal(packageDialogueWorkbook.getWorksheet("AI预编码人工检查表").getCell("H2").value, "我要做游戏😊");
 assert((await zip.file(packageRelationsPath).async("string")).includes("学生研究数据总表XLSX"));
-assert((await zip.file(packageMessagesPath).async("string")).includes(longStudentText));
-assert((await zip.file("导出格式版本.txt").async("string")).includes("导出格式版本：2.0"));
+const packageMessages = await zip.file(packageMessagesPath).async("string");
+assert(packageMessages.includes(longStudentText));
+assert((await zip.file("导出格式版本.txt").async("string")).includes("导出格式版本：2.1"));
 
 const integrity = JSON.parse(await zip.file("00_索引/数据完整性汇总.json").async("string"));
-assert.equal(integrity.export_schema_version, "2.0");
+assert.equal(integrity.export_schema_version, "2.1");
+assert.equal(integrity.exported_ai_html_code_file_count, 1);
+assert.equal(integrity.assistant_failure_record_count, 0);
+assert.equal(integrity.student_messages_without_immediate_ai_record_count, 1);
 assert.equal(integrity.students_with_messages, 1);
 assert.equal(integrity.students_with_complete_dialogue_files, 1);
 assert.equal(integrity.student_complete_dialogue_message_count_matches, true);

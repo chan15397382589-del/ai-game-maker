@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:admin-export": "node scripts/test-admin-export-query.mjs && node scripts/test-admin-export.mjs && node scripts/test-admin-export-stream.mjs"
+    "test:admin-export": "node scripts/test-chat-data-integrity.mjs && node scripts/test-admin-export-query.mjs && node scripts/test-admin-export.mjs && node scripts/test-admin-export-stream.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.1",

@@ -6,7 +6,7 @@ import JSZip from "jszip";
 
 const TIME_ZONE = "Asia/Shanghai";
 const LEGACY_SESSION_GAP_MS = 30 * 60 * 1000;
-const RESEARCH_EXPORT_SCHEMA_VERSION = "2.0";
+const RESEARCH_EXPORT_SCHEMA_VERSION = "2.1";
 // Excel单元格最多容纳32,767个字符。ExcelJS在写入包含大量Emoji的超长单元格时，
 // 可能在内部XML缓冲区边界损坏代理项；使用8,000个UTF-16字符的保守分段。
 const EXCEL_CELL_CHUNK_SIZE = 8_000;
@@ -172,15 +172,37 @@ function normalizedHtmlHash(content: unknown): string {
   return hashContent(normalized);
 }
 
-function extractHtmlFromMessage(content: unknown): string {
+function extractHtmlBlocksFromMessage(content: unknown): string[] {
   const text = String(content || "");
-  const htmlFence = text.match(/```html\s*([\s\S]*?)```/i);
-  if (htmlFence) return htmlFence[1].trim();
-  const genericFence = text.match(/```\s*([\s\S]*?)```/);
-  if (genericFence && /<!doctype|<html/i.test(genericFence[1])) return genericFence[1].trim();
+  const blocks: string[] = [];
+  for (const match of text.matchAll(/```(?:html|htm)\s*([\s\S]*?)(?:```|$)/gi)) {
+    const code = match[1].trim();
+    if (code) blocks.push(code);
+  }
+  if (!blocks.length) {
+    for (const match of text.matchAll(/```\s*([\s\S]*?)(?:```|$)/g)) {
+      const code = match[1].trim();
+      if (code && /<!doctype|<html/i.test(code)) blocks.push(code);
+    }
+  }
   const start = text.search(/<!doctype|<html/i);
   const end = text.toLowerCase().lastIndexOf("</html>");
-  return start >= 0 && end >= start ? text.slice(start, end + 7).trim() : "";
+  if (!blocks.length && start >= 0 && end >= start) blocks.push(text.slice(start, end + 7).trim());
+  return [...new Set(blocks)];
+}
+
+function extractHtmlFromMessage(content: unknown): string {
+  return extractHtmlBlocksFromMessage(content)[0] || "";
+}
+
+function sessionFileCategory(path: string, scope = "会话"): string {
+  if (path.endsWith(".txt")) return `${scope}完整对话TXT`;
+  if (path.includes("AI回复_message_") && path.endsWith(".html")) return "AI回复HTML代码";
+  if (path.includes("对话配对") && path.endsWith(".xlsx")) return `${scope}对话人工检查XLSX`;
+  if (path.includes("对话配对") && path.endsWith(".csv")) return `${scope}对话配对CSV`;
+  if (path.includes("消息明细") && path.endsWith(".csv")) return `${scope}逐条消息CSV`;
+  if (path.includes("对应关系") && path.endsWith(".csv")) return `${scope}与游戏对应关系CSV`;
+  return `${scope}关联文件`;
 }
 
 function buildMessageSessions(messages: Row[]): { sessions: ExportSession[]; messages: Row[] } {
@@ -452,14 +474,14 @@ function addMessageAuditWorksheet(workbook: ExcelJS.Workbook, messageRows: Row[]
   const auditSheet = workbook.addWorksheet(sheetName, { properties: { defaultRowHeight: 22 } });
   const auditHeaders = [
     "学生内消息序号", "消息ID", "角色", "时间戳", "内容分段", "内容原文", "内容SHA256",
-    "会话ID", "原始会话ID", "会话识别规则", "输入方式", "含代码", "AI建议类型", "活动日期", "课时",
+    "会话ID", "原始会话ID", "会话识别规则", "输入方式", "含代码", "HTML代码块数", "AI建议类型", "活动日期", "课时",
   ];
   auditSheet.addRow(auditHeaders);
   for (const message of messageRows) {
     const contentChunks = splitExcelCellText(message.内容原文);
     contentChunks.forEach((chunk, index) => {
       auditSheet.addRow([
-        message.学生内消息序号,
+        message.学生内消息序号 ?? message.消息序号,
         String(message.消息ID ?? ""),
         message.角色,
         excelDate(message.时间戳, true),
@@ -471,6 +493,7 @@ function addMessageAuditWorksheet(workbook: ExcelJS.Workbook, messageRows: Row[]
         message.会话识别规则,
         message.输入方式,
         message.含代码,
+        message.HTML代码块数,
         message.AI建议类型,
         excelDate(message.活动日期, false),
         message.课时,
@@ -479,8 +502,8 @@ function addMessageAuditWorksheet(workbook: ExcelJS.Workbook, messageRows: Row[]
   }
   styleDialogueWorksheet(
     auditSheet,
-    [13, 14, 10, 20, 11, 80, 66, 42, 42, 42, 12, 10, 16, 13, 12],
-    [6, 7, 8, 9, 10, 13],
+    [13, 14, 10, 20, 11, 80, 66, 42, 42, 42, 12, 10, 14, 16, 13, 12],
+    [6, 7, 8, 9, 10, 14],
     5,
   );
   auditSheet.getColumn(2).numFmt = "@";
@@ -530,9 +553,10 @@ async function buildStudentDialogueWorkbook(pairRows: Row[], messageRows: Row[])
   return writeStudentWorkbook(workbook);
 }
 
-async function buildSessionDialogueWorkbook(pairRows: Row[]): Promise<Uint8Array> {
+async function buildSessionDialogueWorkbook(pairRows: Row[], messageRows: Row[]): Promise<Uint8Array> {
   const workbook = initializeStudentWorkbook();
   addDialogueReviewWorksheet(workbook, pairRows);
+  addMessageAuditWorksheet(workbook, messageRows, "消息审计");
   return writeStudentWorkbook(workbook);
 }
 
@@ -643,6 +667,7 @@ async function populateResearchExport(
   const fileIndex: FileIndexRow[] = [];
   const artifactIndex: Row[] = [];
   const messageIndex: Row[] = [];
+  let exportedAiHtmlCodeFileCount = 0;
   const groupMessageIndex: Row[] = [];
   const integrityIssues: Row[] = [];
   const sessionFilePaths = new Map<string, string[]>();
@@ -723,6 +748,35 @@ async function populateResearchExport(
       groupNames: groups.map((group) => group.name).join(" | ") || "未分组",
     };
   };
+
+  const assistantFailureRecordCount = exportMessages.filter((message) => (
+    message.role === "assistant"
+    && (message.ai_suggestion_type === "system_error" || String(message.content || "").includes("【系统记录："))
+  )).length;
+  const studentMessagesWithoutImmediateAi: Array<{ session: ExportSession; message: Row; next?: Row }> = [];
+  for (const session of sessionBuild.sessions) {
+    session.messages.forEach((message, index) => {
+      if (message.role !== "user") return;
+      const next = session.messages[index + 1];
+      if (next?.role !== "assistant") studentMessagesWithoutImmediateAi.push({ session, message, next });
+    });
+  }
+  for (const issue of studentMessagesWithoutImmediateAi) {
+    const student = studentMap.get(issue.session.userId) || {};
+    integrityIssues.push({
+      异常类型: "学生消息后没有紧接AI记录",
+      来源表: "messages",
+      记录ID: issue.message.id,
+      用户UUID: issue.session.userId,
+      学生ID: student.student_id || "",
+      姓名: student.name || "",
+      会话ID: issue.session.sessionId,
+      消息时间: timestampParts(issue.message.created_at).display,
+      下一条消息ID: issue.next?.id || "",
+      下一条消息角色: issue.next?.role || "会话结束",
+      建议: "核查AI服务异常记录、Supabase备份或历史导出包；连续学生发言也会在此列出",
+    });
+  }
 
   for (const conversation of data.conversations.filter((row) => !conversationSessionLinks.has(row.id))) {
     const student = studentMap.get(conversation.user_id) || {};
@@ -945,31 +999,59 @@ async function populateResearchExport(
     const meta = fileMeta("AI对话平台", "完整对话文本", "messages", `${sessionId}:${context.time.date}`, first.user_id, first.created_at, sessionId, first.__session_relation, first.__session_confidence, first.session_id || "");
     addIndexedFile(txtPath, txt, meta);
 
-    const dailyRows = rows.map((message, index) => ({
-      消息序号: index + 1,
-      消息ID: message.id,
-      角色: message.role === "user" ? "学生" : "AI",
-      时间戳: timestampParts(message.created_at).display,
-      内容原文: message.content || "",
-      内容SHA256: hashContent(message.content || ""),
-      输入方式: message.input_method || "",
-      含代码: message.has_code ?? "",
-      AI建议类型: message.ai_suggestion_type || "",
-      会话ID: sessionId,
-      原始会话ID: message.session_id || "",
-      会话识别规则: message.__session_relation,
-      用户UUID: message.user_id,
-      学生ID: context.student.student_id || "",
-      姓名: context.student.name || "",
-      年级: context.student.grade ?? "",
-      班级: context.student.class_num ?? context.student.class_name ?? "",
-      SRL组别: context.student.srl_condition || "",
-      小组ID: context.groupIds,
-      小组名称: context.groupNames,
-      活动日期: timestampParts(message.created_at).date,
-      课时: context.lesson,
-      对话文件路径: txtPath,
-    }));
+    const htmlCodePaths: string[] = [];
+    for (const message of rows.filter((message) => message.role === "assistant")) {
+      const htmlBlocks = extractHtmlBlocksFromMessage(message.content);
+      htmlBlocks.forEach((htmlCode, index) => {
+        const htmlPath = `${context.base}/AI回复_message_${safeSegment(message.id, "unknown", 30)}_HTML代码_${String(index + 1).padStart(2, "0")}.html`;
+        addIndexedFile(htmlPath, htmlCode, fileMeta(
+          "AI对话平台",
+          "AI回复HTML代码",
+          "messages",
+          message.id,
+          message.user_id,
+          message.created_at,
+          sessionId,
+          message.__session_relation,
+          message.__session_confidence,
+          message.session_id || "",
+        ));
+        htmlCodePaths.push(htmlPath);
+        exportedAiHtmlCodeFileCount += 1;
+      });
+    }
+
+    const dailyRows = rows.map((message, index) => {
+      const htmlBlockCount = message.role === "assistant"
+        ? extractHtmlBlocksFromMessage(message.content).length
+        : 0;
+      return {
+        消息序号: index + 1,
+        消息ID: message.id,
+        角色: message.role === "user" ? "学生" : "AI",
+        时间戳: timestampParts(message.created_at).display,
+        内容原文: message.content || "",
+        内容SHA256: hashContent(message.content || ""),
+        输入方式: message.input_method || "",
+        含代码: message.has_code ?? (htmlBlockCount > 0),
+        HTML代码块数: htmlBlockCount,
+        AI建议类型: message.ai_suggestion_type || "",
+        会话ID: sessionId,
+        原始会话ID: message.session_id || "",
+        会话识别规则: message.__session_relation,
+        用户UUID: message.user_id,
+        学生ID: context.student.student_id || "",
+        姓名: context.student.name || "",
+        年级: context.student.grade ?? "",
+        班级: context.student.class_num ?? context.student.class_name ?? "",
+        SRL组别: context.student.srl_condition || "",
+        小组ID: context.groupIds,
+        小组名称: context.groupNames,
+        活动日期: timestampParts(message.created_at).date,
+        课时: context.lesson,
+        对话文件路径: txtPath,
+      };
+    });
     const pairRows = buildDialoguePairs(rows, sessionId).map((pair) => ({
       学生ID: context.student.student_id || "",
       姓名: context.student.name || "",
@@ -981,14 +1063,14 @@ async function populateResearchExport(
       ...pair,
     }));
     const dialogueReviewRows = buildDialogueReviewRows(pairRows);
-    const pairWorkbook = await buildSessionDialogueWorkbook(pairRows);
+    const pairWorkbook = await buildSessionDialogueWorkbook(pairRows, dailyRows);
     const messageMeta = fileMeta("AI对话平台", "结构化对话CSV", "messages", `${sessionId}:${context.time.date}`, first.user_id, first.created_at, sessionId, first.__session_relation, first.__session_confidence, first.session_id || "");
     addIndexedFile(pairCsvPath, toCsv(dialogueReviewRows), { ...messageMeta, 数据类型: "学生-AI对话配对CSV" });
     addIndexedFile(pairWorkbookPath, pairWorkbook, { ...messageMeta, 数据类型: "学生-AI对话人工检查XLSX" }, "STORE");
     addIndexedFile(rawCsvPath, toCsv(dailyRows), { ...messageMeta, 数据类型: "逐条消息审计CSV" });
     messageIndex.push(...dailyRows);
     const paths = sessionFilePaths.get(`${first.user_id}:${sessionId}`) || [];
-    paths.push(txtPath, pairCsvPath, pairWorkbookPath, rawCsvPath);
+    paths.push(txtPath, pairCsvPath, pairWorkbookPath, rawCsvPath, ...htmlCodePaths);
     sessionFilePaths.set(`${first.user_id}:${sessionId}`, paths);
   }
 
@@ -1042,6 +1124,9 @@ async function populateResearchExport(
 
     const fullMessageRows = allMessages.map((message, index) => {
       const messageContext = exportContext(userId, message.created_at);
+      const htmlBlockCount = message.role === "assistant"
+        ? extractHtmlBlocksFromMessage(message.content).length
+        : 0;
       completeDialogueMessageKeys.add(`${userId}:${message.id}`);
       return {
         学生内消息序号: index + 1,
@@ -1051,7 +1136,8 @@ async function populateResearchExport(
         内容原文: message.content || "",
         内容SHA256: hashContent(message.content || ""),
         输入方式: message.input_method || "",
-        含代码: message.has_code ?? "",
+        含代码: message.has_code ?? (htmlBlockCount > 0),
+        HTML代码块数: htmlBlockCount,
         AI建议类型: message.ai_suggestion_type || "",
         会话ID: message.__session_id,
         原始会话ID: message.session_id || "",
@@ -1531,7 +1617,7 @@ async function populateResearchExport(
     const relationRows = [
       ...(sessionFilePaths.get(session.key) || []).map((path) => ({
         会话ID: session.sessionId,
-        文件类别: path.endsWith(".txt") ? "完整对话TXT" : path.includes("对话配对") ? "学生-AI对话配对CSV" : "逐条消息CSV",
+        文件类别: sessionFileCategory(path, "会话"),
         作品阶段: "",
         记录ID: "",
         数据库会话ID: session.originalSessionId,
@@ -1617,7 +1703,7 @@ async function populateResearchExport(
       })),
       ...userSessions.flatMap((session) => (sessionFilePaths.get(session.key) || []).map((path) => ({
         会话ID: session.sessionId,
-        文件类别: path.endsWith(".txt") ? "会话完整对话TXT" : path.includes("对话配对") ? "会话对话配对CSV" : path.includes("对应关系") ? "会话与游戏对应关系CSV" : "会话逐条消息CSV",
+        文件类别: sessionFileCategory(path, "会话"),
         作品阶段: "",
         记录ID: "",
         数据库会话ID: session.originalSessionId,
@@ -1743,6 +1829,7 @@ async function populateResearchExport(
     `生成时间：${timestampParts(generatedAt.toISOString()).display}（${TIME_ZONE}）`,
     "新版根级文件：00_汇总数据/学生研究数据总表.xlsx",
     "新版根级文件：00_汇总数据/学生的所有对话记录.xlsx",
+    "AI回复中的HTML代码同时保留在TXT、CSV、XLSX，并按message_id额外导出为可直接打开的独立HTML文件。",
     "CSV为机器可读数据；样式请查看对应XLSX工作簿。",
   ].join("\r\n"), {
     ...packageSummaryMeta,
@@ -1860,6 +1947,8 @@ async function populateResearchExport(
     `历史空session_id消息数：${data.messages.filter((message) => !message.session_id).length}`,
     `重建历史对话会话数：${sessionBuild.sessions.filter((session) => !session.originalSessionId).length}`,
     `完整性异常数：${integrityIssues.length}`,
+    `AI异常状态记录数：${assistantFailureRecordCount}`,
+    `学生消息后没有紧接AI记录数：${studentMessagesWithoutImmediateAi.length}`,
     "",
     "目录说明：",
     "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系；数据完整性异常.csv列出无法可靠恢复的数据。",
@@ -1881,7 +1970,7 @@ async function populateResearchExport(
     "shared_items.conversation_id精确关联 → 同一学生HTML SHA256一致 → 标准化HTML一致 → AI消息代码一致 → 同一学生同日时间最近 → 同一学生历史时间最近。每个作品只选择一个对话，关联方式和置信度写入作品索引。",
     "",
     "完整性说明：",
-    "对话正文和HTML作品均完整导出，不截断。《学生的所有对话记录.xlsx》的“AI预编码人工检查表”工作表采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构，正文列不混入消息ID和时间戳；超过Excel单元格上限的原文拆分到连续行并标明分段。《学生研究数据总表.xlsx》汇总学生概览、人工检查对话、全部消息以及对话与作品索引。消息审计工作表保留ID、完整时间戳、会话标识和SHA256。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM；CSV不支持字体、颜色、列宽等样式，其对应内容已收入美化后的研究数据总表。",
+    "对话正文和HTML作品均完整导出，不截断。AI回复中的HTML代码保留在TXT、CSV和XLSX原文中，并按message_id额外导出为独立HTML文件。《学生的所有对话记录.xlsx》的“AI预编码人工检查表”工作表采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构，正文列不混入消息ID和时间戳；超过Excel单元格上限的原文拆分到连续行并标明分段。《学生研究数据总表.xlsx》汇总学生概览、人工检查对话、全部消息以及对话与作品索引。消息审计工作表保留ID、完整时间戳、会话标识、HTML代码块数和SHA256。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM；CSV不支持字体、颜色、列宽等样式，其对应内容已收入美化后的研究数据总表。",
     warnings.length ? `\n查询警告：\n- ${warnings.join("\n- ")}` : "\n查询警告：无",
   ].join("\r\n");
   zip.file("导出说明.txt", readme);
@@ -1897,6 +1986,9 @@ async function populateResearchExport(
     students_with_messages: sessionsByUser.size,
     students_with_complete_dialogue_files: studentsWithCompleteDialogueFiles,
     student_complete_dialogue_message_count_matches: completeDialogueMessageKeys.size === data.messages.length,
+    exported_ai_html_code_file_count: exportedAiHtmlCodeFileCount,
+    assistant_failure_record_count: assistantFailureRecordCount,
+    student_messages_without_immediate_ai_record_count: studentMessagesWithoutImmediateAi.length,
     derived_legacy_session_count: sessionBuild.sessions.filter((session) => !session.originalSessionId).length,
     integrity_issue_count: integrityIssues.length,
     games_without_dialogue_count: artifactIndex.filter((artifact) => artifact.对应对话会话ID === "未找到对话").length,
@@ -1925,7 +2017,16 @@ export async function buildResearchExport(
   generatedAt = new Date(),
 ): Promise<ResearchExportResult> {
   const zip = new JSZip();
-  const metadata = await populateResearchExport(data, queryWarnings, generatedAt, zip);
+  // JSZip直接接收超长字符串时，流式编码可能在UTF-16代理项中间分块并产生U+FFFD。
+  // 先统一转换为UTF-8字节，确保含Emoji的完整聊天和HTML代码逐字可逆。
+  const metadata = await populateResearchExport(data, queryWarnings, generatedAt, {
+    file(path, content, options) {
+      const source = typeof content === "string"
+        ? Buffer.from(content, "utf8")
+        : Buffer.from(content.buffer as ArrayBuffer, content.byteOffset, content.byteLength);
+      zip.file(path, source, options);
+    },
+  });
   return { zip, ...metadata };
 }
 
