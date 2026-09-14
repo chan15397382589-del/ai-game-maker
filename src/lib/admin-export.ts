@@ -6,7 +6,8 @@ import JSZip from "jszip";
 
 const TIME_ZONE = "Asia/Shanghai";
 const LEGACY_SESSION_GAP_MS = 30 * 60 * 1000;
-const RESEARCH_EXPORT_SCHEMA_VERSION = "2.1";
+const RESEARCH_EXPORT_SCHEMA_VERSION = "2.2";
+const HISTORICAL_CODE_MESSAGE_CUTOFF_DATE = "2026-06-05";
 // Excel单元格最多容纳32,767个字符。ExcelJS在写入包含大量Emoji的超长单元格时，
 // 可能在内部XML缓冲区边界损坏代理项；使用8,000个UTF-16字符的保守分段。
 const EXCEL_CELL_CHUNK_SIZE = 8_000;
@@ -21,6 +22,10 @@ const DIALOGUE_REVIEW_HEADERS = [
   "当前学生发言 Student(t)",
   "当前AI回复 AI(t)",
   "内容分段",
+  "配对状态",
+  "配对依据",
+  "配对置信度",
+  "疑似内部HTML载荷数",
 ] as const;
 
 type Row = Record<string, any>;
@@ -195,6 +200,15 @@ function extractHtmlFromMessage(content: unknown): string {
   return extractHtmlBlocksFromMessage(content)[0] || "";
 }
 
+function isLikelyInternalStudentHtmlPayload(message: Row): boolean {
+  const role = message.role || (message.角色 === "学生" ? "user" : message.角色);
+  if (role !== "user") return false;
+  const content = String(message.content ?? message.内容原文 ?? "");
+  return content.length > 500
+    && /<!doctype|<html/i.test(content)
+    && /<\/html>/i.test(content);
+}
+
 function sessionFileCategory(path: string, scope = "会话"): string {
   if (path.endsWith(".txt")) return `${scope}完整对话TXT`;
   if (path.includes("AI回复_message_") && path.endsWith(".html")) return "AI回复HTML代码";
@@ -285,9 +299,10 @@ function buildDialoguePairs(messages: Row[], sessionId: string): Row[] {
   const pairs: Row[] = [];
   let studentMessages: Row[] = [];
   let aiMessages: Row[] = [];
+  let internalHtmlPayloads: Row[] = [];
 
   const flush = () => {
-    if (!studentMessages.length && !aiMessages.length) return;
+    if (!studentMessages.length && !aiMessages.length && !internalHtmlPayloads.length) return;
     // 配对表的正文列只保留可读内容；消息ID与时间戳已有独立字段，
     // 逐条原始记录继续由“消息审计”工作表保存。
     const formatContent = (rows: Row[], label: string) => {
@@ -296,6 +311,18 @@ function buildDialoguePairs(messages: Row[], sessionId: string): Row[] {
         `【${label}${index + 1}/${rows.length}】\n${message.content || ""}`
       )).join("\n\n");
     };
+    const pairingStatus = studentMessages.length > 0
+      ? aiMessages.length > 0 ? "已按时间顺序配对" : "AI回复原文缺失"
+      : internalHtmlPayloads.length > 0
+        ? aiMessages.length > 0 ? "仅内部HTML载荷后有AI记录" : "仅内部HTML载荷"
+        : "AI主动消息";
+    const pairingBasis = studentMessages.length > 0 && aiMessages.length > 0
+      ? "同一会话内，连续学生自然发言组与其后相邻AI消息组配对"
+      : studentMessages.length > 0
+        ? "同一会话内，该学生自然发言组之后没有AI消息记录"
+        : internalHtmlPayloads.length > 0
+          ? "完整HTML载荷保留在消息审计表，不计为学生自然发言"
+          : "会话内AI消息之前没有学生自然发言";
     pairs.push({
       对话轮次: pairs.length + 1,
       会话ID: sessionId,
@@ -307,13 +334,24 @@ function buildDialoguePairs(messages: Row[], sessionId: string): Row[] {
       AI消息ID: aiMessages.map((message) => message.id).join(" | "),
       AI回复时间: aiMessages.map((message) => timestampParts(message.created_at).display).join(" | "),
       AI回复原文: formatContent(aiMessages, "AI回复"),
-      回复状态: studentMessages.length === 0 ? "AI主动消息" : aiMessages.length === 0 ? "学生发言尚无AI回复" : "已回复",
+      疑似内部HTML载荷数: internalHtmlPayloads.length,
+      疑似内部HTML载荷消息ID: internalHtmlPayloads.map((message) => message.id).join(" | "),
+      配对状态: pairingStatus,
+      配对依据: pairingBasis,
+      配对置信度: studentMessages.length > 0 && aiMessages.length > 0 ? "高" : "无法配对",
+      回复状态: pairingStatus,
+      __lastStudentAt: studentMessages.at(-1)?.created_at || "",
     });
     studentMessages = [];
     aiMessages = [];
+    internalHtmlPayloads = [];
   };
 
   for (const message of messages) {
+    if (isLikelyInternalStudentHtmlPayload(message)) {
+      internalHtmlPayloads.push(message);
+      continue;
+    }
     if (message.role === "user") {
       if (aiMessages.length) flush();
       studentMessages.push(message);
@@ -358,12 +396,13 @@ function excelDate(value: unknown, includeTime: boolean): Date | string {
 function buildDialogueReviewRows(pairRows: Row[]): Row[] {
   const reviewRows: Row[] = [];
   let previousAiReply = "";
-  let previousStudentKey = "";
+  let previousConversationKey = "";
 
   for (const pair of pairRows) {
     const studentKey = String(pair.用户UUID || pair.学生ID || "");
-    if (previousStudentKey && studentKey !== previousStudentKey) previousAiReply = "";
-    previousStudentKey = studentKey;
+    const conversationKey = `${studentKey}:${pair.会话ID || ""}`;
+    if (previousConversationKey && conversationKey !== previousConversationKey) previousAiReply = "";
+    previousConversationKey = conversationKey;
 
     const previous = previousAiReply || "（首轮，无上一轮AI回复）";
     const student = pair.学生发言原文 || "（无学生发言，AI主动消息）";
@@ -383,6 +422,10 @@ function buildDialogueReviewRows(pairRows: Row[]): Row[] {
         "当前学生发言 Student(t)": contentChunks[1][index] || "",
         "当前AI回复 AI(t)": contentChunks[2][index] || "",
         内容分段: `${index + 1}/${segmentCount}`,
+        配对状态: pair.配对状态,
+        配对依据: pair.配对依据,
+        配对置信度: pair.配对置信度,
+        疑似内部HTML载荷数: pair.疑似内部HTML载荷数 || 0,
       });
     }
     if (pair.AI回复原文) previousAiReply = pair.AI回复原文;
@@ -456,7 +499,7 @@ function addDialogueReviewWorksheet(workbook: ExcelJS.Workbook, pairRows: Row[])
       header === "上课日期" ? excelDate(row[header], false) : row[header]
     )));
   }
-  styleDialogueWorksheet(dialogueSheet, [16, 12, 14, 16, 13, 13, 60, 48, 60, 11], [7, 8, 9]);
+  styleDialogueWorksheet(dialogueSheet, [16, 12, 14, 16, 13, 13, 60, 48, 60, 11, 20, 42, 12, 16], [7, 8, 9, 12]);
   dialogueSheet.getColumn(5).numFmt = "yyyy-mm-dd";
   dialogueSheet.getColumn(7).eachCell((cell, rowNumber) => {
     if (rowNumber > 1) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF3F4F6" } };
@@ -569,7 +612,7 @@ async function buildResearchWorkbook(
   const workbook = initializeStudentWorkbook();
   const overviewHeaders = [
     "学生ID", "姓名", "班级", "SRL组别", "用户UUID", "小组名称", "活动日期数", "会话数",
-    "对话轮次数", "消息总数", "学生消息数", "AI消息数", "原始会话ID为空消息数",
+    "对话轮次数", "消息总数", "学生消息数", "自然学生发言数", "疑似内部HTML载荷数", "缺AI原文轮次数", "AI消息数", "原始会话ID为空消息数",
     "阶段作品数", "最终作品数", "未关联对话作品数", "低置信度作品关联数", "数据检查结果",
   ];
   const overviewSheet = addFlatResearchWorksheet(
@@ -577,11 +620,11 @@ async function buildResearchWorkbook(
     "学生研究概览",
     overviewHeaders,
     overviewRows,
-    [16, 12, 14, 16, 38, 18, 13, 11, 13, 11, 12, 11, 22, 13, 13, 18, 20, 34],
-    [18],
+    [16, 12, 14, 16, 38, 18, 13, 11, 13, 11, 12, 16, 20, 16, 11, 22, 13, 13, 18, 20, 34],
+    [21],
     4,
   );
-  overviewSheet.getColumn(18).eachCell((cell, rowNumber) => {
+  overviewSheet.getColumn(21).eachCell((cell, rowNumber) => {
     if (rowNumber <= 1) return;
     const needsReview = String(cell.value || "").startsWith("需核查");
     cell.fill = {
@@ -761,20 +804,37 @@ async function populateResearchExport(
       if (next?.role !== "assistant") studentMessagesWithoutImmediateAi.push({ session, message, next });
     });
   }
-  for (const issue of studentMessagesWithoutImmediateAi) {
+  const sessionPairDiagnostics = sessionBuild.sessions.flatMap((session) => (
+    buildDialoguePairs(session.messages, session.sessionId).map((pair) => ({ session, pair }))
+  ));
+  const unansweredStudentTurns = sessionPairDiagnostics.filter(({ pair }) => (
+    pair.学生消息数 > 0 && pair.AI消息数 === 0
+  ));
+  const unansweredStudentMessageCount = unansweredStudentTurns.reduce((sum, { pair }) => sum + pair.学生消息数, 0);
+  const consecutiveStudentMessagesEventuallyPairedCount = sessionPairDiagnostics.reduce((sum, { pair }) => (
+    sum + (pair.AI消息数 > 0 ? Math.max(0, pair.学生消息数 - 1) : 0)
+  ), 0);
+  const likelyInternalStudentHtmlPayloadCount = exportMessages.filter(isLikelyInternalStudentHtmlPayload).length;
+  const historicalUnansweredTurnCount = unansweredStudentTurns.filter(({ pair }) => (
+    timestampParts(pair.__lastStudentAt).date < HISTORICAL_CODE_MESSAGE_CUTOFF_DATE
+  )).length;
+  for (const issue of unansweredStudentTurns) {
     const student = studentMap.get(issue.session.userId) || {};
+    const date = timestampParts(issue.pair.__lastStudentAt).date;
     integrityIssues.push({
-      异常类型: "学生消息后没有紧接AI记录",
+      异常类型: "学生自然发言组缺少AI原文",
       来源表: "messages",
-      记录ID: issue.message.id,
+      记录ID: issue.pair.学生消息ID,
       用户UUID: issue.session.userId,
       学生ID: student.student_id || "",
       姓名: student.name || "",
       会话ID: issue.session.sessionId,
-      消息时间: timestampParts(issue.message.created_at).display,
-      下一条消息ID: issue.next?.id || "",
-      下一条消息角色: issue.next?.role || "会话结束",
-      建议: "核查AI服务异常记录、Supabase备份或历史导出包；连续学生发言也会在此列出",
+      学生消息数: issue.pair.学生消息数,
+      学生发送时间: issue.pair.学生发送时间,
+      配对状态: issue.pair.配对状态,
+      建议: date < HISTORICAL_CODE_MESSAGE_CUTOFF_DATE
+        ? "高概率受历史HTML型AI消息删除影响；优先核查同会话游戏快照、Supabase备份或旧数据包"
+        : "核查AI服务异常记录、Supabase日志或学生是否在回复完成前离开页面",
     });
   }
 
@@ -1725,10 +1785,16 @@ async function populateResearchExport(
     const unlinkedArtifactCount = studentArtifacts.filter((artifact) => artifact.对应对话会话ID === "未找到对话").length;
     const lowConfidenceArtifactCount = studentArtifacts.filter((artifact) => artifact.关联置信度 === "低").length;
     const blankOriginalSessionCount = fullMessageRows.filter((message) => !message.原始会话ID).length;
+    const internalHtmlPayloadCount = fullMessageRows.filter(isLikelyInternalStudentHtmlPayload).length;
+    const naturalStudentMessageCount = fullMessageRows.filter((message) => (
+      message.角色 === "学生" && !isLikelyInternalStudentHtmlPayload(message)
+    )).length;
+    const unansweredTurnCount = fullPairRows.filter((pair) => pair.学生消息数 > 0 && pair.AI消息数 === 0).length;
     const reviewItems = [
       unlinkedArtifactCount ? `${unlinkedArtifactCount}个作品未关联对话` : "",
       lowConfidenceArtifactCount ? `${lowConfidenceArtifactCount}个作品为低置信度关联` : "",
       blankOriginalSessionCount ? `${blankOriginalSessionCount}条消息原始会话ID为空（已重建）` : "",
+      unansweredTurnCount ? `${unansweredTurnCount}轮学生自然发言缺少AI原文` : "",
     ].filter(Boolean);
     const overviewRow = {
       学生ID: context.student.student_id || "",
@@ -1742,6 +1808,9 @@ async function populateResearchExport(
       对话轮次数: fullPairRows.length,
       消息总数: fullMessageRows.length,
       学生消息数: fullMessageRows.filter((message) => message.角色 === "学生").length,
+      自然学生发言数: naturalStudentMessageCount,
+      疑似内部HTML载荷数: internalHtmlPayloadCount,
+      缺AI原文轮次数: unansweredTurnCount,
       AI消息数: fullMessageRows.filter((message) => message.角色 === "AI").length,
       原始会话ID为空消息数: blankOriginalSessionCount,
       阶段作品数: studentArtifacts.filter((artifact) => artifact.来源表 !== "projects").length,
@@ -1835,6 +1904,55 @@ async function populateResearchExport(
     ...packageSummaryMeta,
     数据类型: "导出格式版本标识",
   });
+
+  const artifactTimestamp = (display: unknown): number => {
+    const text = String(display || "").trim();
+    if (!text) return Number.NaN;
+    return new Date(`${text.replace(" ", "T")}+08:00`).getTime();
+  };
+  const htmlArtifactRecordKeys = new Set([
+    ...data.conversations.filter((row) => row.html_code).map((row) => `conversations:${row.id}`),
+    ...data.snapshots.filter((row) => row.html_code).map((row) => `game_snapshots:${row.id}`),
+    ...data.projects.filter((row) => row.html_code).map((row) => `projects:${row.id}`),
+    ...(data.sharedItems || []).filter((row) => row.html_code).map((row) => `shared_items:${row.id}`),
+  ]);
+  const missingAiRecoveryRows = unansweredStudentTurns.map(({ session, pair }) => {
+    const student = studentMap.get(session.userId) || {};
+    const lastStudentAt = new Date(String(pair.__lastStudentAt)).getTime();
+    const candidates = artifactIndex.filter((artifact) => {
+      if (artifact.用户UUID !== session.userId || artifact.对应对话会话ID !== session.sessionId) return false;
+      if (!String(artifact.文件路径 || "").toLowerCase().endsWith(".html")) return false;
+      if (!htmlArtifactRecordKeys.has(`${artifact.来源表}:${artifact.作品ID}`)) return false;
+      const at = artifactTimestamp(artifact.时间戳);
+      return Number.isFinite(at) && at >= lastStudentAt && at - lastStudentAt <= 5 * 60_000;
+    });
+    return {
+      学生ID: student.student_id || "",
+      姓名: student.name || "",
+      用户UUID: session.userId,
+      会话ID: session.sessionId,
+      原始会话ID: session.originalSessionId,
+      学生消息ID: pair.学生消息ID,
+      学生消息数: pair.学生消息数,
+      学生发送时间: pair.学生发送时间,
+      AI原文状态: "数据库中没有可配对的AI消息原文",
+      替代HTML证据数: candidates.length,
+      替代证据记录ID: candidates.map((artifact) => `${artifact.来源表}:${artifact.作品ID}`).join(" | "),
+      替代证据文件路径: candidates.map((artifact) => artifact.文件路径).join(" | "),
+      恢复结论: candidates.length
+        ? "可恢复同会话、学生发言后5分钟内的HTML结果；不得标注为AI回复原文"
+        : "当前数据包没有可安全替代的HTML证据；需查Supabase备份或旧导出包",
+    };
+  });
+  const missingTurnsWithArtifactEvidence = missingAiRecoveryRows.filter((row) => row.替代HTML证据数 > 0).length;
+  addIndexedFile(
+    "00_索引/AI原文缺失恢复索引.csv",
+    toCsv(missingAiRecoveryRows, [
+      "学生ID", "姓名", "用户UUID", "会话ID", "原始会话ID", "学生消息ID", "学生消息数", "学生发送时间",
+      "AI原文状态", "替代HTML证据数", "替代证据记录ID", "替代证据文件路径", "恢复结论",
+    ]),
+    { ...packageSummaryMeta, 数据类型: "AI原文缺失恢复索引CSV" },
+  );
 
   const surveyRows = data.tasks.filter((task) => task.task_id === "survey").map((task) => {
     const context = exportContext(task.user_id, task.updated_at || task.created_at);
@@ -1948,10 +2066,14 @@ async function populateResearchExport(
     `重建历史对话会话数：${sessionBuild.sessions.filter((session) => !session.originalSessionId).length}`,
     `完整性异常数：${integrityIssues.length}`,
     `AI异常状态记录数：${assistantFailureRecordCount}`,
-    `学生消息后没有紧接AI记录数：${studentMessagesWithoutImmediateAi.length}`,
+    `原始口径：学生消息后没有紧接AI记录数：${studentMessagesWithoutImmediateAi.length}`,
+    `校正口径：连续学生自然发言合并后仍缺AI原文的轮次数：${unansweredStudentTurns.length}`,
+    `其中${HISTORICAL_CODE_MESSAGE_CUTOFF_DATE}前缺AI原文轮次数：${historicalUnansweredTurnCount}`,
+    `可由同会话5分钟内HTML作品提供替代证据的缺失轮次数：${missingTurnsWithArtifactEvidence}`,
+    `疑似旧版平台内部HTML载荷消息数：${likelyInternalStudentHtmlPayloadCount}`,
     "",
     "目录说明：",
-    "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系；数据完整性异常.csv列出无法可靠恢复的数据。",
+    "1. 00_索引：学生、组别、课时、会话、消息、作品和文件之间的完整对应关系；数据完整性异常.csv列出缺失轮次，AI原文缺失恢复索引.csv列出可核查的替代HTML证据。",
     "2. 00_汇总数据：新版全部学生研究数据总表、全部对话记录、全部消息、对话与作品索引，以及前测、互评、反思和分类评估。",
     "3. 01_按班级：班级 → SRL组别 → 学生。每个有对话学生目录提供《学生的所有对话记录.xlsx》《学生研究数据总表.xlsx》、完整TXT、配对CSV、逐条消息CSV及《对话与作品对应索引.csv》；各日期文件夹保留会话级对话、消息、对应游戏和对应关系表。",
     "4. 99_异常_有作品无对话：只有在messages中确实找不到该学生任何可关联对话时才进入此目录，不会伪造对话。",
@@ -1970,7 +2092,7 @@ async function populateResearchExport(
     "shared_items.conversation_id精确关联 → 同一学生HTML SHA256一致 → 标准化HTML一致 → AI消息代码一致 → 同一学生同日时间最近 → 同一学生历史时间最近。每个作品只选择一个对话，关联方式和置信度写入作品索引。",
     "",
     "完整性说明：",
-    "对话正文和HTML作品均完整导出，不截断。AI回复中的HTML代码保留在TXT、CSV和XLSX原文中，并按message_id额外导出为独立HTML文件。《学生的所有对话记录.xlsx》的“AI预编码人工检查表”工作表采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构，正文列不混入消息ID和时间戳；超过Excel单元格上限的原文拆分到连续行并标明分段。《学生研究数据总表.xlsx》汇总学生概览、人工检查对话、全部消息以及对话与作品索引。消息审计工作表保留ID、完整时间戳、会话标识、HTML代码块数和SHA256。对话配对CSV将连续学生发言与随后AI回复整理为一轮，未回复发言明确标记。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM；CSV不支持字体、颜色、列宽等样式，其对应内容已收入美化后的研究数据总表。",
+    "对话正文和HTML作品均完整导出，不截断。AI回复中的HTML代码保留在TXT、CSV和XLSX原文中，并按message_id额外导出为独立HTML文件。《学生的所有对话记录.xlsx》的“AI预编码人工检查表”工作表采用上一轮AI回复AI(t-1)、当前学生发言Student(t)、当前AI回复AI(t)结构；上一轮AI仅在同一会话内传递，新会话首轮自动清空。疑似旧版平台内部HTML载荷保留在消息审计表，但不计为学生自然发言。连续学生发言与随后AI回复整理为一轮，缺失AI原文的轮次明确标记，不会将别的AI消息强行错配。若同会话5分钟内存在HTML作品，恢复索引只将其标记为替代证据，不伪称AI回复原文。超过Excel单元格上限的原文拆分到连续行并标明分段。《学生研究数据总表.xlsx》汇总学生概览、人工检查对话、全部消息以及对话与作品索引。消息审计工作表保留ID、完整时间戳、会话标识、HTML代码块数和SHA256。文件名包含记录ID或会话ID以避免同名覆盖。CSV采用UTF-8 BOM；CSV不支持字体、颜色、列宽等样式，其对应内容已收入美化后的研究数据总表。",
     warnings.length ? `\n查询警告：\n- ${warnings.join("\n- ")}` : "\n查询警告：无",
   ].join("\r\n");
   zip.file("导出说明.txt", readme);
@@ -1989,6 +2111,12 @@ async function populateResearchExport(
     exported_ai_html_code_file_count: exportedAiHtmlCodeFileCount,
     assistant_failure_record_count: assistantFailureRecordCount,
     student_messages_without_immediate_ai_record_count: studentMessagesWithoutImmediateAi.length,
+    consecutive_student_messages_eventually_paired_count: consecutiveStudentMessagesEventuallyPairedCount,
+    unanswered_student_turn_count: unansweredStudentTurns.length,
+    unanswered_student_message_count: unansweredStudentMessageCount,
+    historical_unanswered_turn_before_cutoff_count: historicalUnansweredTurnCount,
+    missing_ai_turn_with_artifact_evidence_count: missingTurnsWithArtifactEvidence,
+    likely_internal_student_html_payload_count: likelyInternalStudentHtmlPayloadCount,
     derived_legacy_session_count: sessionBuild.sessions.filter((session) => !session.originalSessionId).length,
     integrity_issue_count: integrityIssues.length,
     games_without_dialogue_count: artifactIndex.filter((artifact) => artifact.对应对话会话ID === "未找到对话").length,

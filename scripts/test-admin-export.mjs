@@ -8,6 +8,7 @@ import { buildResearchExport, researchExportFilename } from "../src/lib/admin-ex
 const html = "<!doctype html><html><body><canvas></canvas></body></html>";
 const aiReplyWithHtml = `第一天回复\n\`\`\`html\n${html}\n\`\`\`\n代码结束`;
 const longStudentText = "超长学生发言😊".repeat(4500);
+const internalHtmlPayload = `<!doctype html><html><body>${"旧版游戏代码".repeat(200)}</body></html>`;
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const data = {
   students: [{
@@ -24,6 +25,7 @@ const data = {
     { id: 1, user_id: "u1", session_id: "c1", role: "user", content: "我要做游戏😊", created_at: "2026-05-21T07:00:00Z" },
     { id: 2, user_id: "u1", session_id: "c1", role: "assistant", content: `${aiReplyWithHtml}\n${"长文本".repeat(300)}`, created_at: "2026-05-21T07:01:00Z" },
     { id: 3, user_id: "u1", session_id: "c2", role: "user", content: "第二天继续修改🎮", created_at: "2026-05-22T07:00:00Z" },
+    { id: 6, user_id: "u1", session_id: "c2", role: "user", content: internalHtmlPayload, created_at: "2026-05-22T07:00:30Z" },
     { id: 4, user_id: "u1", session_id: "c2", role: "assistant", content: "第二天完整回复🍎", created_at: "2026-05-22T07:01:00Z" },
     { id: 5, user_id: "u1", session_id: "c2", role: "user", content: longStudentText, created_at: "2026-05-22T07:02:00Z" },
   ],
@@ -72,7 +74,7 @@ for (const path of [packageWorkbookPath, packageDialogueWorkbookPath, packageRel
 }
 assert.equal(
   researchExportFilename(new Date("2026-05-23T01:02:03Z")),
-  "AI游戏课堂_研究数据包_v2.1_2026-05-23_09-02-03.zip",
+  "AI游戏课堂_研究数据包_v2.2_2026-05-23_09-02-03.zip",
   "文件名必须包含格式版本和精确时间，避免误开同日旧数据包",
 );
 
@@ -86,6 +88,7 @@ const sessionPairCsvPath = `${studentRoot}2026-05-21/AI对话_session_c1_对话�
 const sessionPairWorkbookPath = `${studentRoot}2026-05-21/AI对话_session_c1_对话配对.xlsx`;
 const sessionHtmlPath = `${studentRoot}2026-05-21/AI回复_message_2_HTML代码_01.html`;
 const sessionRelationPath = `${studentRoot}2026-05-21/会话_c1_对话与游戏对应关系.csv`;
+const missingAiRecoveryPath = "00_索引/AI原文缺失恢复索引.csv";
 
 for (const path of [fullTxtPath, fullPairPath, fullMessagesPath, fullRelationsPath, reviewWorkbookPath, researchWorkbookPath]) {
   assert(files.includes(path), `缺少学生级完整汇总文件：${path}`);
@@ -94,6 +97,7 @@ for (const path of [fullTxtPath, fullPairPath, fullMessagesPath, fullRelationsPa
 const expectedDialogueHeaders = [
   "学生ID", "姓名", "班级", "SRL组别", "上课日期", "历时轮次序号",
   "上一轮AI回复 AI(t-1)", "当前学生发言 Student(t)", "当前AI回复 AI(t)", "内容分段",
+  "配对状态", "配对依据", "配对置信度", "疑似内部HTML载荷数",
 ];
 assert(files.includes(sessionPairCsvPath), `缺少会话级对话配对CSV：${sessionPairCsvPath}`);
 const sessionPairCsv = await zip.file(sessionPairCsvPath).async("string");
@@ -138,7 +142,7 @@ sessionAuditSheet.eachRow((row, rowNumber) => {
 assert(sessionAiAuditText.join("").includes(html), "会话消息审计表必须保留AI回复中的完整HTML代码");
 
 const fullTxt = await zip.file(fullTxtPath).async("string");
-for (const id of [1, 2, 3, 4, 5]) {
+for (const id of [1, 2, 3, 4, 5, 6]) {
   assert.equal([...fullTxt.matchAll(new RegExp(`message_id=${id}\\]`, "g"))].length, 1, `消息${id}应在学生完整TXT中且仅出现一次`);
 }
 assert(fullTxt.includes("第一天回复"));
@@ -152,6 +156,8 @@ assert(fullTxt.includes(longStudentText), "完整TXT不得截断超过Excel单�
 const fullMessages = await zip.file(fullMessagesPath).async("string");
 assert(fullMessages.includes("第二天完整回复🍎"), "ZIP往返后必须保留非BMP字符");
 assert(fullMessages.includes(html), "学生完整消息CSV必须保留AI回复中的HTML代码");
+assert(fullMessages.includes(internalHtmlPayload), "疑似内部HTML载荷必须保留在完整消息审计中");
+assert(!fullPairCsv.includes(internalHtmlPayload), "疑似内部HTML载荷不得混入自然对话配对表");
 
 const reviewWorkbookBuffer = await zip.file(reviewWorkbookPath).async("nodebuffer");
 const reviewWorkbookZip = await JSZip.loadAsync(reviewWorkbookBuffer);
@@ -172,13 +178,15 @@ const dialogueSheet = reviewWorkbook.getWorksheet("AI预编码人工检查表");
 assert.deepEqual(dialogueSheet.getRow(1).values.slice(1), [
   "学生ID", "姓名", "班级", "SRL组别", "上课日期", "历时轮次序号",
   "上一轮AI回复 AI(t-1)", "当前学生发言 Student(t)", "当前AI回复 AI(t)", "内容分段",
+  "配对状态", "配对依据", "配对置信度", "疑似内部HTML载荷数",
 ]);
 assert.equal(dialogueSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
 assert.equal(dialogueSheet.views[0].state, "frozen");
 assert.equal(dialogueSheet.getCell("C2").value, "三年级4班");
 assert.equal(dialogueSheet.getCell("G2").value, "（首轮，无上一轮AI回复）");
 assert.equal(dialogueSheet.getCell("H2").value, "我要做游戏😊", "主表正文不得混入消息ID或时间戳");
-assert(String(dialogueSheet.getCell("G3").value).includes("第一天回复"));
+assert.equal(dialogueSheet.getCell("G3").value, "（首轮，无上一轮AI回复）", "新会话首轮不得错误继承上一会话的AI回复");
+assert.equal(dialogueSheet.getCell("H3").value, "第二天继续修改🎮", "疑似平台内部HTML载荷不得混入自然学生发言");
 const longDialogueRows = [];
 dialogueSheet.eachRow((row, rowNumber) => {
   if (rowNumber > 1 && row.getCell(6).value === 3) longDialogueRows.push(row);
@@ -227,11 +235,12 @@ assert.deepEqual(researchWorkbook.worksheets.map((sheet) => sheet.name), [
 const overviewSheet = researchWorkbook.getWorksheet("学生研究概览");
 assert.deepEqual(overviewSheet.getRow(1).values.slice(1), [
   "学生ID", "姓名", "班级", "SRL组别", "用户UUID", "小组名称", "活动日期数", "会话数",
-  "对话轮次数", "消息总数", "学生消息数", "AI消息数", "原始会话ID为空消息数",
+  "对话轮次数", "消息总数", "学生消息数", "自然学生发言数", "疑似内部HTML载荷数", "缺AI原文轮次数", "AI消息数", "原始会话ID为空消息数",
   "阶段作品数", "最终作品数", "未关联对话作品数", "低置信度作品关联数", "数据检查结果",
 ]);
-assert.deepEqual(overviewSheet.getRow(2).values.slice(1, 19), [
-  "S001", "测试学生", "三年级4班", "control", "u1", "第一组", 2, 2, 3, 5, 3, 2, 0, 2, 0, 0, 0, "正常",
+assert.deepEqual(overviewSheet.getRow(2).values.slice(1, 22), [
+  "S001", "测试学生", "三年级4班", "control", "u1", "第一组", 2, 2, 3, 6, 4, 3, 1, 1, 2, 0, 2, 0, 0, 0,
+  "需核查：1轮学生自然发言缺少AI原文",
 ]);
 assert.equal(overviewSheet.getCell("A1").fill.fgColor.argb, "FFD9EAF7");
 assert.equal(overviewSheet.views[0].state, "frozen");
@@ -275,13 +284,25 @@ assert.equal(packageDialogueWorkbook.getWorksheet("AI预编码人工检查表").
 assert((await zip.file(packageRelationsPath).async("string")).includes("学生研究数据总表XLSX"));
 const packageMessages = await zip.file(packageMessagesPath).async("string");
 assert(packageMessages.includes(longStudentText));
-assert((await zip.file("导出格式版本.txt").async("string")).includes("导出格式版本：2.1"));
+assert((await zip.file("导出格式版本.txt").async("string")).includes("导出格式版本：2.2"));
+
+assert(files.includes(missingAiRecoveryPath), "数据包必须提供AI原文缺失恢复索引");
+const missingAiRecovery = await zip.file(missingAiRecoveryPath).async("string");
+assert(missingAiRecovery.includes("数据库中没有可配对的AI消息原文"));
+assert(missingAiRecovery.includes("不得标注为AI回复原文"));
+assert(missingAiRecovery.includes("conversations:c2"));
 
 const integrity = JSON.parse(await zip.file("00_索引/数据完整性汇总.json").async("string"));
-assert.equal(integrity.export_schema_version, "2.1");
+assert.equal(integrity.export_schema_version, "2.2");
 assert.equal(integrity.exported_ai_html_code_file_count, 1);
 assert.equal(integrity.assistant_failure_record_count, 0);
-assert.equal(integrity.student_messages_without_immediate_ai_record_count, 1);
+assert.equal(integrity.student_messages_without_immediate_ai_record_count, 2);
+assert.equal(integrity.consecutive_student_messages_eventually_paired_count, 0);
+assert.equal(integrity.unanswered_student_turn_count, 1);
+assert.equal(integrity.unanswered_student_message_count, 1);
+assert.equal(integrity.historical_unanswered_turn_before_cutoff_count, 1);
+assert.equal(integrity.missing_ai_turn_with_artifact_evidence_count, 1);
+assert.equal(integrity.likely_internal_student_html_payload_count, 1);
 assert.equal(integrity.students_with_messages, 1);
 assert.equal(integrity.students_with_complete_dialogue_files, 1);
 assert.equal(integrity.student_complete_dialogue_message_count_matches, true);
