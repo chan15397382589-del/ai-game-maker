@@ -43,6 +43,20 @@ export async function getVerifiedAdmin(token: string): Promise<
   }
 
   // 用户不存在 → 仅白名单邮箱可自动创建管理员
+  // CAT 专家故意不写入 public.users；即使邮箱误入白名单，也不得自动提升为管理员。
+  const { data: catReviewer, error: catReviewerError } = await supabaseAdmin
+    .from("cat_reviewers")
+    .select("id")
+    .eq("auth_user_id", user.id)
+    .maybeSingle();
+  if (catReviewer) {
+    return NextResponse.json({ error: "评审账号不能访问管理员后台" }, { status: 403 });
+  }
+  if (catReviewerError && !["42P01", "PGRST205"].includes(catReviewerError.code || "")) {
+    console.error("[admin-auth] 检查 CAT 评审身份失败:", catReviewerError.message);
+    return NextResponse.json({ error: "身份校验暂不可用" }, { status: 503 });
+  }
+
   const userEmail = user.email || "";
   if (!ADMIN_WHITELIST.includes(userEmail)) {
     console.warn("[admin-auth] 非白名单用户尝试创建管理员:", userEmail);

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [
+    "next-env.d.ts",
+    "src/lib/cat-*.ts",
+    "src/lib/admin-auth.ts",
+    "src/app/admin/cat/**/*.tsx",
+    "src/app/cat/**/*.tsx",
+    "src/app/api/admin/cat/**/*.ts",
+    "src/app/api/cat/**/*.ts"
+  ],
+  "exclude": ["node_modules", "sites", "opengame", "tmp", "outputs"]
+}

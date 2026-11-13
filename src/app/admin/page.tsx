@@ -201,6 +201,9 @@ export default function AdminDashboard() {
             <h1 className="text-xl font-bold">教师管理后台</h1>
           </div>
           <div className="flex items-center gap-2">
+            <a href="/admin/cat" className="bg-white/15 hover:bg-white/25 px-4 py-2 rounded-lg text-sm transition">
+              作品创造力评价
+            </a>
             <button
               onClick={handleExportAll}
               disabled={exportingAll}
