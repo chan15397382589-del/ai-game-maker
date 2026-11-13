@@ -12,7 +12,7 @@ const deepseekAI = new OpenAI({
 });
 
 // 用 DeepSeek 分析图片生成 HTML/CSS 代码
-export async function imageToCode(imageUrl: string): Promise<string> {
+async function imageToCode(imageUrl: string): Promise<string> {
   try {
     const response = await deepseekAI.chat.completions.create({
       model: "deepseek-chat",
